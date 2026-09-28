@@ -1,0 +1,19 @@
+# Local dependencies and build output
+node_modules/
+dist/
+
+# Machine-specific settings and runtime data
+.DS_Store
+.claude/settings.local.json
+.state/
+*.log
+
+# Local environment and authentication material
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx

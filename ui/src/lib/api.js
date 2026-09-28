@@ -1,0 +1,56 @@
+// Browser side of the console API. Every call is same-origin; the server
+// holds the gateway certificate, so nothing here carries a credential.
+
+async function request(path, { method = "GET", body } = {}) {
+  const response = await fetch(`/api/os${path}`, {
+    method,
+    headers: method === "GET" ? undefined : { "content-type": "application/json", "x-openshell-console": "1" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.error ?? `Request failed (${response.status})`)
+  return payload
+}
+
+export const api = {
+  overview: () => request("/overview"),
+  sandbox: (name) => request(`/sandboxes/${encodeURIComponent(name)}`),
+  approvals: () => request("/approvals"),
+  activity: (sandbox) => request(`/activity${sandbox ? `?sandbox=${encodeURIComponent(sandbox)}` : ""}`),
+  create: (spec) => request("/sandboxes", { method: "POST", body: spec }),
+  lifecycle: (name, action) => request(`/sandboxes/${encodeURIComponent(name)}/${action}`, { method: "POST", body: {} }),
+  approve: (chunk) => request("/approvals/approve", { method: "POST", body: { sandbox: chunk.sandbox, chunkId: chunk.id, reviewToken: chunk.reviewToken } }),
+  reject: (chunk, reason) => request("/approvals/reject", { method: "POST", body: { sandbox: chunk.sandbox, chunkId: chunk.id, reason } }),
+  undo: (chunk) => request("/approvals/undo", { method: "POST", body: { sandbox: chunk.sandbox, chunkId: chunk.id } }),
+
+  // Policy center
+  fleetPolicy: () => request("/policy/fleet"),
+  policy: (sandbox) => request(`/policy/${encodeURIComponent(sandbox)}`),
+  revision: (sandbox, version) => request(`/policy/${encodeURIComponent(sandbox)}/revisions/${version}`),
+  applyOps: (sandbox, ops) => request(`/policy/${encodeURIComponent(sandbox)}/ops`, { method: "POST", body: { ops } }),
+  restore: (sandbox, version) => request(`/policy/${encodeURIComponent(sandbox)}/restore`, { method: "POST", body: { version } }),
+  globalPolicy: () => request("/policy/global"),
+  removeGlobal: () => request("/policy/global/remove", { method: "POST", body: {} }),
+  settings: (sandbox) => request(`/settings${sandbox ? `/${encodeURIComponent(sandbox)}` : ""}`),
+  setSetting: (body) => request("/settings", { method: "POST", body }),
+  secrets: () => request("/secrets"),
+  createSecret: (body) => request("/secrets", { method: "POST", body }),
+  rotateSecret: (name, credentials) => request(`/secrets/${encodeURIComponent(name)}/rotate`, { method: "POST", body: { credentials } }),
+  secretExpiry: (name, key, expiresAt) => request(`/secrets/${encodeURIComponent(name)}/expiry`, { method: "POST", body: { key, expiresAt } }),
+  deleteSecret: (name) => request(`/secrets/${encodeURIComponent(name)}/delete`, { method: "POST", body: {} }),
+  attachSecret: (name, sandbox, attach) => request(`/secrets/${encodeURIComponent(name)}/${attach ? "attach" : "detach"}`, { method: "POST", body: { sandbox } }),
+  importProfile: (id) => request("/profiles/import", { method: "POST", body: { id } }),
+  templates: () => request("/templates"),
+  org: () => request("/org"),
+  saveOrg: (org) => request("/org", { method: "POST", body: org }),
+  saveGroup: (group) => request("/org/groups", { method: "POST", body: group }),
+  deleteGroup: (id) => request(`/org/groups/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
+  saveTemplate: (template) => request("/templates", { method: "POST", body: template }),
+  deleteTemplate: (id) => request(`/templates/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
+
+  // Ingress
+  ingress: () => request("/ingress"),
+  exposeService: (body) => request("/ingress/expose", { method: "POST", body }),
+  closeService: (service) => request("/ingress/close", { method: "POST", body: { sandbox: service.sandbox, name: service.name } }),
+  extendService: (service, closeAfterMinutes) => request("/ingress/extend", { method: "POST", body: { sandbox: service.sandbox, name: service.name, closeAfterMinutes } }),
+}

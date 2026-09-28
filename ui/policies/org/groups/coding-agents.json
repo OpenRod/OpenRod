@@ -1,0 +1,26 @@
+{
+  "id": "coding-agents",
+  "name": "Coding agents",
+  "description": "Claude Code working on repos",
+  "template": "claude-github-readonly",
+  "rules": [
+    {
+      "name": "pypi",
+      "binaries": [
+        "/usr/bin/python3*"
+      ],
+      "endpoints": [
+        {
+          "host": "pypi.org",
+          "ports": [
+            443
+          ],
+          "protocol": "rest",
+          "access": "read-only",
+          "enforcement": "enforce"
+        }
+      ]
+    }
+  ],
+  "outside": "inherit"
+}
