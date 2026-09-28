@@ -1,0 +1,153 @@
+import * as React from "react"
+import { motion, useReducedMotion } from "motion/react"
+import { Ban, Bot, Box, Check, ChevronDown, KeyRound, Network, Server, UserRound } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { SOURCE, brandOf } from "@/lib/policy-sources"
+import { PHASE_LABEL, styleOf } from "@/lib/sandboxes"
+import { cn } from "@/lib/utils"
+
+export function HostTile({ host, tone = "default", className }) {
+  return <span aria-hidden="true" className={cn("flex size-6 shrink-0 items-center justify-center rounded-md border font-sans text-xs font-medium", tone === "denied" ? "border-red-200/60 bg-red-50 text-red-700" : "border-border bg-muted/50 text-muted-foreground", className)}>{brandOf(host).charAt(0).toUpperCase()}</span>
+}
+
+const Node = React.forwardRef(function Node({ item, denied, active, onFocus, onBlur, onAllow }, ref) {
+  const source = SOURCE[item.source] ?? SOURCE.own
+  return <div ref={ref} className={cn("relative z-10 flex h-[23px] w-full min-w-0 items-center rounded-md border bg-card transition-colors", active ? "border-stone-400" : "border-border/80")}>
+    <Tooltip>
+      <TooltipTrigger render={<button type="button" />} onMouseEnter={onFocus} onMouseLeave={onBlur} onFocus={onFocus} onBlur={onBlur}
+        aria-label={`${item.host}, ${denied ? `${item.count} blocked attempts` : `${source.label} policy`}`}
+        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{item.host}</span>
+        {denied ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{item.count}×</span> : <span className={cn("size-1 shrink-0 rounded-full", source.swatch)} />}
+
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm break-all font-sans">{item.host} · {denied ? "Blocked in recent activity" : `Allowed by ${source.label.toLowerCase()} policy`}</TooltipContent>
+    </Tooltip>
+    {denied && onAllow && <Button size="sm" variant="ghost" className="mr-1 px-2 text-[11px]" onClick={onAllow}>Review</Button>}
+  </div>
+})
+
+const Group = React.forwardRef(function Group({ title, count, icon: Icon, summary, open, onToggle, tone = "neutral", children, className }, ref) {
+  const id = React.useId()
+  return <section ref={ref} className={cn("relative z-10 min-w-0 overflow-hidden rounded-none border shadow-[0_2px_6px_#1c191703]", tone === "blocked" ? "border-red-200/60 bg-[#fcf6f5]" : tone === "allowed" ? "border-emerald-200/60 bg-[#f3f9f6]" : "border-stone-200 bg-[#f7f7f5]", className)}>
+    <button type="button" aria-expanded={open} aria-controls={id} aria-label={`${open ? "Collapse" : "Expand"} ${title}`} onClick={onToggle}
+      className="group flex w-full items-center gap-2.5 rounded-none px-4 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+      <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-full border bg-card", tone === "blocked" ? "border-red-200/60 text-red-500" : tone === "allowed" ? "border-emerald-200/60 text-emerald-600" : "border-border text-stone-500")}><Icon className="size-3.5" strokeWidth={1.5} /></span>
+      <span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-[11px] font-medium">{title}<span className="text-[10px] font-normal tabular-nums text-muted-foreground">{count}</span></span><span className="mt-0.5 block truncate text-[10px] text-muted-foreground" title={summary}>{summary}</span></span>
+      <ChevronDown className={cn("size-3 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", open && "rotate-180")} />
+    </button>
+    <motion.div id={id} initial={false} animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }} transition={{ duration: useReducedMotion() ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }} inert={!open} aria-hidden={!open} className="overflow-hidden">
+      <div className="space-y-0.5 border-t border-black/5 p-2">{children}</div>
+    </motion.div>
+  </section>
+})
+
+export function Perimeter({ name, phase, agents = [], allowed, denied, onAllow, compact = false, fill = false, owner = "Not reported", secrets = [], gateway }) {
+  const container = React.useRef(null)
+  const core = React.useRef(null)
+  const hub = React.useRef(null)
+  const groups = React.useMemo(() => ({ agents: React.createRef(), owner: React.createRef(), secrets: React.createRef(), blocked: React.createRef(), allowed: React.createRef() }), [])
+  const [expanded, setExpanded] = React.useState({})
+  const [active, setActive] = React.useState(null)
+  const toggle = (key) => setExpanded((previous) => ({ ...previous, [key]: !previous[key] }))
+  const allOpen = Object.keys(groups).filter((key) => key !== "agents").every((key) => expanded[key])
+  return <TooltipProvider delay={150}>
+    <div className={cn("@container flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card font-sans", fill && "flex-1")} aria-label={`Access graph for ${name}`}>
+      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-1.5">
+        <span className="text-[10px] text-muted-foreground">Select a group to explore its access</span>
+        <button type="button" onClick={() => setExpanded(Object.fromEntries(Object.keys(groups).filter((key) => key !== "agents").map((key) => [key, !allOpen])))} className="rounded px-1 text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">{allOpen ? "Collapse all" : "Expand all"}</button>
+      </div>
+      <div ref={container} className={cn("relative mx-auto grid w-full flex-1 max-w-[1020px] grid-cols-1 items-center gap-5 px-4 @2xl:grid-cols-[minmax(0,1fr)_160px_minmax(0,1.3fr)] @2xl:gap-x-8 @2xl:gap-y-7 @2xl:px-6", compact ? "py-3" : "py-7")}>
+        <div ref={groups.agents} aria-label="Agent types" className="relative z-10 order-3 flex flex-col items-center gap-7 @2xl:order-none @2xl:col-start-1 @2xl:row-start-1 @2xl:row-span-4">
+          {(agents.length ? agents : [{ name: "Not reported", logo: null }]).map((agent) => <div key={agent.name} data-agent-node className="flex max-w-full flex-col items-center gap-2 bg-card px-3 py-2" title={`AI agent: ${agent.name}`}>
+            {agent.logo ? <img src={agent.logo} alt="" className="size-8 object-contain" /> : <Bot className="size-7 text-muted-foreground" strokeWidth={1.3} aria-hidden="true" />}
+            <span className="max-w-full break-words text-center text-xs font-medium">{agent.name}</span>
+          </div>)}
+        </div>
+        <Group ref={groups.owner} title="Owner" icon={UserRound} summary={owner} open={!!expanded.owner} onToggle={() => toggle("owner")} className="@2xl:col-start-2 @2xl:row-start-1">
+          <p className="rounded-xl border border-border/70 bg-card px-3 py-2 text-[11px] break-words">{owner}</p>
+        </Group>
+        <div ref={hub} className="relative z-10 flex min-w-0 flex-col items-center justify-self-center rounded-xl px-3 @2xl:col-start-2 @2xl:row-start-2">
+          <div ref={core} className="flex size-14 items-center justify-center rounded-2xl border border-stone-300 bg-card shadow-[0_3px_8px_#1c191708]"><Box className="size-6 text-stone-600" strokeWidth={1.3} /></div>
+          <p className="mt-2 max-w-[156px] truncate text-xs font-medium" title={name}>{name}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground"><span className={cn("size-1 rounded-full", styleOf(phase).bar)} />{PHASE_LABEL[phase] ?? "Unknown"}</p>
+
+        </div>
+        <div className="relative z-10 flex justify-center @2xl:col-start-2 @2xl:row-start-3">
+          <Tooltip><TooltipTrigger render={<button type="button" />} className="relative z-10 flex min-h-10 max-w-full items-center gap-1.5 bg-card px-2 text-[10px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"><Server className="size-3 shrink-0" strokeWidth={1.5} /><span>{gateway ? `${gateway.remote ? "Remote" : "Local"} gateway` : "Host not reported"}</span></TooltipTrigger><TooltipContent className="max-w-64 font-sans">{gateway ? `Connected through ${gateway.name}. ` : ""}The sandbox’s host machine or cloud placement is not reported.</TooltipContent></Tooltip>
+        </div>
+        <section aria-label="Network access" className="relative z-10 order-4 overflow-hidden rounded-xl border border-border/80 bg-card shadow-[0_2px_8px_#1c191705] @2xl:order-none @2xl:col-start-3 @2xl:row-start-1 @2xl:row-span-4">
+          <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
+            <Network className="size-3.5 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+            <h4 className="text-[11px] font-medium">Network</h4>
+            <span className="ml-auto text-[10px] text-muted-foreground">Outbound access</span>
+          </div>
+        <Group ref={groups.allowed} title="Approved network" count={allowed.length} icon={Check} summary="Destinations in policy" tone="allowed" open={!!expanded.allowed} onToggle={() => toggle("allowed")} className="border-0 shadow-none">
+          {allowed.map((item) => <Node key={item.host} item={item} active={active === item.host} onFocus={() => setActive(item.host)} onBlur={() => setActive(null)} />)}
+          {!allowed.length && <p className="py-2 text-center text-[11px] text-muted-foreground">No approved destinations</p>}
+        </Group>
+        <Group ref={groups.blocked} title="Blocked network" count={denied.length} icon={Ban} summary="Recent connection attempts" tone="blocked" open={!!expanded.blocked} onToggle={() => toggle("blocked")} className="border-0 border-t border-border/60 shadow-none">
+          {denied.map((item) => <Node key={item.host} item={item} denied active={active === item.host} onFocus={() => setActive(item.host)} onBlur={() => setActive(null)} onAllow={onAllow ? () => onAllow(item) : undefined} />)}
+          {!denied.length && <p className="py-2 text-center text-[11px] text-muted-foreground">No blocked attempts</p>}
+        </Group>
+        </section>
+        <Group ref={groups.secrets} title="Secrets" count={secrets.length} icon={KeyRound} summary={secrets.length ? secrets.map((secret) => secret.name).join(", ") : "None attached"} open={!!expanded.secrets} onToggle={() => toggle("secrets")} className="@2xl:col-start-2 @2xl:row-start-4">
+          {secrets.map((secret) => <Tooltip key={secret.name}><TooltipTrigger render={<button type="button" />} className="block w-full truncate rounded-lg border border-border/70 bg-card px-2.5 py-1.5 text-left text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring">{secret.name}</TooltipTrigger><TooltipContent className="max-w-72 break-words font-sans">{secret.name}{secret.type ? ` · ${secret.type}` : ""}{secret.credentialKeys?.length ? ` · ${secret.credentialKeys.join(", ")}` : ""}</TooltipContent></Tooltip>)}
+          {!secrets.length && <p className="py-2 text-center text-[11px] text-muted-foreground">No secrets attached</p>}
+        </Group>
+        <Connections container={container} core={core} hub={hub} groups={groups} />
+      </div>
+    </div>
+  </TooltipProvider>
+}
+
+// One edge per group. Observe animated bounds so connections stay attached as
+// the clusters expand, collapse, or reflow with the viewport.
+function Connections({ container, core, hub, groups }) {
+  const [paths, setPaths] = React.useState([])
+  React.useLayoutEffect(() => {
+    function measure() {
+      if (!container.current || !core.current || !hub.current) return
+      const bounds = container.current.getBoundingClientRect()
+      const box = core.current.getBoundingClientRect()
+      const body = hub.current.getBoundingClientRect()
+      const cx = box.left + box.width / 2 - bounds.left
+      const cy = box.top + box.height / 2 - bounds.top
+      setPaths(Object.entries(groups).flatMap(([key, ref]) => {
+        const rect = ref.current?.getBoundingClientRect()
+        if (!rect) return []
+        if (key === "owner" || key === "secrets") {
+          const sy = (key === "owner" ? box.top : body.bottom) - bounds.top
+          const ty = (key === "owner" ? rect.bottom : rect.top) - bounds.top
+          return [{ key, d: `M ${cx} ${sy} V ${ty}`, x: cx, y: ty }]
+        }
+        if (key === "agents") {
+          return [...ref.current.querySelectorAll("[data-agent-node]")].map((node, index) => {
+            const agent = node.getBoundingClientRect()
+            const sx = box.left - bounds.left
+            const tx = agent.right - bounds.left
+            const ty = agent.top + agent.height / 2 - bounds.top
+            const mx = (sx + tx) / 2
+            return { key: `agent-${index}`, d: `M ${sx} ${cy} C ${mx} ${cy}, ${mx} ${ty}, ${tx} ${ty}`, x: tx, y: ty }
+          })
+        }
+        const sx = box.right - bounds.left
+        const tx = rect.left - bounds.left
+        // Connect to each section's header, even when its host list expands.
+        const header = ref.current.querySelector("button").getBoundingClientRect()
+        const ty = header.top + header.height / 2 - bounds.top
+        const branch = sx + (tx - sx) * 0.4
+        const bend = branch + (tx - branch) * 0.5
+        return [{ key, d: `M ${sx} ${cy} H ${branch} C ${bend} ${cy}, ${bend} ${ty}, ${tx} ${ty}`, x: tx, y: ty }]
+      }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    ;[container.current, core.current, hub.current, ...Object.values(groups).map((ref) => ref.current)].filter(Boolean).forEach((element) => observer.observe(element))
+    return () => observer.disconnect()
+  }, [container, core, hub, groups])
+  return <svg className="pointer-events-none absolute inset-0 hidden size-full overflow-visible @2xl:block" aria-hidden="true" fill="none">
+    {paths.map((path) => <g key={path.key}><path d={path.d} stroke={path.key === "blocked" ? "#dfc4c0" : path.key === "allowed" ? "#b9d6c9" : "#d6d3d1"} strokeWidth="1.5" strokeLinecap="round" /><circle cx={path.x} cy={path.y} r="2.5" fill="var(--card)" stroke="#c9c5c0" /></g>)}
+  </svg>
+}

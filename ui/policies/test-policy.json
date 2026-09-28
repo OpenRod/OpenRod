@@ -1,0 +1,51 @@
+{
+  "id": "test-policy",
+  "name": "test policy",
+  "description": "Claude can read sport5 only (plus the Anthropic hosts its secret needs).",
+  "filesystem": {
+    "workdir": true,
+    "readOnly": [
+      "/bin",
+      "/usr",
+      "/lib",
+      "/proc",
+      "/dev/urandom",
+      "/etc",
+      "/var/log"
+    ],
+    "readWrite": [
+      "/tmp",
+      "/dev/null"
+    ]
+  },
+  "landlock": "best_effort",
+  "rules": [
+    {
+      "name": "sport5",
+      "binaries": [
+        "/usr/local/bin/claude"
+      ],
+      "endpoints": [
+        {
+          "host": "sport5.co.il",
+          "ports": [
+            443
+          ],
+          "protocol": "rest",
+          "access": "read-only",
+          "enforcement": "enforce"
+        },
+        {
+          "host": "www.sport5.co.il",
+          "ports": [
+            443
+          ],
+          "protocol": "rest",
+          "access": "read-only",
+          "enforcement": "enforce"
+        }
+      ]
+    }
+  ],
+  "ingress": []
+}
