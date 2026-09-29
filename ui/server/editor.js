@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -45,24 +45,62 @@ function listEditors() {
   return Object.entries(EDITORS).map(([id, editor]) => ({ id, label: editor.label, installed: Boolean(editorBinary(id)) }))
 }
 
+// Every run of the CLI rewrites ~/.ssh/config and its own ssh_config with a
+// plain truncating write, even when nothing changes, so two runs at once can
+// lose the operator's hosts. Run them one at a time.
+let queue = Promise.resolve()
+function oneAtATime(task) {
+  const run = queue.then(task, task)
+  queue = run.catch(() => {})
+  return run
+}
+
+const TIMEOUT_MS = 60000
+
+// Before it launches the editor, the CLI probes the sandbox over ssh, and that
+// probe has no timeout of its own. The CLI gets its own process group so a
+// timeout also stops its ssh and ssh-proxy children.
+export function runCli(cli, args, env, timeoutMs = TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cli, args, { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    let timedOut = false
+    child.stderr.on('data', (chunk) => { if (stderr.length < 65536) stderr += chunk })
+    const timer = setTimeout(() => {
+      timedOut = true
+      try { process.kill(-child.pid, 'SIGTERM') } catch { /* already gone */ }
+    }, timeoutMs)
+    child.on('error', (error) => { clearTimeout(timer); reject(error) })
+    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stderr, timedOut }) })
+  })
+}
+
+// Gateway errors come through miette as `code: '…', message: "…"`; the
+// message part is the readable one.
+export function reasonFrom(stderr) {
+  const text = stderr.replace(/\x1b\[[0-9;]*m/g, '')
+  const gateway = text.match(/message: "([^"]+)"/)?.[1]
+  if (gateway) return gateway
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean)
+  return (lines.find((line) => /^(error|×)/i.test(line)) ?? lines.at(-1))?.replace(/^error:\s*/i, '').replace(/^×\s*/, '')
+}
+
 async function openEditor(name, input) {
-  const id = String(input.editor ?? '')
-  if (!EDITORS[id]) throw fail('Unknown editor.')
+  const id = String(input?.editor ?? '')
+  if (!Object.hasOwn(EDITORS, id)) throw fail('Unknown editor.')
+  const { label } = EDITORS[id]
   const binary = editorBinary(id)
-  if (!binary) throw fail(`${EDITORS[id].label} is not installed on this machine.`, 409)
+  if (!binary) throw fail(`${label} is not installed on this machine.`, 409)
   const cli = openshellBinary()
   if (!cli) throw fail('The openshell CLI is not installed on this machine.', 409)
   const args = ['sandbox', 'connect', name, '--editor', id, '--gateway', resolveGateway().name]
-  // The CLI looks the editor up on PATH, so put the one found above first.
-  const env = { ...process.env, PATH: [path.dirname(binary), process.env.PATH].filter(Boolean).join(path.delimiter), NO_COLOR: '1' }
-  await new Promise((resolve, reject) => {
-    execFile(cli, args, { env, timeout: 60000 }, (error, _stdout, stderr) => {
-      if (!error) return resolve()
-      const lines = String(stderr).replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((line) => line.trim()).filter(Boolean)
-      const reason = (lines.find((line) => /^(error|×)/i.test(line)) ?? lines.at(-1))?.replace(/^error:\s*/i, '').replace(/^×\s*/, '')
-      reject(fail(error.killed ? `Opening ${EDITORS[id].label} timed out.` : reason || `Could not open ${EDITORS[id].label}.`, 502))
-    })
-  })
+  // The editor app can start from this process tree and inherit its
+  // environment, so change nothing unless the CLI can't find the editor.
+  const dir = path.dirname(binary)
+  const env = pathDirs().includes(dir) ? process.env : { ...process.env, PATH: [dir, process.env.PATH].filter(Boolean).join(path.delimiter) }
+  const result = await oneAtATime(() => runCli(cli, args, env))
+  if (result.timedOut) throw fail(`Opening ${label} timed out.`, 504)
+  if (result.code !== 0) throw fail(reasonFrom(result.stderr) || `Could not open ${label}.`, 502)
   return { ok: true, editor: id }
 }
 
