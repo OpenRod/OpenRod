@@ -1,5 +1,4 @@
 {
-  "rules": [],
   "blocked": [],
-  "outside": "ask"
+  "outside": "block"
 }

@@ -146,10 +146,10 @@ async function revisionPolicy(sandbox, version) {
 function mergeOp(op) {
   const ruleName = String(op.ruleName ?? '')
   if (op.kind !== 'addRule' && !RULE_NAME.test(ruleName)) throw fail('Unknown rule.')
-  // Organization and group rules are changed where they are defined, so one
-  // sandbox cannot drift from its group.
+  // Policy and organization rules are changed where they are defined, so one
+  // sandbox cannot drift from the policies that apply to it.
   const target = op.kind === 'addRule' ? String(op.rule?.name ?? '') : ruleName
-  if (isManaged(target)) throw fail('This rule comes from organization or group policy. Change it on the Organization page.', 403)
+  if (isManaged(target)) throw fail('This rule comes from an egress policy or the organization. Change it on the Egress or Organization page.', 403)
   switch (op.kind) {
     case 'addRule': {
       const { name, rule } = ruleToProto(op.rule)

@@ -76,6 +76,9 @@ export function sandboxView(sandbox) {
   }
 }
 
+// An egress block: an endpoint whose deny rules match every request.
+const blocksAll = (e) => (e.denyRules ?? []).some((r) => (r.method || '*') === '*' && r.path === '/**')
+
 export function policyView(policy) {
   if (!policy) return null
   const rules = Object.entries(policy.networkPolicies ?? {}).map(([key, rule]) => ({
@@ -84,12 +87,13 @@ export function policyView(policy) {
     fromProvider: key.startsWith('_provider_'),
     binaries: (rule.binaries ?? []).map((b) => b.path),
     endpoints: (rule.endpoints ?? []).map((e) => ({
+      blocked: blocksAll(e),
       host: e.host,
       port: e.port || e.ports?.[0] || null,
       ports: e.ports?.length ? e.ports : e.port ? [e.port] : [],
       path: e.path || null,
       protocol: e.protocol || 'tcp',
-      access: ACCESS[e.access] || (e.rules?.length ? 'custom' : e.protocol && e.protocol !== 'tcp' ? 'none' : 'connect'),
+      access: blocksAll(e) ? 'blocked' : ACCESS[e.access] || (e.rules?.length ? 'custom' : e.protocol && e.protocol !== 'tcp' ? 'none' : 'connect'),
       // UNSPECIFIED is not "enforce": the gateway treats an unset mode as audit,
       // which logs violations and lets them through.
       enforcement: e.enforcement === 1 ? 'enforce' : 'audit',
