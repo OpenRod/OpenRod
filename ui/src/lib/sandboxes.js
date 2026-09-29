@@ -73,5 +73,5 @@ export function elapsedSince(value, now = Date.now()) {
 
 export function uptimeOf(sandbox, now = Date.now()) {
   if (["stopped", "completed"].includes(sandbox.phase)) return "Not running"
-  return sandbox.phase === "ready" ? elapsedSince(sandbox.startedAt, now) : "—"
+  return sandbox.phase === "ready" ? elapsedSince(sandbox.startedAt, now) : "-"
 }

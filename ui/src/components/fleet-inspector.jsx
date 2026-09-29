@@ -36,7 +36,7 @@ function Heading({ children, aside, icon: Icon }) {
   )
 }
 
-// Nothing picked: the fleet as the gateway sees it — where traffic goes, and
+// Nothing picked: the fleet as the gateway sees it - where traffic goes, and
 // which credentials it carries. Picking a host lights up who talks to it.
 export function FleetPanel({ traffic, focus, setFocus, providers, sandboxes }) {
   const [all, setAll] = React.useState(false)
@@ -144,7 +144,7 @@ export function BoxPanel({ sandbox, stats, events, onOpen, onGraph, onClose, onN
           {[
             ["Command", commandText(sandbox.command)],
             ["Providers", sandbox.providers.join(", ") || "None"],
-            ["Policy", `v${sandbox.policyVersion ?? "—"}`],
+            ["Policy", `v${sandbox.policyVersion ?? "-"}`],
           ].map(([label, value]) => (
             <div key={label} className="min-w-0">
               <dt className="text-[10px] text-muted-foreground">{label}</dt>

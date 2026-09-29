@@ -85,7 +85,7 @@ export function createActivityStore(filename) {
     const bad = () => { throw Object.assign(new Error('Invalid activity query'), { status: 400 }) }
     if (!options || typeof options !== 'object' || Array.isArray(options)) bad()
     for (const key of ['query', 'direction', 'range', 'from', 'to']) if (options[key] !== undefined && typeof options[key] !== 'string') bad()
-    for (const key of ['sandboxes', 'verdicts']) if (options[key] !== undefined && (!Array.isArray(options[key]) || options[key].length > 10000 || options[key].some((v) => typeof v !== 'string'))) bad()
+    for (const key of ['sandboxes', 'verdicts', 'agents']) if (options[key] !== undefined && (!Array.isArray(options[key]) || options[key].length > 10000 || options[key].some((v) => typeof v !== 'string'))) bad()
     if (options.filters !== undefined && (!options.filters || typeof options.filters !== 'object' || Array.isArray(options.filters))) bad()
     for (const f of Object.values(options.filters ?? {})) if (!f || typeof f.value !== 'string' || !['equals', 'contains', 'excludes'].includes(f.mode)) bad()
     if (options.range === 'custom' && ((!options.from && !options.to) || (options.from && !Number.isFinite(Date.parse(options.from))) || (options.to && !Number.isFinite(Date.parse(options.to))) || (options.from && options.to && Date.parse(options.from) > Date.parse(options.to)))) bad()
@@ -96,7 +96,7 @@ export function createActivityStore(filename) {
     const clauses = ['seq <= ?'], args = [snapshot]
     const field = (name) => `json_extract(fields, '$.${name}')`
     if (options.query?.trim()) { clauses.push('instr(search, ?) > 0'); args.push(options.query.trim().toLowerCase()) }
-    for (const [name, values] of [['sandbox', options.sandboxes], ['verdict', options.verdicts]]) {
+    for (const [name, values] of [['sandbox', options.sandboxes], ['verdict', options.verdicts], ['agent', options.agents]]) {
       if (Array.isArray(values) && values.length) { clauses.push(`${field(name)} IN (${values.map(() => '?').join(',')})`); args.push(...values) }
     }
     if (options.direction && options.direction !== 'all') { clauses.push(`${field('direction')} = ?`); args.push(options.direction) }
@@ -121,7 +121,8 @@ export function createActivityStore(filename) {
     const offset = Math.max(0, Math.floor(Number(options.offset) || 0))
     const total = db.prepare(`SELECT count(*) AS n FROM events WHERE ${where}`).get(...args).n
     const events = db.prepare(`SELECT data FROM events WHERE ${where} ORDER BY ${key === 'time' ? 'coalesce(at, 0)' : key === 'severity' ? severityOrder : field(key)} ${order}, id ASC LIMIT ? OFFSET ?`).all(...args, limit, offset).map((r) => JSON.parse(r.data))
-    return { events, total, snapshot, now, sandboxes: db.prepare('SELECT DISTINCT sandbox FROM events ORDER BY sandbox').all().map((r) => r.sandbox), nextOffset: offset + events.length < total ? offset + events.length : null, coverage: coverage() }
+    const agents = db.prepare("SELECT DISTINCT json_extract(fields, '$.agent') AS agent FROM events WHERE seq <= ? ORDER BY agent").all(snapshot).map((row) => row.agent).filter(Boolean)
+    return { events, total, snapshot, now, agents, sandboxes: db.prepare('SELECT DISTINCT sandbox FROM events ORDER BY sandbox').all().map((r) => r.sandbox), nextOffset: offset + events.length < total ? offset + events.length : null, coverage: coverage() }
   }
   function previewDeletion(input) {
     const bad = () => { throw Object.assign(new Error('Choose selected logs, matching logs, or all logs'), { status: 400 }) }

@@ -133,7 +133,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               <span className="truncate">{name}</span>
               {phase && <span className="ml-2 flex shrink-0 items-center gap-1.5 text-xs font-normal text-muted-foreground"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} />{PHASE_LABEL[phase]}</span>}
             </DialogTitle>
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="mr-1 font-sans font-medium text-foreground">{detail?.policy ? allowed.length : "—"}</strong>allowed hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{denied.length}</strong>blocked hosts</span></div>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="mr-1 font-sans font-medium text-foreground">{detail?.policy ? allowed.length : "-"}</strong>allowed hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{denied.length}</strong>blocked hosts</span></div>
             </div>
             <DialogDescription className="sr-only">Sandbox access graph, details, rules, and connection activity.</DialogDescription>
           </DialogHeader>
@@ -266,7 +266,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                   ["Providers", sandbox.providers.join(", ") || "None"],
                   ["Created", absoluteTime(sandbox.createdAt)],
                   ["Workspace", sandbox.workspace],
-                  ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : `v${sandbox.policyVersion ?? "—"}`],
+                  ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : `v${sandbox.policyVersion ?? "-"}`],
                   ["Sandbox ID", sandbox.id, true, true],
                 ].map(([label, value, mono, wide]) => (
                   <div key={label} className={wide ? "sm:col-span-2" : undefined}>

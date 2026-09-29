@@ -83,3 +83,11 @@ test('security severity and operational log levels remain independent', () => {
   assert.deepEqual(filterActivity([log, audit], { filters: { logLevel: { mode: 'equals', value: 'ERROR' } } }), [log])
   assert.deepEqual(filterActivity([log, audit], { filters: { severity: { mode: 'equals', value: 'MED' } } }), [audit])
 })
+
+test('agent multiselect includes any selected agent and clearing restores all logs', () => {
+  const rows = ['/bin/claude', '/bin/codex', '/bin/curl'].map((binary, id) => activityRow({ id: String(id), binary, sandbox: id === 1 ? 'other' : 'box' }))
+  assert.equal(filterActivity(rows, { agents: ['Claude Code', 'Codex'] }).length, 2)
+  assert.equal(filterActivity(rows, { agents: ['Claude Code', 'Codex'], sandboxes: ['box'] }).length, 1)
+  assert.equal(filterActivity(rows, { agents: ['Unknown'] })[0].values.agent, 'Unknown')
+  assert.equal(filterActivity(rows, { agents: [] }).length, 3)
+})

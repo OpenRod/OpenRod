@@ -18,7 +18,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* OpenRod Desk — tokens from the approved "Minimalist Card Flow" design. Light only. */
+/* OpenRod Desk - tokens from the approved "Minimalist Card Flow" design. Light only. */
 :root {
   --paper: #fafaf9;
   --paper-sidebar: #f5f5f4;
@@ -59,7 +59,7 @@
   --sidebar-ring: var(--ink-faint);
   --sidebar-width: 16rem;
 
-  /* Primary actions: a desaturated slate — not ink black, not a brand colour. */
+  /* Primary actions: a desaturated slate - not ink black, not a brand colour. */
   --action: #4a5568;
   --action-foreground: #ffffff;
 

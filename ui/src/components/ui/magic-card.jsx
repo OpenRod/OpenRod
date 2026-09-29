@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 
 // Magic UI's Magic Card, converted to JSX. Two changes for this app: the orb
 // mode and the next-themes lookup are dropped (the Desk is light-only), and the
-// purple/pink default gradient is replaced by stone — a spotlight in a hue the
+// purple/pink default gradient is replaced by stone - a spotlight in a hue the
 // design system does not own would be the loudest thing on the page.
 export function MagicCard({
   children,

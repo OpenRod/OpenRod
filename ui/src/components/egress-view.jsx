@@ -101,7 +101,7 @@ function DestinationRow({ d, total, onOpen }) {
         <span className="flex flex-wrap gap-1">{sources.map((s) => <SourcePill key={s} source={s} />)}</span>
         <span className="text-[12px] text-muted-foreground">{d.access.size === 1 ? ACCESS_LABEL[[...d.access][0]] ?? [...d.access][0] : "Mixed"}</span>
         <span className="block"><Coverage n={d.sandboxes.size} total={total} /></span>
-        <span className="text-right text-[12px] tabular-nums text-muted-foreground">{d.hits ? d.hits.toLocaleString() : "—"}</span>
+        <span className="text-right text-[12px] tabular-nums text-muted-foreground">{d.hits ? d.hits.toLocaleString() : "-"}</span>
         <ChevronRight className={cn("size-3.5 text-faint transition-transform", open && "rotate-90")} aria-hidden="true" />
       </button>
       <AnimatePresence initial={false}>
@@ -154,7 +154,7 @@ function BlockedRow({ b, onDecide }) {
       </span>
       <span className="text-[12px] tabular-nums">{plural(b.sandboxes.size, "sandbox", "sandboxes")}</span>
       <span className="text-[12px] tabular-nums text-red-600/90">{b.attempts}×</span>
-      <span className="truncate font-mono text-[11.5px] text-muted-foreground">{[...b.programs].map(program).join(", ") || "—"}</span>
+      <span className="truncate font-mono text-[11.5px] text-muted-foreground">{[...b.programs].map(program).join(", ") || "-"}</span>
       <span className="flex items-center justify-end gap-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--action)] px-2.5 text-[12px] font-medium text-white outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
@@ -340,9 +340,9 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
                       ))}
                     </span>
                     <span className="items-center gap-1.5 text-[12px] flex">
-                      <span className={cn("size-1.5 rounded-full", REVISION[s.status]?.dot ?? "bg-stone-200")} />{s.error ? "Unavailable" : s.version ? `v${s.version} ${REVISION[s.status]?.label.toLowerCase()}` : "—"}
+                      <span className={cn("size-1.5 rounded-full", REVISION[s.status]?.dot ?? "bg-stone-200")} />{s.error ? "Unavailable" : s.version ? `v${s.version} ${REVISION[s.status]?.label.toLowerCase()}` : "-"}
                     </span>
-                    <span className={cn("text-right text-[12px] tabular-nums", info.blocked ? "text-red-600/90" : "text-faint")}>{info.blocked || "—"}</span>
+                    <span className={cn("text-right text-[12px] tabular-nums", info.blocked ? "text-red-600/90" : "text-faint")}>{info.blocked || "-"}</span>
                     <ChevronRight className="size-3.5 text-faint" aria-hidden="true" />
                   </button>
                 </li>

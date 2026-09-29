@@ -23,7 +23,7 @@ export function activityRow(event) {
   }
   return { event, agent, key: activityKey(event), values, timestamp: Date.parse(event.at), search: [...Object.values(values), event.message, event.detail, event.source, event.target, JSON.stringify(event.original?.fields ?? event.original?.metadata ?? {})].join(' ').toLowerCase() }
 }
-export function filterActivity(rows, { query = '', direction = 'all', sandboxes = [], verdicts = [], filters = {}, range = 'all', from = '', to = '', now = Date.now(), sort = { key: 'time', direction: 'desc' } } = {}) {
+export function filterActivity(rows, { query = '', direction = 'all', sandboxes = [], verdicts = [], agents = [], filters = {}, range = 'all', from = '', to = '', now = Date.now(), sort = { key: 'time', direction: 'desc' } } = {}) {
   const names = new Set(sandboxes)
   const q = query.trim().toLowerCase()
   const start = range === 'custom' ? (from ? Date.parse(from) : -Infinity) : range === 'all' ? -Infinity : now - Number(range) * 60000
@@ -31,6 +31,7 @@ export function filterActivity(rows, { query = '', direction = 'all', sandboxes 
   return rows.filter((r) => {
     if (direction !== 'all' && r.values.direction !== direction) return false
     if (names.size && !names.has(r.values.sandbox)) return false
+    if (agents.length && !agents.includes(r.values.agent)) return false
     if (verdicts.length && !verdicts.includes(r.values.verdict)) return false
     if (q && !r.search.includes(q)) return false
     if (range !== 'all' && (!Number.isFinite(r.timestamp) || r.timestamp < start || r.timestamp > end)) return false

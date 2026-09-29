@@ -117,7 +117,7 @@ export function AppSidebar({ view, onNavigate }) {
                 {[
                   ["Endpoint", gateway.endpoint, true],
                   ["Authentication", gateway.authMode === "mtls" ? "mTLS" : gateway.authMode],
-                  ["Runtime", gateway.drivers.map((d) => `${d.driver}${d.version ? ` ${d.version}` : ""}`).join(", ") || "—", true],
+                  ["Runtime", gateway.drivers.map((d) => `${d.driver}${d.version ? ` ${d.version}` : ""}`).join(", ") || "-", true],
                   ["Location", gateway.remote ? "Remote" : "This Mac"],
                 ].map(([label, value, mono]) => (
                   <div key={label}>
