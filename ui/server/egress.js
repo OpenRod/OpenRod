@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { ruleToProto } from './policy.js'
+import { appliesTo, blockHosts } from '../src/lib/egress.js'
+
+export { appliesTo, blockHosts }
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 
@@ -13,8 +16,8 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 //
 // OpenShell has no host-level deny, so a block is an inspected endpoint whose
 // deny rules match every request. It answers HTTP with policy_denied and
-// refuses anything that is not HTTP. It has to cover the same ports as the
-// allows, or a blocked host would stay open on the others.
+// refuses anything that is not HTTP. It has to cover every port the sandbox's
+// other rules open, or a blocked host would stay open on the others.
 //
 // Stored as JSON in policies/egress/<id>.json, reviewed like code.
 
@@ -112,14 +115,6 @@ export async function removePolicy(id) {
 
 // ---- compile -----------------------------------------------------------------
 
-export const appliesTo = (policy, sandbox) => policy.appliesTo.everyone
-  || (sandbox.group != null && policy.appliesTo.groups.includes(sandbox.group))
-  || policy.appliesTo.sandboxes.includes(sandbox.name)
-
-// Blocking example.com also blocks its subdomains. OpenShell rejects `**.com`,
-// so a bare top-level name stays exact.
-export const blockHosts = (host) => (host.startsWith('*') || !host.includes('.') ? [host] : [host, `**.${host}`])
-
 function allowSpec(policy) {
   const a = policy.advanced
   // "Any request" with nothing blocked needs no inspection at all.
@@ -150,10 +145,12 @@ function blockSpec(name, hosts, ports) {
 
 // The console-owned rules for one sandbox, keyed by policy name: every allow
 // and block policy that applies to it, plus the organization's blocked hosts.
-export function compileFor(sandbox, policies, orgBlocked = []) {
+// `openPorts` are the ports the sandbox's other rules (template, one-off,
+// provider) open, so a block covers those as well as the allows' ports.
+export function compileFor(sandbox, policies, orgBlocked = [], openPorts = []) {
   const mine = policies.filter((p) => appliesTo(p, sandbox))
   const allows = mine.filter((p) => p.action === 'allow')
-  const ports = uniq([...WEB_PORTS, ...allows.flatMap((p) => p.advanced.ports)]).sort((a, b) => a - b)
+  const ports = uniq([...WEB_PORTS, ...allows.flatMap((p) => p.advanced.ports), ...openPorts.map(Number)]).sort((a, b) => a - b)
   const specs = [
     ...allows.map(allowSpec),
     ...mine.filter((p) => p.action === 'block').map((p) => blockSpec(PREFIX + p.id, p.destinations, ports)),

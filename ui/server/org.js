@@ -4,6 +4,9 @@ import { randomUUID } from 'node:crypto'
 import { WORKSPACE, gateway, sandboxView } from './gateway.js'
 import { findTemplate, templateToPolicy } from './policy.js'
 import { appliesTo, blockHosts, blockedByPolicy, compileFor, listPolicies, removePolicy, validatePolicy, writePolicy } from './egress.js'
+import { hostMatches } from '../src/lib/egress.js'
+
+export { hostMatches }
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 
@@ -39,17 +42,6 @@ function validateBlocked(input) {
   for (const h of hosts) if (!HOST_PATTERN.test(h)) throw fail(`"${h}" is not a host (wildcards: *.example.com or **.example.com).`)
   if (hosts.length > 500) throw fail('Too many blocked hosts.')
   return hosts
-}
-
-// `*.a.com` is one label deep, `**.a.com` any depth; otherwise exact.
-export function hostMatches(pattern, host) {
-  host = String(host ?? '').toLowerCase()
-  if (pattern.startsWith('**.')) return host.endsWith(pattern.slice(2))
-  if (pattern.startsWith('*.')) {
-    const rest = pattern.slice(1)
-    return host.endsWith(rest) && !host.slice(0, -rest.length).includes('.') && host.length > rest.length
-  }
-  return host === pattern
 }
 
 // A rule host collides with a blocked pattern when either one covers the other:
@@ -138,7 +130,12 @@ const write = async (file, value) => {
 export const effectiveOutside = () => 'block'
 
 // The rules the console owns in a sandbox's policy, keyed by their policy name.
-const managedRules = (org, policies, sandbox) => compileFor(sandbox, policies, org.blocked)
+const managedRules = (org, policies, sandbox, openPorts) => compileFor(sandbox, policies, org.blocked, openPorts)
+
+// The ports a sandbox's own rules open (template, one-off, provider). A block
+// has to cover them, or a blocked host would stay reachable there.
+const openPorts = (networkPolicies) => Object.entries(networkPolicies ?? {}).filter(([key]) => !isManaged(key))
+  .flatMap(([, rule]) => (rule.endpoints ?? []).flatMap((e) => (e.ports?.length ? e.ports : e.port ? [e.port] : [])))
 
 // Everything a new sandbox needs from its group, resolved before it exists.
 export async function planSandbox({ name, group: groupId, template: templateId }) {
@@ -152,7 +149,7 @@ export async function planSandbox({ name, group: groupId, template: templateId }
   if (!template) throw fail('Unknown policy template.')
   assertNotBlocked(org, template.rules, 'Template')
   const policy = templateToPolicy(template)
-  Object.assign(policy.networkPolicies, managedRules(org, policies, { name, group: group?.id ?? null }))
+  Object.assign(policy.networkPolicies, managedRules(org, policies, { name, group: group?.id ?? null }, openPorts(policy.networkPolicies)))
   return {
     policy,
     template,
@@ -172,20 +169,35 @@ export async function enforcePolicyOnly(client) {
   }
 }
 
-// Rewrites the managed rules of one sandbox to match the stored policy. The
-// sandbox's own rules are never touched.
-async function syncOne(client, sandbox, org, groups, policies, { force = true } = {}) {
+// The operations that bring one sandbox's managed rules in line with the
+// stored policies. `extraPorts` are ports the same update is about to open.
+async function managedOps(client, sandbox, org, groups, policies, extraPorts = []) {
   const groupId = sandbox.labels?.[GROUP_LABEL] ?? null
   const group = groupId ? groups.find((g) => g.id === groupId) ?? null : null
-  const desired = managedRules(org, policies, { name: sandbox.name, group: group?.id ?? null })
   const status = await client.raw.getSandboxPolicyStatus({ sandbox: sandbox.name, workspaceScope: WORKSPACE })
-  const current = Object.keys(status.revision?.policy?.networkPolicies ?? {}).filter(isManaged)
+  const rules = status.revision?.policy?.networkPolicies ?? {}
+  const desired = managedRules(org, policies, { name: sandbox.name, group: group?.id ?? null }, [...openPorts(rules), ...extraPorts])
+  const current = Object.keys(rules).filter(isManaged)
   const same = current.length === Object.keys(desired).length && current.every((k) => k in desired)
-  if (!force && same) return { changed: false }
   const ops = [
     ...current.map((ruleName) => ({ operation: { case: 'removeRule', value: { ruleName } } })),
     ...Object.entries(desired).map(([ruleName, rule]) => ({ operation: { case: 'addRule', value: { ruleName, rule } } })),
   ]
+  return { ops, same, group }
+}
+
+// For a one-off rule edit that opens new ports: the managed rules recomputed
+// with those ports, to go in the same update as the edit.
+export async function managedOpsFor(client, name, extraPorts) {
+  const [org, groups, policies, sandbox] = await Promise.all([readOrg(), listGroups(), listPolicies(), client.raw.getSandbox({ name, workspaceScope: WORKSPACE })])
+  return (await managedOps(client, sandboxView(sandbox.sandbox), org, groups, policies, extraPorts)).ops
+}
+
+// Rewrites the managed rules of one sandbox to match the stored policy. The
+// sandbox's own rules are never touched.
+async function syncOne(client, sandbox, org, groups, policies, { force = true } = {}) {
+  const { ops, same, group } = await managedOps(client, sandbox, org, groups, policies)
+  if (!force && same) return { changed: false }
   let version = null
   if (ops.length) {
     const response = await client.raw.updateConfig({

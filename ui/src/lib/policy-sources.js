@@ -13,17 +13,6 @@ export const SOURCE_ORDER = ["org", "policy", "group", "own", "secret"]
 export const sourceOf = (key) => (key.startsWith("_provider_") ? "secret" : key.startsWith("egress_") ? "policy" : key.startsWith("org_") ? "org" : key.startsWith("group_") ? "group" : "own")
 export const displayName = (key) => key.replace(/^_provider_/, "").replace(/^(org|group|egress)_/, "").replace(/_/g, "-")
 
-// `*.a.com` is one label deep, `**.a.com` any depth; otherwise exact. Same as the server.
-export function hostMatches(pattern, host) {
-  host = String(host ?? "").toLowerCase()
-  if (pattern.startsWith("**.")) return host.endsWith(pattern.slice(2))
-  if (pattern.startsWith("*.")) {
-    const rest = pattern.slice(1)
-    return host.endsWith(rest) && !host.slice(0, -rest.length).includes(".") && host.length > rest.length
-  }
-  return host === pattern
-}
-
 export function hostOf(d) {
   if (!d) return null
   try { return new URL(d.includes('://') ? d : `https://${d}`).hostname } catch { return d.split('/')[0].replace(/:\d+$/, '') }
