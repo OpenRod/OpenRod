@@ -23,6 +23,8 @@ export const api = {
   activity: (options = {}) => request(`/activity?query=${encodeURIComponent(JSON.stringify(options))}`),
   create: (spec) => request("/sandboxes", { method: "POST", body: spec }),
   lifecycle: (name, action) => request(`/sandboxes/${encodeURIComponent(name)}/${action}`, { method: "POST", body: {} }),
+  editors: () => request("/editors"),
+  openEditor: (name, editor) => request(`/sandboxes/${encodeURIComponent(name)}/editor`, { method: "POST", body: { editor } }),
 
   // Policy center
   fleetPolicy: () => request("/policy/fleet"),
