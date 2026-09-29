@@ -13,9 +13,12 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  activityDestinations: () => request('/activity-destinations'),
+  createActivityDestination: (body) => request('/activity-destinations', { method: 'POST', body }),
+  activityDestinationAction: (id, action) => request(`/activity-destinations/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: {} }),
   overview: () => request("/overview"),
   sandbox: (name) => request(`/sandboxes/${encodeURIComponent(name)}`),
-  activity: (sandbox) => request(`/activity${sandbox ? `?sandbox=${encodeURIComponent(sandbox)}` : ""}`),
+  activity: (options = {}) => request(`/activity?query=${encodeURIComponent(JSON.stringify(options))}`),
   create: (spec) => request("/sandboxes", { method: "POST", body: spec }),
   lifecycle: (name, action) => request(`/sandboxes/${encodeURIComponent(name)}/${action}`, { method: "POST", body: {} }),
 

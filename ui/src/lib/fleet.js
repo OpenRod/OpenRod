@@ -1,7 +1,8 @@
 // What the gateway's proxy has decided, folded per sandbox and per host. Built
 // from the live audit buffer (the most recent decisions, not all of history),
 // so counts are "lately", and a sandbox with no entry has simply been quiet.
-export const hostOf = (destination) => destination?.split("/")[0]?.replace(/:\d+$/, "") ?? null
+import { hostOf } from "./policy-sources.js"
+export { hostOf }
 const isIp = (host) => /^\d+\.\d+\.\d+\.\d+$/.test(host)
 
 export function foldTraffic(events) {
@@ -82,7 +83,7 @@ export function demoEvent(sandboxes, rand = Math.random, at = new Date().toISOSt
   const host = rand() < 0.08 ? pick(rand, [...SUSPECT]) : HOSTS[Math.floor(rand() ** 1.8 * (HOSTS.length - 3))]
   const denied = SUSPECT.has(host) ? rand() < 0.9 : rand() < 0.03
   return {
-    sandbox: box.name, at, kind: "audit", level: "OCSF", category: "NET", severity: denied ? "MED" : "INFO",
+    sandbox: box.name, at, kind: "audit", level: "OCSF", category: "NET", action: "OPEN", severity: denied ? "MED" : "INFO",
     verdict: denied ? "denied" : "allowed", destination: `${host}:443`, binary: "/usr/local/bin/claude",
     reason: denied ? "policy_dns_ineligible" : null, policy: denied ? null : "_provider_my_claude",
     message: `NET:OPEN [${denied ? "MED" : "INFO"}] ${denied ? "DENIED" : "ALLOWED"} /usr/local/bin/claude(0) -> ${host}:443 #${Math.floor(rand() * 1e9)}`,

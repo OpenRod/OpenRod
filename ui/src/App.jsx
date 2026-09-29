@@ -6,7 +6,6 @@ import { EgressView } from "@/components/egress-view"
 import { IngressView } from "@/components/ingress-view"
 import { SecretsView } from "@/components/secrets-view"
 import { TemplatesView } from "@/components/image-templates-view"
-import { GuardrailsView } from "@/components/guardrails-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { LiveProvider } from "@/lib/live"
@@ -18,7 +17,6 @@ const TITLES = {
   ingress: "Ingress",
   secrets: "Secrets",
   templates: "Templates",
-  guardrails: "Guardrails",
 }
 
 // One page failing to render must not take the console down with it.
@@ -40,6 +38,10 @@ class PageBoundary extends React.Component {
 
 function viewFromLocation() {
   const view = window.location.hash.slice(1)
+  if (view === "guardrails") {
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#activity`)
+    return "activity"
+  }
   return TITLES[view] ? view : "sandboxes"
 }
 
@@ -77,7 +79,6 @@ export function App() {
           {view === "ingress" && <IngressView />}
           {view === "secrets" && <SecretsView />}
           {view === "templates" && <TemplatesView />}
-          {view === "guardrails" && <GuardrailsView />}
           </PageBoundary>
         </SidebarInset>
         <Toaster position="bottom-right" />

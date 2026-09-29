@@ -1,4 +1,5 @@
 import * as React from "react"
+import { activityKey as eventKey } from "@/lib/activity-inventory"
 import { api } from "@/lib/api"
 
 // One live picture of the gateway for every page: sandboxes and the audit
@@ -7,13 +8,14 @@ import { api } from "@/lib/api"
 const LiveContext = React.createContext(null)
 const MAX_EVENTS = 2000
 
-const eventKey = (e) => `${e.sandbox}|${e.at}|${e.message}`
 
 export function LiveProvider({ children }) {
   const [sandboxes, setSandboxes] = React.useState(null)
   const [overview, setOverview] = React.useState(null)
   const [events, setEvents] = React.useState([])
   const [connection, setConnection] = React.useState("connecting")
+  const [collection, setCollection] = React.useState(null)
+  const [historyError, setHistoryError] = React.useState(null)
   const seen = React.useRef(new Set())
 
   const addEvents = React.useCallback((incoming) => {
@@ -37,16 +39,18 @@ export function LiveProvider({ children }) {
   }, [])
 
   const loadHistory = React.useCallback(async () => {
-    try { addEvents(await api.activity()) } catch { /* The stream still delivers new events. */ }
+    try { const result = await api.activity({ limit: 500 }); addEvents(result.events); setCollection(result.coverage); setHistoryError(null) } catch (error) { setHistoryError(error.message) }
   }, [addEvents])
 
   React.useEffect(() => {
     loadOverview(); loadHistory()
     const source = new EventSource("/api/os/stream")
-    source.onopen = () => setConnection("live")
+    source.onopen = () => { setConnection("live"); loadHistory() }
     source.onerror = () => setConnection("reconnecting")
     source.addEventListener("sandboxes", (e) => { setConnection("live"); setSandboxes(JSON.parse(e.data)) })
     source.addEventListener("log", (e) => addEvents([JSON.parse(e.data)]))
+    source.addEventListener("collection", (e) => setCollection(JSON.parse(e.data)))
+    source.addEventListener("gateway-health", () => setConnection("live"))
     source.addEventListener("gateway-error", () => setConnection("gateway-down"))
     const slow = setInterval(() => { loadOverview() }, 15000)
     return () => { source.close(); clearInterval(slow) }
@@ -54,9 +58,9 @@ export function LiveProvider({ children }) {
 
   const value = React.useMemo(() => ({
     sandboxes: sandboxes ?? overview?.sandboxes ?? null,
-    overview, events, connection,
+    overview, events, connection, collection, historyError,
     refresh: () => { loadOverview(); loadHistory() },
-  }), [sandboxes, overview, events, connection, loadOverview, loadHistory])
+  }), [sandboxes, overview, events, connection, collection, historyError, loadOverview, loadHistory])
 
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>
 }
