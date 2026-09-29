@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { AuditLine } from "@/components/audit-line"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { agentsOf } from "@/lib/agents"
+import { agentsOf, agentInventoryLabel } from "@/lib/agents"
 import { Perimeter } from "@/components/perimeter"
 import { api } from "@/lib/api"
 import { hostOf, isIp, portOf, sourceOf } from "@/lib/policy-sources"
 import { rankHosts } from "@/lib/fleet"
-import { PHASE_LABEL, commandText, groupKey, imageName, statusOf, styleOf } from "@/lib/sandboxes"
+import { PHASE_LABEL, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
 const count = (n) => Intl.NumberFormat("en-US").format(n)
 const remember = (key, value) => { try { sessionStorage.setItem(key, value) } catch { /* optional */ } }
@@ -133,7 +133,7 @@ export function BoxPanel({ sandbox, stats, events, onOpen, onGraph, onClose, onN
           <span className={`mt-1 size-3 shrink-0 rounded-[3px] ${style.cell}`} aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="truncate font-mono text-sm font-medium">{sandbox.name}</p>
-            <p className="text-[11px] text-muted-foreground">{PHASE_LABEL[sandbox.phase]} · {imageName(sandbox.image)}</p>
+            <p className="text-[11px] text-muted-foreground">{PHASE_LABEL[sandbox.phase]} · {imageName(sandbox.image, sandbox.imageTemplateName)}</p>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Clear selection" className="-mt-1 -mr-1 text-muted-foreground"><X className="size-3.5" /></Button>
         </div>
@@ -145,7 +145,6 @@ export function BoxPanel({ sandbox, stats, events, onOpen, onGraph, onClose, onN
             ["Command", commandText(sandbox.command)],
             ["Providers", sandbox.providers.join(", ") || "None"],
             ["Policy", `v${sandbox.policyVersion ?? "—"}`],
-            ["Group", groupKey(sandbox, "group")],
           ].map(([label, value]) => (
             <div key={label} className="min-w-0">
               <dt className="text-[10px] text-muted-foreground">{label}</dt>
@@ -197,13 +196,23 @@ export function BoxPanel({ sandbox, stats, events, onOpen, onGraph, onClose, onN
 // is a policy change, so it hands off to Egress rather than happening here.
 export function PerimeterDialog({ sandbox, events, onClose, onNavigate }) {
   const [rules, setRules] = React.useState(null)
+  const [inventory, setInventory] = React.useState(null)
   const name = sandbox?.name
   React.useEffect(() => {
     if (!name) { setRules(null); return }
     let cancelled = false
-    api.sandbox(name).then((d) => { if (!cancelled) setRules(d.policy?.rules ?? []) }).catch(() => { if (!cancelled) setRules([]) })
-    return () => { cancelled = true }
-  }, [name])
+    let timer
+    setRules(null); setInventory(null)
+    const refresh = async () => {
+      try {
+        const d = await api.sandbox(name)
+        if (!cancelled) { setRules(d.policy?.rules ?? []); setInventory(d.agentInventory) }
+      } catch { if (!cancelled) { setRules([]); setInventory({ status: "unavailable" }) } }
+      if (!cancelled) timer = setTimeout(refresh, 30000)
+    }
+    refresh()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [name, sandbox?.phase])
 
   const allowed = React.useMemo(() => {
     const seen = new Map()
@@ -232,7 +241,7 @@ export function PerimeterDialog({ sandbox, events, onClose, onNavigate }) {
         </DialogHeader>
         {sandbox && (rules === null
           ? <p role="status" className="py-16 text-center text-sm text-muted-foreground">Reading policy…</p>
-          : <Perimeter agents={agentsOf(sandbox)} name={name} phase={sandbox.phase} allowed={allowed} denied={denied}
+          : <Perimeter agents={agentsOf({ ...sandbox, agentInventory: inventory })} agentStatus={agentInventoryLabel({ agentInventory: inventory })} name={name} phase={sandbox.phase} allowed={allowed} denied={denied}
               onAllow={() => { remember("egress-scope", name); onClose(); onNavigate("egress") }} />)}
       </DialogContent>
     </Dialog>

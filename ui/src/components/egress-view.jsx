@@ -22,9 +22,8 @@ import { HostTile } from "@/components/perimeter"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
-import { GROUP_LABEL, styleOf } from "@/lib/sandboxes"
+import { styleOf } from "@/lib/sandboxes"
 import { SOURCE, SOURCE_ORDER, displayName, hostOf, isIp, portOf, program, sourceOf } from "@/lib/policy-sources"
-import { groupDestinations } from "@/lib/egress-groups"
 import { cn } from "@/lib/utils"
 
 const REVISION = {
@@ -81,14 +80,14 @@ function Coverage({ n, total }) {
 
 const DEST_COLS = "grid-cols-[minmax(0,2fr)_minmax(0,1fr)_8rem_7rem_5rem_1rem]"
 const BLOCK_COLS = "grid-cols-[minmax(0,1.6fr)_7.5rem_5rem_minmax(0,1fr)_13.5rem]"
-const BOX_COLS = "grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.3fr)_8rem_5rem_1rem]"
+const BOX_COLS = "grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_8rem_5rem_1rem]"
 
 function DestinationRow({ d, total, onOpen }) {
   const [open, setOpen] = React.useState(false)
   const reduceMotion = useReducedMotion()
   const detailsId = React.useId()
   const sources = SOURCE_ORDER.filter((s) => d.sources.has(s))
-  const grants = [...d.grants].sort((a, b) => a.groupName.localeCompare(b.groupName) || a.sandbox.localeCompare(b.sandbox) || a.key.localeCompare(b.key))
+  const grants = [...d.grants].sort((a, b) => a.sandbox.localeCompare(b.sandbox) || a.key.localeCompare(b.key))
   return (
     <li>
       <button onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={detailsId}
@@ -117,16 +116,15 @@ function DestinationRow({ d, total, onOpen }) {
               </div>
               <div className="overflow-hidden rounded-md border border-border bg-card">
                 <table className="w-full table-fixed text-left text-xs" aria-label={`Sandbox access to ${d.host}`}>
-                  <colgroup><col className="w-[22%]" /><col className="w-[23%]" /><col className="w-[25%]" /><col className="w-[15%]" /><col className="w-[15%]" /></colgroup>
+                  <colgroup><col className="w-[35%]" /><col className="w-[35%]" /><col className="w-[15%]" /><col className="w-[15%]" /></colgroup>
                   <thead className="border-b border-border bg-muted/40 text-[11px] text-muted-foreground">
-                    <tr>{["Sandbox", "Group", "Rule", "Source"].map((label) => <th key={label} scope="col" className="h-8 px-3 font-medium">{label}</th>)}<th scope="col" className="px-3"><span className="sr-only">Actions</span></th></tr>
+                    <tr>{["Sandbox", "Rule", "Source"].map((label) => <th key={label} scope="col" className="h-8 px-3 font-medium">{label}</th>)}<th scope="col" className="px-3"><span className="sr-only">Actions</span></th></tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {grants.map((grant) => {
                       const source = SOURCE[sourceOf(grant.key)]
                       return <tr key={`${grant.sandbox}:${grant.key}`} className="transition-colors hover:bg-muted/30 focus-within:bg-muted/30">
                         <td className="h-10 px-3"><span className="flex min-w-0 items-center gap-2"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium" title={grant.sandbox}>{grant.sandbox}</span></span></td>
-                        <td className="px-3 text-muted-foreground"><span className="block truncate" title={grant.groupName}>{grant.groupName}</span></td>
                         <td className="px-3"><span className="block truncate font-mono text-[11px] text-muted-foreground" title={displayName(grant.key)}>{displayName(grant.key)}</span></td>
                         <td className="px-3 text-muted-foreground"><span className="flex items-center gap-1.5"><span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", source.swatch)} />{source.label}</span></td>
                         <td className="px-2 text-right"><Button variant="ghost" size="sm" className="h-7 text-[11px] text-muted-foreground" aria-label={`View ${grant.sandbox} policy for ${displayName(grant.key)}`} onClick={() => onOpen(grant.sandbox)}>View policy<ArrowUpRight className="size-3" /></Button></td>
@@ -143,30 +141,7 @@ function DestinationRow({ d, total, onOpen }) {
   )
 }
 
-function DestinationGroup({ group, onOpen, initiallyOpen }) {
-  const [open, setOpen] = React.useState(initiallyOpen)
-  const [limit, setLimit] = React.useState(50)
-  const id = React.useId()
-  const assignments = new Set(group.destinations.flatMap((d) => d.grants.map((g) => `${g.sandbox}:${g.key}`))).size
-  return <section aria-label={group.name} className="border-b border-border">
-    <button aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)}
-      className="flex min-h-12 w-full items-center gap-3 bg-muted/40 px-6 py-3 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-      <ChevronRight aria-hidden="true" className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-90")} />
-      <Users aria-hidden="true" className="size-4 text-muted-foreground" />
-      <span className="text-xs font-semibold">{group.name}</span>
-      <span className="text-[11px] text-muted-foreground">{plural(group.total, "sandbox", "sandboxes")}</span>
-      <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">{plural(group.destinations.length, "destination")} · {plural(assignments, "rule assignment")}</span>
-    </button>
-    {open && <div id={id}>
-      <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
-      <ul className="divide-y divide-border/60">{group.destinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={group.total} onOpen={onOpen} />)}</ul>
-      {group.destinations.length > limit && <Button variant="ghost" className="h-9 w-full rounded-none text-xs text-muted-foreground" onClick={() => setLimit((value) => value + 50)}>Show {Math.min(50, group.destinations.length - limit)} more destinations</Button>}
-    </div>}
-  </section>
-}
-
-function BlockedRow({ b, groups, onDecide }) {
-  const inGroups = groups.filter((g) => b.groupIds.has(g.id))
+function BlockedRow({ b, onDecide }) {
   const canRule = b.programs.size > 0
   return (
     <li className={cn("grid items-center gap-4 px-6 py-2", BLOCK_COLS)}>
@@ -189,13 +164,8 @@ function BlockedRow({ b, groups, onDecide }) {
             <DropdownMenuGroup>
               <DropdownMenuLabel>Allow {b.host}</DropdownMenuLabel>
               <DropdownMenuItem disabled={!canRule} onClick={() => onDecide("allow-org", b)}>
-                <Building2 />Everywhere<span className="ml-auto text-[11px] text-muted-foreground">organization</span>
+                <Building2 />Everywhere<span className="ml-auto text-[11px] text-muted-foreground">all sandboxes</span>
               </DropdownMenuItem>
-              {inGroups.map((g) => (
-                <DropdownMenuItem key={g.id} disabled={!canRule} onClick={() => onDecide("allow-group", b, g)}>
-                  <Users />{g.name}<span className="ml-auto text-[11px] text-muted-foreground">group</span>
-                </DropdownMenuItem>
-              ))}
               {b.sandboxes.size === 1 && (
                 <DropdownMenuItem onClick={() => onDecide("allow-one", b)}>
                   <Globe2 />Only {[...b.sandboxes][0]}
@@ -204,7 +174,7 @@ function BlockedRow({ b, groups, onDecide }) {
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="sm" className="h-7 rounded-lg px-2.5 text-[12px] text-muted-foreground hover:text-red-700" onClick={() => onDecide("block-org", b)} title="Add to the organization's blocked hosts">
+        <Button variant="ghost" size="sm" className="h-7 rounded-lg px-2.5 text-[12px] text-muted-foreground hover:text-red-700" onClick={() => onDecide("block-org", b)} title="Add to the shared blocked hosts">
           Block everywhere
         </Button>
       </span>
@@ -249,16 +219,9 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
   const points = React.useMemo(() => bucketEgress(events, 15, now), [events, now])
   const sandboxes = fleet.sandboxes
   const total = sandboxes.length
-  const groups = org?.groups ?? []
 
   const { destinations, blocked, perSandbox } = React.useMemo(() => {
     const dest = new Map()
-    const groupNames = new Map((org?.groups ?? []).map((group) => [group.id, group.name]))
-    const groupTotals = new Map()
-    for (const sandbox of sandboxes) {
-      const id = sandbox.labels?.[GROUP_LABEL] || null
-      groupTotals.set(id, (groupTotals.get(id) ?? 0) + 1)
-    }
     const allowedBy = new Map()
     const perSandbox = new Map()
     for (const s of sandboxes) {
@@ -269,15 +232,11 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
         counts[src] = (counts[src] ?? 0) + 1
         for (const e of r.endpoints) {
           hosts.add(e.host)
-          const d = dest.get(e.host) ?? { host: e.host, sources: new Set(), access: new Set(), ports: new Set(), sandboxes: new Set(), groupMembers: new Map(), grants: [], hits: 0, hitsBySandbox: new Map() }
+          const d = dest.get(e.host) ?? { host: e.host, sources: new Set(), access: new Set(), ports: new Set(), sandboxes: new Set(), grants: [], hits: 0, hitsBySandbox: new Map() }
           d.sources.add(src); d.access.add(e.access); e.ports.forEach((p) => d.ports.add(p)); d.sandboxes.add(s.name)
-          const groupId = s.labels?.[GROUP_LABEL] || null
-          const groupName = groupId ? groupNames.get(groupId) ?? groupId : "No group"
-          if (!d.groupMembers.has(groupId)) d.groupMembers.set(groupId, new Set())
-          d.groupMembers.get(groupId).add(s.name)
           let grant = d.grants.find((g) => g.sandbox === s.name && g.key === r.key)
           if (!grant) {
-            grant = { sandbox: s.name, key: r.key, groupName, groupId, source: src, access: [], ports: [] }
+            grant = { sandbox: s.name, key: r.key, source: src, access: [], ports: [] }
             d.grants.push(grant)
           }
           grant.access.push(e.access)
@@ -289,16 +248,14 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       perSandbox.set(s.name, { counts, blocked: 0 })
     }
     const block = new Map()
-    const groupOf = new Map(sandboxes.map((s) => [s.name, s.labels?.[GROUP_LABEL] ?? null]))
     for (const e of events) {
       if (e.kind !== "audit" || !e.verdict) continue
       const host = hostOf(e.destination)
       if (!host || isIp(host)) continue
       if (e.verdict === "allowed") { const d = dest.get(host); if (d) { d.hits += 1; d.hitsBySandbox.set(e.sandbox, (d.hitsBySandbox.get(e.sandbox) ?? 0) + 1) }; continue }
       if (e.verdict !== "denied" || allowedBy.get(e.sandbox)?.has(host)) continue
-      const b = block.get(host) ?? { host, port: portOf(e.destination), sandboxes: new Set(), groupIds: new Set(), attempts: 0, programs: new Set(), lastAt: null }
+      const b = block.get(host) ?? { host, port: portOf(e.destination), sandboxes: new Set(), attempts: 0, programs: new Set(), lastAt: null }
       b.attempts += 1; b.sandboxes.add(e.sandbox)
-      if (groupOf.get(e.sandbox)) b.groupIds.add(groupOf.get(e.sandbox))
       if (e.binary) b.programs.add(e.binary)
       if (e.at && (!b.lastAt || e.at > b.lastAt)) b.lastAt = e.at
       block.set(host, b)
@@ -306,7 +263,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
     }
     const decided = new Set(org?.org?.blocked ?? [])
     return {
-      destinations: [...dest.values()].map((d) => ({ ...d, groups: [...d.groupMembers].map(([id, members]) => ({ id, name: id ? groupNames.get(id) ?? id : "No group", count: members.size, total: groupTotals.get(id) })).sort((a, b) => a.name.localeCompare(b.name)) })).sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.hits - a.hits || a.host.localeCompare(b.host)),
+      destinations: [...dest.values()].sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.hits - a.hits || a.host.localeCompare(b.host)),
       blocked: [...block.values()].filter((b) => !decided.has(b.host)).sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.attempts - a.attempts),
       perSandbox,
     }
@@ -314,12 +271,12 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
 
   const enforced = sandboxes.filter((s) => s.status === "loaded").length
   const needle = query.trim().toLowerCase()
-  const destinationGroups = React.useMemo(() => groupDestinations(destinations, query, sourceFilter), [destinations, query, sourceFilter])
-  const destinationCount = new Set(destinationGroups.flatMap((group) => group.destinations.map((d) => d.host))).size
+  const filteredDestinations = destinations.filter((d) => (sourceFilter === "all" || d.sources.has(sourceFilter)) && (!needle || [d.host, ...d.grants.flatMap((g) => [g.sandbox, g.key])].join(" ").toLowerCase().includes(needle)))
+  const destinationCount = filteredDestinations.length
   const sourceOptions = [{ id: "all", label: "All" }, ...SOURCE_ORDER.filter((s) => destinations.some((d) => d.sources.has(s))).map((s) => ({ id: s, label: SOURCE[s].label }))]
 
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
-  const filteredBoxes = sandboxes.filter((s) => !needle || [s.name, groups.find((g) => g.id === s.labels?.[GROUP_LABEL])?.name, s.labels?.[GROUP_LABEL]].join(" ").toLowerCase().includes(needle))
+  const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
   const count = view === "destinations" ? destinationCount : view === "blocked" ? filteredBlocked.length : filteredBoxes.length
   const allCount = view === "destinations" ? destinations.length : view === "blocked" ? blocked.length : total
   const filtering = Boolean(query || (view === "destinations" && sourceFilter !== "all"))
@@ -346,32 +303,30 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
         <div className="relative mr-auto w-full sm:w-64">
           <Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-          <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={view === "sandboxes" ? "Search name, group…" : "Search destination, group, rule…"} aria-label="Search egress" className="h-9 pr-8 pl-9 text-xs" />
+          <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={view === "sandboxes" ? "Search sandbox…" : "Search destination, sandbox, rule…"} aria-label="Search egress" className="h-9 pr-8 pl-9 text-xs" />
           {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
         </div>
         {view === "destinations" && <select aria-label="Filter by source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{sourceOptions.map((o) => <option key={o.id} value={o.id}>{o.id === "all" ? "All sources" : o.label}</option>)}</select>}
         {filtering && <Button variant="ghost" size="sm" onClick={clear}><X className="size-3" />Clear</Button>}
         <Button variant="ghost" size="icon-sm" aria-label="Refresh egress" onClick={onRefresh}><RefreshCw className="size-3.5" /></Button>
         <Button variant="outline" size="sm" onClick={() => onOpen("global")}><Network className="size-3.5" />Global policy</Button>
-        <Button size="sm" className="bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={() => onNavigate("organization")}><Building2 className="size-3.5" />Organization policy</Button>
       </div>
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {count === 0 ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering && <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
-            {view === "destinations" && destinationGroups.map((group) => (
-              <DestinationGroup key={`${group.id ?? "ungrouped"}:${query}:${sourceFilter}`} group={group} onOpen={onOpen} initiallyOpen={destinationGroups.length === 1 || filtering} />
-            ))}
+            {view === "destinations" && <>
+              <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
+              <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
+            </>}
             {view === "blocked" && <>
               <ColumnHead className={BLOCK_COLS}><span>Destination</span><span>Sandboxes</span><span>Attempts</span><span>Program</span><span className="text-right">Actions</span></ColumnHead>
-              <ul className="divide-y divide-border/60">{filteredBlocked.slice(0, limit).map((b) => <BlockedRow key={b.host} b={b} groups={groups} onDecide={onDecide} />)}</ul>
+              <ul className="divide-y divide-border/60">{filteredBlocked.slice(0, limit).map((b) => <BlockedRow key={b.host} b={b} onDecide={onDecide} />)}</ul>
             </>}
             {view === "sandboxes" && <>
-              <ColumnHead className={BOX_COLS}><span>Sandbox</span><span>Group</span><span>Rules by source</span><span>Policy</span><span className="text-right">Blocked</span><span /></ColumnHead>
+              <ColumnHead className={BOX_COLS}><span>Sandbox</span><span>Rules by source</span><span>Policy</span><span className="text-right">Blocked</span><span /></ColumnHead>
           <ul className="divide-y divide-border/70">
             {filteredBoxes.slice(0, limit).map((s) => {
               const info = perSandbox.get(s.name) ?? { counts: {}, blocked: 0 }
-              const groupId = s.labels?.[GROUP_LABEL]
-              const group = groups.find((g) => g.id === groupId)
               return (
                 <li key={s.name}>
                   <button onClick={() => onOpen(s.name)} className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", BOX_COLS)}>
@@ -379,7 +334,6 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
                       <span className={cn("size-2 shrink-0 rounded-[3px]", styleOf(s.phase).cell)} aria-hidden="true" />
                       <span className="truncate font-mono text-xs">{s.name}</span>
                     </span>
-                    <span className="truncate text-xs text-muted-foreground">{group?.name ?? groupId ?? "—"}</span>
                     <span className="items-center gap-3 flex">
                       {SOURCE_ORDER.filter((k) => info.counts[k]).map((k) => (
                         <span key={k} className="flex items-center gap-1.5 text-[12px] tabular-nums" title={SOURCE[k].label}><span className={cn("size-1.5 rounded-full", SOURCE[k].swatch)} />{info.counts[k]}</span>
@@ -396,12 +350,12 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
             })}
           </ul>
             </>}
-            {view !== "destinations" && count > limit && <button onClick={() => setLimit((n) => n + 100)} className="w-full border-t border-border py-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">Show {Math.min(100, count - limit)} more</button>}
+            {count > limit && <button onClick={() => setLimit((n) => n + 100)} className="w-full border-t border-border py-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">Show {Math.min(100, count - limit)} more</button>}
           </div>
         )}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-6 py-2 text-[11px] text-muted-foreground">
-        <span><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}{view === "destinations" && ` across ${plural(destinationGroups.length, "group")}`}</span>
+        <span><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}</span>
         <span className="hidden sm:inline">{enforced}/{total} policies enforced · ⌘K to search</span>
       </div>
     </div>
@@ -512,7 +466,7 @@ function RuleRow({ rule, onOp, onDelete, busy, locked, managedBy, onManage }) {
                   </span>
                 ))}
                 <span className="ml-auto flex items-center gap-2">
-                  {managedBy && <button onClick={onManage} className="text-[12px] text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">Managed in {managedBy}</button>}
+                  {managedBy && (onManage ? <button onClick={onManage} className="text-[12px] text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">Managed in {managedBy}</button> : <span className="text-[12px] text-muted-foreground">Managed in {managedBy} · Enterprise Version</span>)}
                   {!locked && onDelete && <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-destructive" disabled={busy} onClick={onDelete}><Trash2 />Delete</Button>}
                 </span>
               </div>
@@ -655,7 +609,7 @@ function FilesStrip({ filesystem, landlock, failureMode }) {
 
 const FILTERS = [{ id: "all", label: "All" }, ...SOURCE_ORDER.map((s) => ({ id: s, label: SOURCE[s].label }))]
 
-function SandboxDetail({ name, sandbox, events, groups, onBack, onNavigate, onDraft, reloadSignal }) {
+function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, reloadSignal }) {
   const [policy, setPolicy] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [deleting, setDeleting] = React.useState(null)
@@ -709,7 +663,6 @@ function SandboxDetail({ name, sandbox, events, groups, onBack, onNavigate, onDr
   }, [events, name, policy]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const globalActive = policy?.source === "global"
-  const group = groups.find((g) => g.id === sandbox?.labels?.[GROUP_LABEL])
   const counts = Object.fromEntries(FILTERS.map((f) => [f.id, rules.filter((r) => f.id === "all" || sourceOf(r.key) === f.id).length]))
   const shown = rules.filter((r) => filter === "all" || sourceOf(r.key) === filter)
 
@@ -723,7 +676,7 @@ function SandboxDetail({ name, sandbox, events, groups, onBack, onNavigate, onDr
           <header className="flex flex-wrap items-end gap-x-6 gap-y-4">
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                <span className={cn("size-2 rounded-[3px]", styleOf(sandbox?.phase).cell)} />{group ? group.name : "No group"}
+                <span className={cn("size-2 rounded-[3px]", styleOf(sandbox?.phase).cell)} />Sandbox
               </p>
               <h2 className="mt-2 truncate text-xl font-semibold tracking-tight">{name}</h2>
               <div className="mt-4 flex flex-wrap items-center gap-4">
@@ -790,7 +743,7 @@ function SandboxDetail({ name, sandbox, events, groups, onBack, onNavigate, onDr
                     <RuleRow key={rule.key} rule={rule} busy={busy} locked={source !== "own" || globalActive}
                       onOp={(op) => apply([op])} onDelete={source === "own" ? () => setDeleting(rule.key) : null}
                       managedBy={source === "secret" ? "Secrets" : source !== "own" ? "Organization" : null}
-                      onManage={() => onNavigate(source === "secret" ? "secrets" : "organization")} />
+                      onManage={source === "secret" ? () => onNavigate("secrets") : undefined} />
                   )
                 })}
               </Card>
@@ -821,7 +774,7 @@ function SandboxDetail({ name, sandbox, events, groups, onBack, onNavigate, onDr
 
 // ---- page -------------------------------------------------------------------
 
-// A fleet decision writes one organization or group rule, which every sandbox
+// A fleet decision writes one shared rule, which every sandbox
 // it covers then enforces.
 function ruleFor(b) {
   const web = b.port === 443 || b.port === 80
@@ -872,18 +825,18 @@ export function EgressView({ onNavigate }) {
   const open = (name) => { setScope(name); scroller.current?.scrollTo({ top: 0 }) }
   const back = () => { setScope(null); loadFleet(); scroller.current?.scrollTo({ top: 0 }) }
 
-  function decide(kind, b, group) {
+  function decide(kind, b) {
     if (kind === "allow-one") {
       const name = [...b.sandboxes][0]
       setScope(name)
       setEditor({ sandbox: name, initial: ruleFor(b) })
       return
     }
-    setPending({ kind, b, group })
+    setPending({ kind, b })
   }
 
   async function confirmDecision() {
-    const { kind, b, group } = pending
+    const { kind, b } = pending
     try {
       const current = org ?? (await api.org())
       let result
@@ -891,10 +844,6 @@ export function EgressView({ onNavigate }) {
         const rule = ruleFor(b)
         if (current.org.rules.some((r) => r.name === rule.name)) rule.name = `${rule.name}-${b.port}`
         result = await api.saveOrg({ ...current.org, rules: [...current.org.rules, rule] })
-      } else if (kind === "allow-group") {
-        const rule = ruleFor(b)
-        if (group.rules.some((r) => r.name === rule.name)) rule.name = `${rule.name}-${b.port}`
-        result = await api.saveGroup({ ...group, rules: [...group.rules, rule] })
       } else if (kind === "block-org") {
         result = await api.saveOrg({ ...current.org, blocked: [...current.org.blocked, b.host] })
       }
@@ -907,14 +856,14 @@ export function EgressView({ onNavigate }) {
   }
 
   const total = fleet?.sandboxes?.length ?? 0
-  const affected = pending?.kind === "allow-group" ? (fleet?.sandboxes ?? []).filter((s) => s.labels?.[GROUP_LABEL] === pending.group.id).length : total
+  const affected = total
 
   return (
     <div ref={scroller} className="h-[calc(100svh-3.5rem)] overflow-y-auto">
       {scope === "global" ? <GlobalPanel onBack={back} />
         : scope ? (
           <SandboxDetail key={scope} name={scope} sandbox={fleet?.sandboxes?.find((s) => s.name === scope) ?? live.sandboxes?.find((s) => s.name === scope)}
-            events={live.events} groups={org?.groups ?? []} onBack={back} onNavigate={onNavigate} reloadSignal={signal}
+            events={live.events} onBack={back} onNavigate={onNavigate} reloadSignal={signal}
             onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} />
         ) : !fleet ? <p role="status" className="py-24 text-center text-sm text-muted-foreground">Loading…</p>
         : fleet.error ? <p role="alert" className="py-24 text-center text-sm text-muted-foreground">{fleet.error}</p>
@@ -932,7 +881,7 @@ export function EgressView({ onNavigate }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pending?.kind === "block-org" ? `Block ${pending?.b.host} everywhere?` : pending?.kind === "allow-group" ? `Allow ${pending?.b.host} for ${pending?.group.name}?` : `Allow ${pending?.b.host} everywhere?`}
+              {pending?.kind === "block-org" ? `Block ${pending?.b.host} everywhere?` : `Allow ${pending?.b.host} everywhere?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pending?.kind === "block-org" ? "No sandbox or rule will be able to reach it." : `Read-only, for ${[...(pending?.b.programs ?? [])].map(program).join(", ")}.`} Applies to {plural(affected, "sandbox", "sandboxes")}.

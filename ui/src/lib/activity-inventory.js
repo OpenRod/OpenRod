@@ -1,9 +1,14 @@
+import { AGENTS } from "./agents.js"
+
 export const activityKey = (e) => `${e.sandbox}|${e.at}|${e.message}`
 const REASONS = { policy_dns_ineligible: 'no rule allows this host', transparent_tcp_policy_denied: 'no rule allows this connection' }
 export function activityRow(event) {
   const why = event.verdict === 'denied' ? REASONS[event.reason] ?? event.reason ?? '' : event.policy?.replace(/^_provider_/, 'provider · ') ?? ''
-  const values = { time: event.at ?? '', verdict: event.verdict ?? '', sandbox: event.sandbox ?? '', program: event.binary?.split('/').pop() || (event.category === 'HTTP' ? event.method : '') || '', destination: event.destination ?? event.detail ?? '', why }
-  return { event, key: activityKey(event), values, timestamp: Date.parse(event.at), search: [...Object.values(values), event.binary, event.reason, event.detail].join(' ').toLowerCase() }
+  const program = event.binary?.split('/').pop() || ''
+  const known = AGENTS.find((agent) => agent.commands.includes(program.toLowerCase()) && program.toLowerCase() !== 'agent')
+  const agent = known ? { name: known.name, logo: `/logos/agents/${known.logo}.svg` } : null
+  const values = { time: event.at ?? '', verdict: event.verdict ?? '', sandbox: event.sandbox ?? '', agent: agent?.name ?? '', action: [known ? '' : program, event.method].filter(Boolean).join(' · '), destination: event.destination ?? event.detail ?? '', why }
+  return { event, agent, key: activityKey(event), values, timestamp: Date.parse(event.at), search: [...Object.values(values), event.binary, event.reason, event.detail].join(' ').toLowerCase() }
 }
 export function filterActivity(rows, { query = '', direction = 'out', sandboxes = [], verdicts = [], filters = {}, range = 'all', from = '', to = '', now = Date.now(), sort = { key: 'time', direction: 'desc' } } = {}) {
   const names = new Set(sandboxes)

@@ -37,6 +37,21 @@ Templates is also a local environment library, with a separate **Image templates
 
 Run recipe/storage checks with `node --test server/image-templates.test.js` from `ui/`. Runtime smoke checks have covered a real Node/Python build, uploaded archive, registry pull, local import, and a temporary OpenShell sandbox with working files/environment and writable workspace.
 
+## Sandbox attribution
+
+New sandboxes created through this console store `openshell.console/created-by`
+and `openshell.console/owner` in their gateway metadata labels. Both initially
+identify the local OS account running the console server. Set
+`OPENSHELL_CONSOLE_OPERATOR` before starting the server to use a specific user or
+service ID instead. The server supplies these values; browser input cannot
+choose the creator. Sandbox summary and Details show **Created by** separately
+from **Owner**.
+
+This is local operator attribution, not an authenticated browser user or an
+immutable audit record. There is no owner reassignment UI yet. Existing sandboxes
+and sandboxes created outside the console retain their existing metadata;
+missing attribution displays “Not reported”.
+
 ## How it connects
 
 The browser only talks to `/api/os/*` on this dev server. `server/` holds an
@@ -57,3 +72,7 @@ route accepts a size-limited binary stream with the same origin/header checks.
   back to Docker Hub and the sandbox errors.
 - Only approvals can be undone. Rejections are final; a rejected host shows
   up again only if the sandbox retries it.
+
+### Installed agent detection
+
+Opening a sandbox's graph or details runs a read-only executable inventory inside ready sandboxes and refreshes it every 30 seconds while open. This finds agents shipped in the image and subsequently installed agents, including removals. It checks PATH and common user installation directories for Claude Code, Codex, GitHub Copilot, Cursor Agent, Gemini CLI, OpenCode, OpenClaw, Pi, Antigravity CLI, Kiro CLI, Factory Droid, and Aider; custom names or locations outside these paths are not automatically discovered. No agent is launched and no credentials are read. A completed scan takes precedence over launch labels; failed/stopped scans retain the last process-cached result as last detected, and an empty successful scan is shown separately from an unavailable scan. Checks have a timeout and share a short cache across tabs. The inventory establishes executable presence, not authentication or agent health, and does not distinguish image provenance from later installation.

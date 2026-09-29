@@ -43,7 +43,7 @@ const Group = React.forwardRef(function Group({ title, count, icon: Icon, summar
   </section>
 })
 
-export function Perimeter({ name, phase, agents = [], allowed, denied, onAllow, compact = false, fill = false, owner = "Not reported", secrets = [], gateway }) {
+export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inventory not checked", allowed, denied, onAllow, compact = false, fill = false, owner = "Not reported", secrets = [], gateway }) {
   const container = React.useRef(null)
   const core = React.useRef(null)
   const hub = React.useRef(null)
@@ -60,7 +60,7 @@ export function Perimeter({ name, phase, agents = [], allowed, denied, onAllow, 
       </div>
       <div ref={container} className={cn("relative mx-auto grid w-full flex-1 max-w-[1020px] grid-cols-1 items-center gap-5 px-4 @2xl:grid-cols-[minmax(0,1fr)_160px_minmax(0,1.3fr)] @2xl:gap-x-8 @2xl:gap-y-7 @2xl:px-6", compact ? "py-3" : "py-7")}>
         <div ref={groups.agents} aria-label="Agent types" className="relative z-10 order-3 flex flex-col items-center gap-7 @2xl:order-none @2xl:col-start-1 @2xl:row-start-1 @2xl:row-span-4">
-          {(agents.length ? agents : [{ name: "Not reported", logo: null }]).map((agent) => <div key={agent.name} data-agent-node className="flex max-w-full flex-col items-center gap-2 bg-card px-3 py-2" title={`AI agent: ${agent.name}`}>
+          {(agents.length ? agents : [{ name: agentStatus, logo: null }]).map((agent) => <div key={agent.name} data-agent-node className="flex max-w-full flex-col items-center gap-2 bg-card px-3 py-2" title={`${agent.name} · ${agentStatus}`}>
             {agent.logo ? <img src={agent.logo} alt="" className="size-8 object-contain" /> : <Bot className="size-7 text-muted-foreground" strokeWidth={1.3} aria-hidden="true" />}
             <span className="max-w-full break-words text-center text-xs font-medium">{agent.name}</span>
           </div>)}

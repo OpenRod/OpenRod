@@ -1,10 +1,13 @@
+import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
+import { IMAGE_TEMPLATE_ID, IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
 import { sessionLaunch } from '../src/lib/sandbox-session.js'
+import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
-import { imageTemplateRoute, importImageArchive, imageTemplateForLaunch } from './image-templates.js'
+import { imageTemplateRoute, importImageArchive, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 
 // These routes act with the operator's gateway certificate. A loopback Host
 // header alone is not proof of a local caller when Vite is bound to a LAN
@@ -53,7 +56,7 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 async function listSandboxes() {
   const { client } = await gateway()
   const response = await client.raw.listSandboxes({ workspaceScope: WORKSPACE })
-  return response.sandboxes.map(sandboxView).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+  return nameSandboxImages(response.sandboxes.map(sandboxView), await listImageTemplates().catch(() => [])).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
 }
 
 // Deleted sandboxes have no draft or log buffer worth asking for.
@@ -87,14 +90,15 @@ async function overview() {
 }
 
 async function sandboxDetail(name) {
-  const { client } = await gateway()
+  const { client, target } = await gateway()
   const [sandbox, config] = await Promise.all([
     client.raw.getSandbox({ name, workspaceScope: WORKSPACE }),
     client.sandbox.getConfig(name).catch(() => null),
   ])
-  const view = sandboxView(sandbox.sandbox)
+  const [view] = nameSandboxImages([sandboxView(sandbox.sandbox)], await listImageTemplates().catch(() => []))
   return {
     ...view,
+    agentInventory: await agentInventory(client, view, target.endpoint),
     policy: policyView(config?.policy),
     policySource: config?.policySource ?? null,
     policyHash: config?.policyHash ?? null,
@@ -118,8 +122,10 @@ async function activity(only) {
 
 async function createSandbox(input) {
   const { client } = await gateway()
+  let imageLabels = {}
   if (input.imageTemplate) {
     const saved = await imageTemplateForLaunch(String(input.imageTemplate))
+    imageLabels = { [IMAGE_TEMPLATE_ID]: saved.id, [IMAGE_TEMPLATE_NAME]: saved.recipe.name }
     // A content-addressed image cannot silently drift when a tag is rebuilt.
     input = { ...input, image: saved.inspection.imageId, session: saved.recipe.command?.trim() === 'claude' ? 'claude' : !saved.recipe.command?.trim() ? 'shell' : null, command: saved.recipe.command ? ['/bin/bash', '-lc', saved.recipe.command] : [], environment: Object.fromEntries(saved.recipe.environment.map((e) => [e.name, e.value])) }
   }
@@ -139,10 +145,11 @@ async function createSandbox(input) {
   // resolved here from stored policy, never accepted raw from the browser.
   const plan = await planSandbox({ group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null })
   const template = plan.template
+  const labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels() }
   await enforcePolicyOnly(client)
   const ref = await client.sandbox.create({
     policy: plan.policy,
-    labels: { ...plan.labels, ...launch.labels },
+    labels,
     name,
     ...(image ? { image } : {}),
     providers,
@@ -157,7 +164,7 @@ async function createSandbox(input) {
   for (const door of template?.ingress ?? []) {
     try { opened.push({ ...door, ...(await expose({ sandbox: ref.name, name: door.name, port: door.port, closeAfterMinutes: door.closeAfterMinutes ?? null })) }) } catch { /* a door that failed to open is simply missing from `opened` */ }
   }
-  return { name: ref.name, phase: ref.phase, opened, labels: launch.labels }
+  return { name: ref.name, phase: ref.phase, opened, labels }
 }
 
 async function lifecycle(name, action) {

@@ -314,7 +314,7 @@ export function FleetFloor({ sandboxes, groupBy, lens, traffic, pending, match, 
               left: Math.min(Math.max(8, hoverCell.x - 20), (width || 800) - 240),
             }}>
             <p className="font-mono text-[11px] font-medium">{hovered.name}</p>
-            <p className="text-[10px] opacity-70">{PHASE_LABEL[hovered.phase]} · {imageName(hovered.image)}</p>
+            <p className="text-[10px] opacity-70">{PHASE_LABEL[hovered.phase]} · {imageName(hovered.image, hovered.imageTemplateName)}</p>
             {(hoverTraffic || hoverAsks > 0) && (
               <p className="mt-0.5 font-mono text-[10px] tabular-nums">
                 {hoverTraffic ? <span className="opacity-80">{count(hoverTraffic.allowed)}↑ </span> : null}
