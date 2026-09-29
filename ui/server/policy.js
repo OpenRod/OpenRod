@@ -443,7 +443,14 @@ export const BUILTIN_TEMPLATES = [
     rules: [
       { name: 'github-read', binaries: ['/usr/lib/git-core/git-remote-http', '/usr/lib/git-core/git-remote-https', '/usr/local/bin/claude'],
         endpoints: [
-          { host: 'github.com', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
+          // git clone and fetch POST to git-upload-pack, so GET-only would block them.
+          // Pushing POSTs to git-receive-pack, which stays denied.
+          { host: 'github.com', ports: [443], protocol: 'rest', enforcement: 'enforce',
+            allow: [
+              { method: 'GET', path: '/**' }, { method: 'HEAD', path: '/**' }, { method: 'OPTIONS', path: '/**' },
+              { method: 'POST', path: '/*/*/git-upload-pack' },
+            ],
+            deny: [{ method: '*', path: '/*/*/git-receive-pack' }] },
           { host: 'api.github.com', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
           { host: 'codeload.github.com', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
         ] },
