@@ -15,13 +15,9 @@ async function request(path, { method = "GET", body } = {}) {
 export const api = {
   overview: () => request("/overview"),
   sandbox: (name) => request(`/sandboxes/${encodeURIComponent(name)}`),
-  approvals: () => request("/approvals"),
   activity: (sandbox) => request(`/activity${sandbox ? `?sandbox=${encodeURIComponent(sandbox)}` : ""}`),
   create: (spec) => request("/sandboxes", { method: "POST", body: spec }),
   lifecycle: (name, action) => request(`/sandboxes/${encodeURIComponent(name)}/${action}`, { method: "POST", body: {} }),
-  approve: (chunk) => request("/approvals/approve", { method: "POST", body: { sandbox: chunk.sandbox, chunkId: chunk.id, reviewToken: chunk.reviewToken } }),
-  reject: (chunk, reason) => request("/approvals/reject", { method: "POST", body: { sandbox: chunk.sandbox, chunkId: chunk.id, reason } }),
-  undo: (chunk) => request("/approvals/undo", { method: "POST", body: { sandbox: chunk.sandbox, chunkId: chunk.id } }),
 
   // Policy center
   fleetPolicy: () => request("/policy/fleet"),
@@ -41,6 +37,32 @@ export const api = {
   attachSecret: (name, sandbox, attach) => request(`/secrets/${encodeURIComponent(name)}/${attach ? "attach" : "detach"}`, { method: "POST", body: { sandbox } }),
   importProfile: (id) => request("/profiles/import", { method: "POST", body: { id } }),
   templates: () => request("/templates"),
+  imageTemplates: () => request("/image-templates"),
+  localImages: () => request("/image-templates/local-images"),
+  saveImageTemplate: (body) => request("/image-templates", { method: "POST", body }),
+  buildImageTemplate: (id) => request(`/image-templates/${encodeURIComponent(id)}/build`, { method: "POST", body: {} }),
+  cancelImageBuild: (id) => request(`/image-templates/${encodeURIComponent(id)}/cancel`, { method: "POST", body: {} }),
+  deleteImageTemplate: (id) => request(`/image-templates/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
+  importImageArchive: async (id, file, onProgress, signal) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", `/api/os/image-templates/${encodeURIComponent(id)}/archive`)
+    xhr.setRequestHeader("content-type", "application/octet-stream")
+    xhr.setRequestHeader("x-openshell-console", "1")
+    const abort = () => xhr.abort()
+    signal?.addEventListener("abort", abort, { once: true })
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(Math.round(event.loaded / event.total * 100)) }
+    xhr.onloadend = () => signal?.removeEventListener("abort", abort)
+    xhr.onerror = () => reject(new Error("Upload failed. Check the local server and retry."))
+    xhr.onabort = () => reject(new Error("Upload cancelled."))
+    xhr.onload = () => {
+      let data
+      try { data = JSON.parse(xhr.responseText) } catch { reject(new Error("Invalid server response.")); return }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data)
+      else reject(new Error(data.error || "Import failed."))
+    }
+    if (signal?.aborted) { reject(new Error("Upload cancelled.")); return }
+    xhr.send(file)
+  }),
   org: () => request("/org"),
   saveOrg: (org) => request("/org", { method: "POST", body: org }),
   saveGroup: (group) => request("/org/groups", { method: "POST", body: group }),

@@ -61,11 +61,6 @@ export function SandboxesView({ onNavigate }) {
   const virtual = useVirtualRows({ count: ordered.length, rowHeight: ROW_HEIGHT })
   React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, status, imageFilter, groupFilter, sort])
   const points = React.useMemo(() => bucketEgress(live.events, 15, now), [live.events, now])
-  const pending = React.useMemo(() => {
-    const result = new Map()
-    for (const item of live.approvals.pending) result.set(item.sandbox, (result.get(item.sandbox) ?? 0) + 1)
-    return result
-  }, [live.approvals.pending])
   const clearFilters = () => { setQuery(""); setStatus("all"); setImageFilter(""); setGroupFilter("") }
   const filtering = query || status !== "all" || imageFilter || groupFilter
   const loading = live.sandboxes === null && !live.overview?.error
@@ -113,7 +108,7 @@ export function SandboxesView({ onNavigate }) {
               </tr></thead>
               <tbody>
                 {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={7} style={{ height: virtual.paddingTop, padding: 0, border: 0 }} /></tr>}
-                {ordered.slice(virtual.start, virtual.end).map((row, index) => <InventoryRow key={row.sandbox.id ?? row.sandbox.name} row={row} now={now} pending={pending.get(row.sandbox.name) ?? 0} index={virtual.start + index + 2} onOpen={setOpened} />)}
+                {ordered.slice(virtual.start, virtual.end).map((row, index) => <InventoryRow key={row.sandbox.id ?? row.sandbox.name} row={row} now={now} index={virtual.start + index + 2} onOpen={setOpened} />)}
                 {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={7} style={{ height: (ordered.length - virtual.end) * ROW_HEIGHT, padding: 0, border: 0 }} /></tr>}
               </tbody>
             </table>}
@@ -126,11 +121,11 @@ export function SandboxesView({ onNavigate }) {
   )
 }
 
-const InventoryRow = React.memo(function InventoryRow({ row, now, pending, index, onOpen }) {
+const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen }) {
   const { sandbox, owner, image, group } = row
   const cell = "h-10 border-b border-border/60 px-4 py-0 align-middle text-muted-foreground"
   return <tr aria-rowindex={index} onClick={() => onOpen(sandbox.name)} className="group cursor-pointer bg-card transition-colors hover:bg-muted/60 focus-within:bg-muted/60">
-    <td className={`${cell} pl-6`}><button aria-haspopup="dialog" aria-label={`Open ${sandbox.name}`} onClick={(event) => { event.stopPropagation(); onOpen(sandbox.name) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span>{pending > 0 && <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800" title={`${pending} pending approvals`}>{pending}</span>}<ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+    <td className={`${cell} pl-6`}><button aria-haspopup="dialog" aria-label={`Open ${sandbox.name}`} onClick={(event) => { event.stopPropagation(); onOpen(sandbox.name) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
     <td className={cell}><span className="flex items-center gap-1.5 whitespace-nowrap"><span className={`size-1.5 shrink-0 rounded-full ${styleOf(sandbox.phase).bar}`} />{PHASE_LABEL[sandbox.phase] ?? "Unknown"}</span></td>
     <td className={cell}><span className="block truncate" title={owner}>{owner}</span></td>
     <td className={cell}><span className="block truncate font-mono text-[11px]" title={image}>{image}</span></td>

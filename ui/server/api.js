@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { WORKSPACE, chunkView, gateway, logView, policyView, providerView, sandboxView } from './gateway.js'
+import { sessionLaunch } from '../src/lib/sandbox-session.js'
+import { WORKSPACE, gateway, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
-import { blockedBy, orgRoute, planSandbox, policyContext, readOrg, setApprovalMode, settledBy, startOrgSweeper } from './org.js'
+import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
+import { imageTemplateRoute, importImageArchive, imageTemplateForLaunch } from './image-templates.js'
 
 // These routes act with the operator's gateway certificate. A loopback Host
 // header alone is not proof of a local caller when Vite is bound to a LAN
@@ -30,11 +32,11 @@ function isMutation(req) {
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const IMAGE = /^[\w./:@-]{1,256}$/
 
-async function body(req) {
+async function body(req, limit = 65536) {
   let raw = ''
   for await (const chunk of req) {
     raw += chunk
-    if (raw.length > 65536) throw Object.assign(new Error('Request too large'), { status: 413 })
+    if (Buffer.byteLength(raw) > limit) throw Object.assign(new Error('Request too large'), { status: 413 })
   }
   return raw ? JSON.parse(raw) : {}
 }
@@ -100,29 +102,6 @@ async function sandboxDetail(name) {
   }
 }
 
-async function approvals() {
-  const { client } = await gateway()
-  const [sandboxes, policy] = await Promise.all([listSandboxes().then(live), policyContext()])
-  const all = await Promise.all(sandboxes.map(async (s) => {
-    try {
-      const draft = await client.raw.getDraftPolicy({ sandbox: s.name, workspaceScope: WORKSPACE })
-      const group = policy.groupOf(s)
-      // A request policy already decides is settled by the background pass;
-      // it is never put in front of a reviewer, even for the seconds before.
-      return draft.chunks.map((chunk) => chunkView(s.name, chunk))
-        .filter((c) => c.status !== 'pending' || !settledBy(policy.org, group, c.endpoints.map((e) => e.host)))
-    } catch { return [] }
-  }))
-  const byTime = (a, b) => (b.lastSeenAt ?? b.createdAt ?? '').localeCompare(a.lastSeenAt ?? a.createdAt ?? '')
-  const byDecision = (a, b) => (b.decidedAt ?? '').localeCompare(a.decidedAt ?? '')
-  // History is capped per sandbox, not fleet-wide, so a busy sandbox cannot
-  // push every other sandbox's decisions out of view.
-  return {
-    pending: all.flat().filter((c) => c.status === 'pending').sort(byTime),
-    decided: all.flatMap((chunks) => chunks.filter((c) => c.status !== 'pending').sort(byDecision).slice(0, 25)).sort(byDecision),
-  }
-}
-
 async function activity(only) {
   const { client } = await gateway()
   const sandboxes = live(await listSandboxes()).filter((s) => !only || s.name === only)
@@ -139,10 +118,18 @@ async function activity(only) {
 
 async function createSandbox(input) {
   const { client } = await gateway()
+  if (input.imageTemplate) {
+    const saved = await imageTemplateForLaunch(String(input.imageTemplate))
+    // A content-addressed image cannot silently drift when a tag is rebuilt.
+    input = { ...input, image: saved.inspection.imageId, session: saved.recipe.command?.trim() === 'claude' ? 'claude' : !saved.recipe.command?.trim() ? 'shell' : null, command: saved.recipe.command ? ['/bin/bash', '-lc', saved.recipe.command] : [], environment: Object.fromEntries(saved.recipe.environment.map((e) => [e.name, e.value])) }
+  }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
   const providers = Array.isArray(input.providers) ? input.providers.map(String) : []
   const command = Array.isArray(input.command) ? input.command.map(String).filter(Boolean) : []
+  const session = input.session ?? (command.length === 1 && command[0] === 'claude' ? 'claude' : command.length === 0 ? 'shell' : null)
+  if (session != null && !['claude', 'shell'].includes(session)) throw fail('Unknown session type.')
+  const launch = sessionLaunch(session, command)
   if (!NAME.test(name)) throw fail('Use lowercase letters, digits and dashes for the name.')
   if (image && !IMAGE.test(image)) throw fail('That image reference is not valid.')
   if (!providers.every((p) => NAME.test(p))) throw fail('Unknown provider name.')
@@ -152,24 +139,25 @@ async function createSandbox(input) {
   // resolved here from stored policy, never accepted raw from the browser.
   const plan = await planSandbox({ group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null })
   const template = plan.template
+  await enforcePolicyOnly(client)
   const ref = await client.sandbox.create({
     policy: plan.policy,
-    labels: plan.labels,
+    labels: { ...plan.labels, ...launch.labels },
     name,
     ...(image ? { image } : {}),
     providers,
-    command,
-    // An agent CLI expects a terminal; `openshell sandbox connect` attaches to it.
-    tty: command.length > 0,
+    command: launch.command,
+    ...(input.imageTemplate ? { environment: input.environment } : {}),
+    // Interactive sessions run through exec, independently of the main process.
+    tty: launch.tty,
   })
-  try { await setApprovalMode(client, ref.name, plan.approvalMode) } catch { /* the background pass sets it again */ }
   // Services a template opens at start go through the same path as opening
   // one by hand, so they get the same auto-close deadline.
   const opened = []
   for (const door of template?.ingress ?? []) {
     try { opened.push({ ...door, ...(await expose({ sandbox: ref.name, name: door.name, port: door.port, closeAfterMinutes: door.closeAfterMinutes ?? null })) }) } catch { /* a door that failed to open is simply missing from `opened` */ }
   }
-  return { name: ref.name, phase: ref.phase, opened }
+  return { name: ref.name, phase: ref.phase, opened, labels: launch.labels }
 }
 
 async function lifecycle(name, action) {
@@ -177,30 +165,6 @@ async function lifecycle(name, action) {
   if (action === 'stop') await client.raw.stopSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
   else if (action === 'start') await client.raw.startSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
   else if (action === 'delete') return client.sandbox.delete(name)
-  return { ok: true }
-}
-
-async function decide(input, action) {
-  const { client } = await gateway()
-  const sandbox = String(input.sandbox ?? '')
-  const chunkId = String(input.chunkId ?? '')
-  if (!NAME.test(sandbox) || !/^[0-9a-f-]{36}$/.test(chunkId)) throw fail('Unknown approval.')
-  const common = { sandbox, chunkId, workspaceScope: WORKSPACE, requestId: randomUUID() }
-  if (action === 'approve') {
-    const draft = await client.raw.getDraftPolicy({ sandbox, workspaceScope: WORKSPACE })
-    const chunk = draft.chunks.find((c) => c.id === chunkId)
-    const hit = chunk && blockedBy(await readOrg(), (chunk.proposedRule?.endpoints ?? []).map((e) => e.host))
-    if (hit) throw fail(`${hit.host} is blocked by organization policy (${hit.pattern}). Change it on the Organization page.`, 403)
-    // The token binds the approval to the proposal the operator actually read;
-    // the gateway rejects it if the proposal has changed since.
-    await client.raw.approveDraftChunk({ ...common, reviewToken: String(input.reviewToken ?? '') })
-  } else if (action === 'reject') {
-    const reason = String(input.reason ?? '').trim()
-    if (!reason) throw fail('A reason is required to reject.')
-    await client.raw.rejectDraftChunk({ ...common, reason: reason.slice(0, 500) })
-  } else if (action === 'undo') {
-    await client.raw.undoDraftChunk(common)
-  }
   return { ok: true }
 }
 
@@ -243,9 +207,7 @@ function createHub() {
       for await (const event of stream) {
         const payload = event.payload
         if (payload.case === 'log') emit('log', logView(name, payload.value))
-        else if (payload.case === 'draftPolicyUpdate') {
-          emit('draft', { sandbox: name, totalPending: payload.value.totalPending, newChunks: payload.value.newChunks, summary: payload.value.summary })
-        } else if (payload.case === 'sandbox') refresh()
+        else if (payload.case === 'sandbox') refresh()
       }
     } catch { /* Stream ended or sandbox went away; the next refresh decides. */ }
     if (watches.get(name) === controller) watches.delete(name)
@@ -294,24 +256,26 @@ export function openshellApi() {
             if (parts[0] === 'overview') return send(res, 200, await overview())
             if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await listSandboxes())
             if (parts[0] === 'sandboxes' && parts.length === 2 && NAME.test(parts[1])) return send(res, 200, await sandboxDetail(parts[1]))
-            if (parts[0] === 'approvals') return send(res, 200, await approvals())
             if (parts[0] === 'activity') {
               const only = url.searchParams.get('sandbox')
               if (only && !NAME.test(only)) throw fail('Unknown sandbox.')
               return send(res, 200, await activity(only))
             }
-            const routed = (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
+            const routed = (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
             if (routed !== undefined) return send(res, 200, routed)
             return send(res, 404, { error: 'Not found' })
           }
+          if (req.method === 'POST' && parts[0] === 'image-templates' && parts.length === 3 && parts[2] === 'archive') {
+            if (req.headers.origin !== `http://${req.headers.host}` || req.headers['content-type'] !== 'application/octet-stream' || req.headers['x-openshell-console'] !== '1') return send(res, 403, { error: 'Request rejected' })
+            return send(res, 200, await importImageArchive(req, parts[1]))
+          }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
-          const input = await body(req)
+          const input = await body(req, parts[0] === 'image-templates' ? 512 * 1024 : 65536)
           if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await createSandbox(input))
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          if (parts[0] === 'approvals' && ['approve', 'reject', 'undo'].includes(parts[1])) return send(res, 200, await decide(input, parts[1]))
-          const routed = (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
         } catch (error) {

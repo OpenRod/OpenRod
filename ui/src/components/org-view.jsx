@@ -11,32 +11,9 @@ import { RuleEditor, RULE_PRESETS, RuleLine } from "@/components/rule-editor"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 
-// What happens to a request that no organization, group or sandbox rule covers.
-const OUTSIDE = [
-  { id: "block", label: "Keep blocked", hint: "Rejected on sight with the reason recorded. Nobody is asked." },
-  { id: "auto", label: "Auto-approve safe ones", hint: "The gateway applies drafts its prover finds clean. The rest wait in Approvals." },
-  { id: "ask", label: "Ask a reviewer", hint: "Every request waits in Approvals." },
-]
-const INHERIT = { id: "inherit", label: "Same as organization", hint: "Follow the organization's setting." }
-
 const lines = (text) => text.split("\n").map((s) => s.trim()).filter(Boolean)
 const slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "es"}`
-
-function Choice({ options, value, onChange, label }) {
-  return (
-    <div>
-      <div role="radiogroup" aria-label={label} className="flex w-fit flex-wrap items-center gap-1 rounded-md border border-border p-0.5">
-        {options.map((o) => (
-          <button key={o.id} type="button" role="radio" aria-checked={value === o.id} onClick={() => onChange(o.id)} title={o.hint}
-            className={`rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${value === o.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-            {o.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 function Section({ title, aside, children }) {
   return (
@@ -107,9 +84,7 @@ function OrgEditor({ data, onSaved, knownPrograms }) {
   return (
     <Editor title="Organization" subtitle={plural(data.total, "sandbox")} icon={Building2}
       dirty={dirty} busy={busy} error={error} onSave={save} saveLabel="Save">
-      <Section title="Requests outside policy">
-        <Choice label="Requests outside policy" options={OUTSIDE} value={draft.outside} onChange={(outside) => setDraft({ ...draft, outside })} />
-      </Section>
+      <p className="text-xs text-muted-foreground">Only configured network access is allowed. All other connections stay blocked.</p>
       <Section title="Allowed for everyone">
         <RuleList rules={draft.rules} onChange={(rules) => setDraft({ ...draft, rules })} knownPrograms={knownPrograms} scope="the organization" />
       </Section>
@@ -164,14 +139,12 @@ function GroupEditor({ data, group, templates, onSaved, onDeleted, knownPrograms
       </div>
 
       <Section title="Files and process">
-        <select value={draft.template} onChange={(e) => setDraft({ ...draft, template: e.target.value })} aria-label="Starting template" title="Applies to new sandboxes only"
+        <select value={draft.template} onChange={(e) => setDraft({ ...draft, template: e.target.value })} aria-label="Security preset" title="Security preset for new sandboxes in this group"
           className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-80">
           {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       </Section>
-      <Section title="Requests outside policy">
-        <Choice label="Requests outside policy" options={[INHERIT, ...OUTSIDE]} value={draft.outside} onChange={(outside) => setDraft({ ...draft, outside })} />
-      </Section>
+      <p className="text-xs text-muted-foreground">Only configured network access is allowed. All other connections stay blocked.</p>
       <Section title="Allowed for this group">
         <RuleList rules={draft.rules} onChange={(rules) => setDraft({ ...draft, rules })} knownPrograms={knownPrograms} scope="this group" />
       </Section>
@@ -223,7 +196,6 @@ function RailRow({ active, onClick, icon: Icon, name, meta, count }) {
   )
 }
 
-const OUTSIDE_SHORT = { block: "keeps blocked", auto: "auto-approves safe", ask: "asks a reviewer", inherit: "follows organization" }
 
 export function OrgView() {
   const live = useLive()
@@ -240,29 +212,28 @@ export function OrgView() {
   const knownPrograms = React.useMemo(() => {
     const set = new Set()
     for (const e of live.events) if (e.binary) set.add(e.binary)
-    for (const c of live.approvals.pending) if (c.binary) set.add(c.binary)
     return [...set].sort()
-  }, [live.events, live.approvals.pending])
+  }, [live.events])
 
   if (!data) return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
   if (data.error) return <p role="alert" className="py-16 text-center text-sm text-muted-foreground">{data.error}</p>
 
   const group = creating ?? data.groups.find((g) => g.id === selected) ?? null
-  const startGroup = () => { setCreating({ isNew: true, id: "", name: "", description: "", template: "locked-down", rules: [], outside: "inherit" }); setSelected("new") }
+  const startGroup = () => { setCreating({ isNew: true, id: "", name: "", description: "", template: "locked-down", rules: [], outside: "block" }); setSelected("new") }
 
   return (
     <div className="flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <nav aria-label="Policy levels" className="flex max-h-56 shrink-0 flex-col overflow-y-auto border-b border-border p-2.5 md:max-h-none md:w-64 md:border-r md:border-b-0">
           <RailRow active={selected === "org"} onClick={() => { setCreating(null); setSelected("org") }} icon={Building2} name="Organization"
-            meta={`${data.org.rules.length} rules · ${data.org.blocked.length} blocked · ${OUTSIDE_SHORT[data.org.outside]}`} count={data.total} />
+            meta={`${data.org.rules.length} rules · ${data.org.blocked.length} blocked · outside policy blocked`} count={data.total} />
           <div className="flex items-center px-2.5 pt-4 pb-1.5">
             <h2 className="text-[10px] font-bold tracking-widest text-faint uppercase">Groups</h2>
             <Button size="icon-xs" variant="ghost" className="ml-auto" aria-label="New group" onClick={startGroup}><Plus /></Button>
           </div>
           {data.groups.map((g) => (
             <RailRow key={g.id} active={selected === g.id} onClick={() => { setCreating(null); setSelected(g.id) }} icon={Users} name={g.name}
-              meta={`${g.rules.length} rules · ${OUTSIDE_SHORT[g.outside]}`} count={data.members[g.id]?.length ?? 0} />
+              meta={`${g.rules.length} rules · outside policy blocked`} count={data.members[g.id]?.length ?? 0} />
           ))}
           {creating && <RailRow active icon={Users} name={creating.name || "New group"} meta="not saved" count="" onClick={() => {}} />}
           {data.groups.length === 0 && !creating && (

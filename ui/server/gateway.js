@@ -189,7 +189,7 @@ export function logView(sandbox, line) {
 
 // Traffic coming *into* the sandbox. Kept out of the egress trail: a refused
 // visit to an exposed service is not the sandbox reaching out, and counting it
-// as an outbound denial would put ingress noise in Egress and Approvals.
+// as an outbound denial would put ingress noise in Egress.
 //   CONFIG:SERVICE_ENDPOINT_CREATED [INFO] Service endpoint exposed sb/web -> 127.0.0.1:8080
 //   NET:OPEN [LOW] DENIED 127.0.0.1:8080 [policy:sandbox_service_relay ...] [reason:service endpoint unreachable]
 //   NET:OPEN [INFO] 127.0.0.1:8080/tcp            (a visit arriving inside the sandbox)

@@ -1,12 +1,11 @@
 import * as React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
-import { ApprovalsView } from "@/components/approvals-view"
 import { ActivityView } from "@/components/activity-view"
 import { EgressView } from "@/components/egress-view"
 import { IngressView } from "@/components/ingress-view"
 import { SecretsView } from "@/components/secrets-view"
-import { TemplatesView } from "@/components/templates-view"
+import { TemplatesView } from "@/components/image-templates-view"
 import { GuardrailsView } from "@/components/guardrails-view"
 import { OrgView } from "@/components/org-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
@@ -15,7 +14,6 @@ import { LiveProvider } from "@/lib/live"
 
 const TITLES = {
   sandboxes: "Sandboxes",
-  approvals: "Approvals",
   activity: "Activity",
   organization: "Organization",
   egress: "Egress",
@@ -76,7 +74,6 @@ export function App() {
           </header>
           <PageBoundary view={view}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} />}
-          {view === "approvals" && <ApprovalsView />}
           {view === "activity" && <ActivityView />}
           {view === "organization" && <OrgView />}
           {view === "egress" && <EgressView onNavigate={navigate} />}

@@ -241,8 +241,6 @@ async function removeGlobal() {
 // ---- guardrail settings -----------------------------------------------------
 
 export const SETTINGS = {
-  agent_policy_proposals_enabled: { type: 'bool', default: false },
-  proposal_approval_mode: { type: 'string', values: ['manual', 'auto'], default: 'manual' },
   ocsf_json_enabled: { type: 'bool', default: false },
 }
 

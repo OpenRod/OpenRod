@@ -24,6 +24,7 @@ import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
 import { GROUP_LABEL, styleOf } from "@/lib/sandboxes"
 import { SOURCE, SOURCE_ORDER, displayName, hostOf, isIp, portOf, program, sourceOf } from "@/lib/policy-sources"
+import { groupDestinations } from "@/lib/egress-groups"
 import { cn } from "@/lib/utils"
 
 const REVISION = {
@@ -78,7 +79,7 @@ function Coverage({ n, total }) {
   )
 }
 
-const DEST_COLS = "grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.1fr)_7rem_6rem_4.5rem_1rem]"
+const DEST_COLS = "grid-cols-[minmax(0,2fr)_minmax(0,1fr)_8rem_7rem_5rem_1rem]"
 const BLOCK_COLS = "grid-cols-[minmax(0,1.6fr)_7.5rem_5rem_minmax(0,1fr)_13.5rem]"
 const BOX_COLS = "grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.3fr)_8rem_5rem_1rem]"
 
@@ -99,11 +100,6 @@ function DestinationRow({ d, total, onOpen }) {
           </span>
         </span>
         <span className="flex flex-wrap gap-1">{sources.map((s) => <SourcePill key={s} source={s} />)}</span>
-        <span className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {d.groups.map((group) => <span key={group.id ?? "ungrouped"} className="min-w-0 truncate" title={`${group.name}: ${group.count} of ${group.total} sandboxes have access`}>
-            {group.name}{group.count < group.total && <span className="ml-1 text-faint tabular-nums">{group.count}/{group.total}</span>}
-          </span>)}
-        </span>
         <span className="text-[12px] text-muted-foreground">{d.access.size === 1 ? ACCESS_LABEL[[...d.access][0]] ?? [...d.access][0] : "Mixed"}</span>
         <span className="block"><Coverage n={d.sandboxes.size} total={total} /></span>
         <span className="text-right text-[12px] tabular-nums text-muted-foreground">{d.hits ? d.hits.toLocaleString() : "—"}</span>
@@ -145,6 +141,28 @@ function DestinationRow({ d, total, onOpen }) {
       </AnimatePresence>
     </li>
   )
+}
+
+function DestinationGroup({ group, onOpen, initiallyOpen }) {
+  const [open, setOpen] = React.useState(initiallyOpen)
+  const [limit, setLimit] = React.useState(50)
+  const id = React.useId()
+  const assignments = new Set(group.destinations.flatMap((d) => d.grants.map((g) => `${g.sandbox}:${g.key}`))).size
+  return <section aria-label={group.name} className="border-b border-border">
+    <button aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)}
+      className="flex min-h-12 w-full items-center gap-3 bg-muted/40 px-6 py-3 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+      <ChevronRight aria-hidden="true" className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-90")} />
+      <Users aria-hidden="true" className="size-4 text-muted-foreground" />
+      <span className="text-xs font-semibold">{group.name}</span>
+      <span className="text-[11px] text-muted-foreground">{plural(group.total, "sandbox", "sandboxes")}</span>
+      <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">{plural(group.destinations.length, "destination")} · {plural(assignments, "rule assignment")}</span>
+    </button>
+    {open && <div id={id}>
+      <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
+      <ul className="divide-y divide-border/60">{group.destinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={group.total} onOpen={onOpen} />)}</ul>
+      {group.destinations.length > limit && <Button variant="ghost" className="h-9 w-full rounded-none text-xs text-muted-foreground" onClick={() => setLimit((value) => value + 50)}>Show {Math.min(50, group.destinations.length - limit)} more destinations</Button>}
+    </div>}
+  </section>
 }
 
 function BlockedRow({ b, groups, onDecide }) {
@@ -251,13 +269,19 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
         counts[src] = (counts[src] ?? 0) + 1
         for (const e of r.endpoints) {
           hosts.add(e.host)
-          const d = dest.get(e.host) ?? { host: e.host, sources: new Set(), access: new Set(), ports: new Set(), sandboxes: new Set(), groupMembers: new Map(), grants: [], hits: 0 }
+          const d = dest.get(e.host) ?? { host: e.host, sources: new Set(), access: new Set(), ports: new Set(), sandboxes: new Set(), groupMembers: new Map(), grants: [], hits: 0, hitsBySandbox: new Map() }
           d.sources.add(src); d.access.add(e.access); e.ports.forEach((p) => d.ports.add(p)); d.sandboxes.add(s.name)
           const groupId = s.labels?.[GROUP_LABEL] || null
           const groupName = groupId ? groupNames.get(groupId) ?? groupId : "No group"
           if (!d.groupMembers.has(groupId)) d.groupMembers.set(groupId, new Set())
           d.groupMembers.get(groupId).add(s.name)
-          if (!d.grants.some((g) => g.sandbox === s.name && g.key === r.key)) d.grants.push({ sandbox: s.name, key: r.key, groupName })
+          let grant = d.grants.find((g) => g.sandbox === s.name && g.key === r.key)
+          if (!grant) {
+            grant = { sandbox: s.name, key: r.key, groupName, groupId, source: src, access: [], ports: [] }
+            d.grants.push(grant)
+          }
+          grant.access.push(e.access)
+          grant.ports.push(...e.ports)
           dest.set(e.host, d)
         }
       }
@@ -270,7 +294,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       if (e.kind !== "audit" || !e.verdict) continue
       const host = hostOf(e.destination)
       if (!host || isIp(host)) continue
-      if (e.verdict === "allowed") { const d = dest.get(host); if (d) d.hits += 1; continue }
+      if (e.verdict === "allowed") { const d = dest.get(host); if (d) { d.hits += 1; d.hitsBySandbox.set(e.sandbox, (d.hitsBySandbox.get(e.sandbox) ?? 0) + 1) }; continue }
       if (e.verdict !== "denied" || allowedBy.get(e.sandbox)?.has(host)) continue
       const b = block.get(host) ?? { host, port: portOf(e.destination), sandboxes: new Set(), groupIds: new Set(), attempts: 0, programs: new Set(), lastAt: null }
       b.attempts += 1; b.sandboxes.add(e.sandbox)
@@ -290,12 +314,13 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
 
   const enforced = sandboxes.filter((s) => s.status === "loaded").length
   const needle = query.trim().toLowerCase()
-  const filtered = destinations.filter((d) => (sourceFilter === "all" || d.sources.has(sourceFilter)) && (!needle || [d.host, ...d.groups.map((group) => group.name)].join(" ").toLowerCase().includes(needle)))
+  const destinationGroups = React.useMemo(() => groupDestinations(destinations, query, sourceFilter), [destinations, query, sourceFilter])
+  const destinationCount = new Set(destinationGroups.flatMap((group) => group.destinations.map((d) => d.host))).size
   const sourceOptions = [{ id: "all", label: "All" }, ...SOURCE_ORDER.filter((s) => destinations.some((d) => d.sources.has(s))).map((s) => ({ id: s, label: SOURCE[s].label }))]
 
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
   const filteredBoxes = sandboxes.filter((s) => !needle || [s.name, groups.find((g) => g.id === s.labels?.[GROUP_LABEL])?.name, s.labels?.[GROUP_LABEL]].join(" ").toLowerCase().includes(needle))
-  const count = view === "destinations" ? filtered.length : view === "blocked" ? filteredBlocked.length : filteredBoxes.length
+  const count = view === "destinations" ? destinationCount : view === "blocked" ? filteredBlocked.length : filteredBoxes.length
   const allCount = view === "destinations" ? destinations.length : view === "blocked" ? blocked.length : total
   const filtering = Boolean(query || (view === "destinations" && sourceFilter !== "all"))
   const clear = () => { setQuery(""); setSourceFilter("all") }
@@ -321,7 +346,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
         <div className="relative mr-auto w-full sm:w-64">
           <Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-          <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={view === "sandboxes" ? "Search name, group…" : "Search destination, group…"} aria-label="Search egress" className="h-9 pr-8 pl-9 text-xs" />
+          <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={view === "sandboxes" ? "Search name, group…" : "Search destination, group, rule…"} aria-label="Search egress" className="h-9 pr-8 pl-9 text-xs" />
           {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
         </div>
         {view === "destinations" && <select aria-label="Filter by source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{sourceOptions.map((o) => <option key={o.id} value={o.id}>{o.id === "all" ? "All sources" : o.label}</option>)}</select>}
@@ -332,11 +357,10 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       </div>
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {count === 0 ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering && <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button>}</div> : (
-          <div className="min-w-[1080px] bg-card">
-            {view === "destinations" && <>
-              <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Groups</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
-              <ul className="divide-y divide-border/60">{filtered.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
-            </>}
+          <div className="min-w-[960px] bg-card">
+            {view === "destinations" && destinationGroups.map((group) => (
+              <DestinationGroup key={`${group.id ?? "ungrouped"}:${query}:${sourceFilter}`} group={group} onOpen={onOpen} initiallyOpen={destinationGroups.length === 1 || filtering} />
+            ))}
             {view === "blocked" && <>
               <ColumnHead className={BLOCK_COLS}><span>Destination</span><span>Sandboxes</span><span>Attempts</span><span>Program</span><span className="text-right">Actions</span></ColumnHead>
               <ul className="divide-y divide-border/60">{filteredBlocked.slice(0, limit).map((b) => <BlockedRow key={b.host} b={b} groups={groups} onDecide={onDecide} />)}</ul>
@@ -372,12 +396,12 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
             })}
           </ul>
             </>}
-            {count > limit && <button onClick={() => setLimit((n) => n + 100)} className="w-full border-t border-border py-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">Show {Math.min(100, count - limit)} more</button>}
+            {view !== "destinations" && count > limit && <button onClick={() => setLimit((n) => n + 100)} className="w-full border-t border-border py-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">Show {Math.min(100, count - limit)} more</button>}
           </div>
         )}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-6 py-2 text-[11px] text-muted-foreground">
-        <span><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}</span>
+        <span><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}{view === "destinations" && ` across ${plural(destinationGroups.length, "group")}`}</span>
         <span className="hidden sm:inline">{enforced}/{total} policies enforced · ⌘K to search</span>
       </div>
     </div>
@@ -842,9 +866,8 @@ export function EgressView({ onNavigate }) {
   const knownPrograms = React.useMemo(() => {
     const set = new Set()
     for (const e of live.events) if (e.binary) set.add(e.binary)
-    for (const c of live.approvals.pending) if (c.binary) set.add(c.binary)
     return [...set].sort()
-  }, [live.events, live.approvals.pending])
+  }, [live.events])
 
   const open = (name) => { setScope(name); scroller.current?.scrollTo({ top: 0 }) }
   const back = () => { setScope(null); loadFleet(); scroller.current?.scrollTo({ top: 0 }) }

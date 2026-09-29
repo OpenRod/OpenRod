@@ -4,7 +4,6 @@ import { ArrowUpRight, Globe, KeyRound, Network, ShieldAlert, X } from "lucide-r
 import { Button } from "@/components/ui/button"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { AuditLine } from "@/components/audit-line"
-import { APPROVALS_SCOPE } from "@/components/approvals-view"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { agentsOf } from "@/lib/agents"
 import { Perimeter } from "@/components/perimeter"
@@ -121,7 +120,7 @@ export function FleetPanel({ traffic, focus, setFocus, providers, sandboxes }) {
 
 // One box picked: everything the gateway knows about it, and what it has been
 // asking the proxy for.
-export function BoxPanel({ sandbox, stats, events, asks, onOpen, onGraph, onClose, onNavigate }) {
+export function BoxPanel({ sandbox, stats, events, onOpen, onGraph, onClose, onNavigate }) {
   const hosts = stats ? rankHosts(stats.hosts) : []
   const max = hosts[0] ? hosts[0].allowed + hosts[0].denied : 1
   const recent = React.useMemo(() => events.filter((e) => e.sandbox === sandbox.name && e.kind === "audit" && e.verdict).slice(0, 10), [events, sandbox.name])
@@ -163,14 +162,6 @@ export function BoxPanel({ sandbox, stats, events, asks, onOpen, onGraph, onClos
         </div>
       </div>
 
-      {asks > 0 && (
-        <button onClick={() => { remember(APPROVALS_SCOPE, sandbox.name); onNavigate("approvals") }}
-          className="flex w-full items-center gap-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-left text-[11px] text-amber-800 outline-none hover:bg-amber-50 focus-visible:ring-2 focus-visible:ring-ring">
-          <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-          {asks} request{asks === 1 ? "" : "s"} waiting on you
-          <ArrowUpRight className="ml-auto size-3" aria-hidden="true" />
-        </button>
-      )}
 
       <section>
         <Heading icon={Globe} aside={stats ? <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{count(stats.allowed)}↑{stats.denied ? <span className="text-red-600"> {count(stats.denied)}✕</span> : null}</span> : null}>

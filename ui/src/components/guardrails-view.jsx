@@ -10,20 +10,6 @@ import { useLive } from "@/lib/live"
 // described by what they do to a sandbox rather than by their keys.
 const GUARDRAILS = [
   {
-    key: "proposal_approval_mode", type: "choice",
-    title: "Approving blocked requests",
-    options: [{ id: "manual", label: "Always ask me" }, { id: "auto", label: "Auto-approve safe ones" }],
-    describe: "Auto-approve applies drafts the prover finds clean. GraphQL and MCP are not checked.",
-    risk: (v) => v === "auto" && "Rules can be added without your review.",
-    fallback: "manual",
-  },
-  {
-    key: "agent_policy_proposals_enabled", type: "bool",
-    title: "Agents can ask for access",
-    describe: "Agents can submit their own policy proposals to Approvals.",
-    fallback: false,
-  },
-  {
     key: "ocsf_json_enabled", type: "bool",
     title: "OCSF JSON audit log",
     describe: "Writes security events to /var/log/openshell-ocsf*.log for a SIEM.",
