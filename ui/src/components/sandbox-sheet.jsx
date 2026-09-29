@@ -153,7 +153,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const allowed = React.useMemo(() => {
     const hosts = new Map()
     for (const rule of detail?.policy?.rules ?? []) for (const endpoint of rule.endpoints) {
-      if (!hosts.has(endpoint.host)) hosts.set(endpoint.host, { host: endpoint.host, source: sourceOf(rule.key) })
+      if (!endpoint.blocked && !hosts.has(endpoint.host)) hosts.set(endpoint.host, { host: endpoint.host, source: sourceOf(rule.key) })
     }
     return [...hosts.values()]
   }, [detail])

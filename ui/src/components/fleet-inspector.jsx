@@ -216,7 +216,7 @@ export function PerimeterDialog({ sandbox, events, onClose, onNavigate }) {
 
   const allowed = React.useMemo(() => {
     const seen = new Map()
-    for (const rule of rules ?? []) for (const e of rule.endpoints) if (!seen.has(e.host)) seen.set(e.host, { host: e.host, source: sourceOf(rule.key) })
+    for (const rule of rules ?? []) for (const e of rule.endpoints) if (!e.blocked && !seen.has(e.host)) seen.set(e.host, { host: e.host, source: sourceOf(rule.key) })
     return [...seen.values()]
   }, [rules])
   const denied = React.useMemo(() => {

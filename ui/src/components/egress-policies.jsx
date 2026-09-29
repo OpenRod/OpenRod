@@ -1,0 +1,310 @@
+import * as React from "react"
+import { AlertTriangle, X } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
+import { RequestList, Segmented } from "@/components/rule-editor"
+import { api } from "@/lib/api"
+import { cn } from "@/lib/utils"
+
+// An egress policy: a name, destinations and an action. Everything else is
+// Advanced, with defaults that mean "any request from any program on the web
+// ports". The server compiles each one into OpenShell rules (server/egress.js).
+
+export const DEFAULT_ADVANCED = { ports: [443, 80], programs: [], requests: "any", allow: [], deny: [], enforcement: "enforce", privateIps: [] }
+const REQUESTS = [
+  { id: "any", label: "Any", hint: "Every method and path" },
+  { id: "read-only", label: "Read only", hint: "GET, HEAD and OPTIONS" },
+  { id: "read-write", label: "Read & write", hint: "Adds POST, PUT and PATCH" },
+  { id: "custom", label: "Specific", hint: "Only the method and path pairs listed" },
+]
+
+export const POLICY_PRESETS = [
+  { label: "GitHub · read and clone", policy: { name: "GitHub read", destinations: ["github.com", "api.github.com", "codeload.github.com"],
+    advanced: { ...DEFAULT_ADVANCED, ports: [443], requests: "custom",
+      // git clone and fetch POST to git-upload-pack; a push POSTs to git-receive-pack.
+      allow: [{ method: "GET", path: "/**" }, { method: "HEAD", path: "/**" }, { method: "POST", path: "/*/*/git-upload-pack" }],
+      deny: [{ method: "*", path: "/*/*/git-receive-pack" }] } } },
+  { label: "npm", policy: { name: "npm registry", destinations: ["registry.npmjs.org"], advanced: { ...DEFAULT_ADVANCED, ports: [443] } } },
+  { label: "PyPI", policy: { name: "PyPI", destinations: ["pypi.org", "files.pythonhosted.org"], advanced: { ...DEFAULT_ADVANCED, ports: [443], requests: "read-only" } } },
+]
+
+export const newPolicy = (over = {}) => ({ name: "", action: "allow", destinations: [], appliesTo: { everyone: false, groups: [], sandboxes: [] }, advanced: DEFAULT_ADVANCED, ...over })
+
+const lines = (text) => text.split("\n").map((s) => s.trim()).filter(Boolean)
+const split = (text) => text.split(/[\s,]+/).filter(Boolean)
+const slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "")
+const joinAnd = (items) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`)
+const isDefault = (a) => JSON.stringify({ ...DEFAULT_ADVANCED, ...a }) === JSON.stringify(DEFAULT_ADVANCED)
+
+function toForm(p) {
+  const a = { ...DEFAULT_ADVANCED, ...(p?.advanced ?? {}) }
+  return {
+    id: p?.id ?? "", name: p?.name ?? "", action: p?.action ?? "allow",
+    destinations: (p?.destinations ?? []).join("\n"),
+    appliesTo: { everyone: false, groups: [], sandboxes: [], ...(p?.appliesTo ?? {}) },
+    ports: a.ports.join(", "), programs: [...a.programs], requests: a.requests, allow: [...a.allow], deny: [...a.deny], enforcement: a.enforcement, privateIps: a.privateIps.join(", "),
+  }
+}
+
+function toPolicy(f, isNew) {
+  return {
+    id: isNew ? slug(f.name) : f.id, name: f.name.trim(), action: f.action, destinations: lines(f.destinations), appliesTo: f.appliesTo,
+    ...(f.action === "allow" ? { advanced: {
+      ports: split(f.ports).map(Number), programs: f.programs, requests: f.requests,
+      allow: f.requests === "custom" ? f.allow.filter((r) => r.path) : [], deny: f.deny.filter((r) => r.path),
+      enforcement: f.enforcement, privateIps: split(f.privateIps),
+    } } : {}),
+  }
+}
+
+export function appliesToText(p, groups) {
+  const to = p.appliesTo
+  if (to.everyone) return "every sandbox"
+  const names = [...to.groups.map((id) => groups.find((g) => g.id === id)?.name ?? id), ...to.sandboxes]
+  return names.length ? joinAnd(names) : null
+}
+
+// The policy in one sentence, so the operator reads what it does.
+export function describePolicy(p, groups = []) {
+  const hosts = p.destinations.length > 3 ? `${p.destinations.slice(0, 3).join(", ")} and ${p.destinations.length - 3} more` : joinAnd(p.destinations)
+  const where = appliesToText(p, groups)
+  const scope = where ? `Applies to ${where}.` : "Not applied to any sandbox yet."
+  if (p.action === "block") return `Blocks ${hosts || "…"} and their subdomains, for every program. Beats every allow. ${scope}`
+  const a = { ...DEFAULT_ADVANCED, ...p.advanced }
+  const requests = a.requests === "custom" ? `only ${a.allow.map((r) => `${r.method} ${r.path}`).join(", ") || "the listed requests"}` : REQUESTS.find((r) => r.id === a.requests)?.label.toLowerCase() + " requests"
+  const programs = a.programs.length ? `from ${joinAnd([...new Set(a.programs.map((b) => b.split("/").pop()))])}` : "from any program"
+  const except = a.deny.length ? `, except ${a.deny.map((r) => `${r.method} ${r.path}`).join(", ")}` : ""
+  const audit = a.enforcement === "audit" ? " Audit only: violations are logged, not blocked." : ""
+  return `Allows ${requests}${except} to ${hosts || "…"} on port${a.ports.length === 1 ? "" : "s"} ${joinAnd(a.ports.map(String))}, ${programs}.${audit} ${scope}`
+}
+
+function Chip({ pressed, disabled, onClick, children, title }) {
+  return (
+    <button type="button" aria-pressed={pressed} disabled={disabled} onClick={onClick} title={title}
+      className={cn("rounded-md border px-2 py-0.5 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40",
+        pressed ? "border-foreground/25 bg-accent text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
+      {children}
+    </button>
+  )
+}
+
+export function PolicyDialog({ open, onOpenChange, initial, groups = [], sandboxes = [], knownPrograms = [], onSaved }) {
+  const isNew = !initial?.id
+  const [form, setForm] = React.useState(() => toForm(initial))
+  const [program, setProgram] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState(null)
+  const [confirmDelete, setConfirmDelete] = React.useState(false)
+  React.useEffect(() => { if (open) { setForm(toForm(initial)); setError(null); setProgram(""); setConfirmDelete(false) } }, [open, initial])
+
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }))
+  const setTo = (patch) => setForm((f) => ({ ...f, appliesTo: { ...f.appliesTo, ...patch } }))
+  const policy = toPolicy(form, isNew)
+  const addProgram = (path) => {
+    const value = path.trim()
+    if (value && !form.programs.includes(value)) set({ programs: [...form.programs, value] })
+    setProgram("")
+  }
+  const toggleGroup = (id) => setTo({ groups: form.appliesTo.groups.includes(id) ? form.appliesTo.groups.filter((g) => g !== id) : [...form.appliesTo.groups, id] })
+  const otherSandboxes = sandboxes.filter((s) => !form.appliesTo.sandboxes.includes(s))
+
+  async function submit(event) {
+    event.preventDefault()
+    setBusy(true); setError(null)
+    try { onSaved(await api.savePolicy({ ...policy, isNew }), policy); onOpenChange(false) } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+  async function remove() {
+    setBusy(true); setError(null)
+    try { onSaved({ ...(await api.deletePolicy(initial.id)), deleted: true }, initial); onOpenChange(false) } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-xl">
+        <form onSubmit={submit} className="grid gap-5">
+          <DialogHeader>
+            <DialogTitle>{isNew ? "Add egress policy" : `Edit ${initial.name}`}</DialogTitle>
+            <DialogDescription className="text-xs">Sandboxes start locked down: nothing leaves them unless a policy allows it. A block beats every allow.</DialogDescription>
+          </DialogHeader>
+
+          {isNew && (
+            <div className="flex flex-wrap gap-1.5">
+              <span className="self-center text-[11px] text-muted-foreground">Start from</span>
+              {POLICY_PRESETS.map((p) => (
+                <button key={p.label} type="button" onClick={() => setForm((f) => ({ ...toForm(newPolicy(p.policy)), appliesTo: f.appliesTo }))}
+                  className="rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="policy-name" className="text-xs">Name</Label>
+            <Input id="policy-name" value={form.name} onChange={(e) => set({ name: e.target.value })} className="text-xs" placeholder="GitHub read" required autoFocus={isNew} />
+          </div>
+
+          <div className="grid gap-1.5">
+            <span className="text-xs font-medium">Action</span>
+            <div className="w-48"><Segmented label="Action" options={[{ id: "allow", label: "Allow" }, { id: "block", label: "Block" }]} value={form.action} onChange={(action) => set({ action })} /></div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="policy-destinations" className="text-xs">Destinations</Label>
+            <Textarea id="policy-destinations" rows={4} value={form.destinations} onChange={(e) => set({ destinations: e.target.value })} className="font-mono text-[11px]"
+              placeholder={form.action === "block" ? "pastebin.com\n**.ngrok.io" : "github.com\n**.githubusercontent.com"} required />
+            <p className="text-[11px] text-muted-foreground">
+              {form.action === "block" ? "One host per line. Blocking a host also blocks its subdomains." : "One host per line. *.example.com matches one level, **.example.com any depth."}
+            </p>
+            {form.action === "allow" && (
+              <label className="flex w-fit items-center gap-2 text-[11px] text-muted-foreground" title="OpenShell 0.1.2 can't allow every host yet. We've asked for it upstream.">
+                <input type="checkbox" disabled className="size-3.5" />All destinations (Open)<span className="text-faint">· needs OpenShell support</span>
+              </label>
+            )}
+          </div>
+
+          <div className="grid gap-1.5">
+            <span className="text-xs font-medium">Applies to</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Chip pressed={form.appliesTo.everyone} onClick={() => setTo({ everyone: !form.appliesTo.everyone })}>Every sandbox</Chip>
+              {/* Groups are an Enterprise feature; a policy that already names one can still drop it. */}
+              {(initial?.appliesTo?.groups ?? []).map((id) => (
+                <Chip key={id} pressed={form.appliesTo.everyone || form.appliesTo.groups.includes(id)} disabled={form.appliesTo.everyone} onClick={() => toggleGroup(id)} title="Group">{groups.find((g) => g.id === id)?.name ?? id}</Chip>
+              ))}
+              {form.appliesTo.sandboxes.map((s) => (
+                <span key={s} className="flex items-center gap-1 rounded-md border border-foreground/25 bg-accent py-0.5 pr-0.5 pl-2 font-mono text-[11px]">
+                  {s}
+                  <button type="button" aria-label={`Remove ${s}`} onClick={() => setTo({ sandboxes: form.appliesTo.sandboxes.filter((x) => x !== s) })}
+                    className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
+                </span>
+              ))}
+              {!form.appliesTo.everyone && otherSandboxes.length > 0 && (
+                <select value="" aria-label="Add a sandbox" onChange={(e) => e.target.value && setTo({ sandboxes: [...form.appliesTo.sandboxes, e.target.value] })}
+                  className="h-6 rounded-md border border-dashed border-border bg-transparent px-1.5 text-[11px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <option value="">+ Sandbox</option>
+                  {otherSandboxes.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {form.action === "allow" && (
+            <details className="group rounded-lg border border-border" open={!isDefault(initial?.advanced) || undefined}>
+              <summary className="cursor-pointer px-3 py-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">Advanced</summary>
+              <div className="grid gap-4 border-t border-border p-3">
+                <div className="grid gap-1">
+                  <Label htmlFor="policy-ports" className="text-[11px] text-muted-foreground">Ports</Label>
+                  <Input id="policy-ports" value={form.ports} onChange={(e) => set({ ports: e.target.value })} className="h-8 w-40 font-mono text-[11px]" placeholder="443, 80" />
+                </div>
+                <div className="grid gap-1.5">
+                  <span className="text-[11px] text-muted-foreground">Requests</span>
+                  <Segmented label="Requests" options={REQUESTS} value={form.requests}
+                    onChange={(requests) => set({ requests, allow: requests === "custom" && !form.allow.length ? [{ method: "GET", path: "" }] : form.allow })} />
+                  {form.requests === "custom" && <RequestList kind="allow" items={form.allow} onChange={(allow) => set({ allow })} />}
+                  <RequestList kind="deny" items={form.deny} onChange={(deny) => set({ deny })} />
+                </div>
+                <div className="grid gap-1.5">
+                  <span className="text-[11px] text-muted-foreground">Programs</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {form.programs.map((b) => (
+                      <span key={b} className="flex items-center gap-1 rounded-md border border-foreground/20 bg-accent py-0.5 pr-0.5 pl-2 font-mono text-[11px]">
+                        {b}
+                        <button type="button" aria-label={`Remove ${b}`} onClick={() => set({ programs: form.programs.filter((x) => x !== b) })}
+                          className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
+                      </span>
+                    ))}
+                    {!form.programs.length && <span className="text-[11px] text-muted-foreground">Any program</span>}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Input value={program} onChange={(e) => setProgram(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addProgram(program) } }}
+                      className="h-8 font-mono text-[11px]" placeholder="/usr/bin/git" title="Globs like /usr/bin/python3* work" aria-label="Program path" />
+                    <Button type="button" variant="outline" size="sm" onClick={() => addProgram(program)} disabled={!program.trim()}>Add</Button>
+                  </div>
+                  {knownPrograms.filter((p) => !form.programs.includes(p)).length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] text-muted-foreground">Seen</span>
+                      {knownPrograms.filter((p) => !form.programs.includes(p)).slice(0, 6).map((p) => (
+                        <button key={p} type="button" onClick={() => addProgram(p)}
+                          className="rounded border border-dashed border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">+ {p}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="w-52"><Segmented label="Enforcement" options={[{ id: "enforce", label: "Enforce" }, { id: "audit", label: "Audit only" }]} value={form.enforcement} onChange={(enforcement) => set({ enforcement })} /></div>
+                  {form.enforcement === "audit" && <span className="flex items-center gap-1 text-[11px] text-amber-700"><AlertTriangle className="size-3" />Request rules are logged, not enforced</span>}
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor="policy-ips" className="text-[11px] text-muted-foreground" title="Loopback and cloud metadata stay blocked">Private addresses</Label>
+                  <Input id="policy-ips" value={form.privateIps} onChange={(e) => set({ privateIps: e.target.value })} className="h-8 font-mono text-[11px]" placeholder="10.0.5.0/24" />
+                </div>
+              </div>
+            </details>
+          )}
+
+          <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-[11px] leading-relaxed">{describePolicy(policy, groups)}</p>
+          {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
+
+          <DialogFooter className="sm:justify-between">
+            {!isNew ? (
+              confirmDelete
+                ? <Button type="button" variant="destructive" disabled={busy} onClick={remove}>Delete policy</Button>
+                : <Button type="button" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(true)}>Delete</Button>
+            ) : <span />}
+            <span className="flex gap-2">
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button type="submit" disabled={busy || !form.name.trim() || !lines(form.destinations).length} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+                {busy && <Spinner aria-hidden="true" />}{isNew ? "Add policy" : "Save policy"}
+              </Button>
+            </span>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export const appliesTo = (policy, sandbox) => policy.appliesTo.everyone
+  || (sandbox.group != null && policy.appliesTo.groups.includes(sandbox.group))
+  || policy.appliesTo.sandboxes.includes(sandbox.name)
+
+// Blocking example.com also blocks its subdomains, as on the server.
+export const blockPatterns = (hosts) => hosts.flatMap((h) => (h.startsWith("*") || !h.includes(".") ? [h] : [h, `**.${h}`]))
+
+// The hosts blocked in every sandbox. They beat every policy.
+export function BlockedHostsDialog({ open, onOpenChange, org, onSaved }) {
+  const [text, setText] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState(null)
+  React.useEffect(() => { if (open) { setText((org?.blocked ?? []).join("\n")); setError(null) } }, [open, org])
+
+  async function submit(event) {
+    event.preventDefault()
+    setBusy(true); setError(null)
+    try { onSaved(await api.saveOrg({ ...org, blocked: lines(text) })); onOpenChange(false) } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={submit} className="grid gap-4">
+          <DialogHeader>
+            <DialogTitle>Blocked everywhere</DialogTitle>
+            <DialogDescription className="text-xs">Blocked in every sandbox, with their subdomains. No policy can open them.</DialogDescription>
+          </DialogHeader>
+          <Textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} className="font-mono text-[11px]" placeholder={"pastebin.com\n**.ngrok.io"} aria-label="Blocked hosts" />
+          {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={busy} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">{busy && <Spinner aria-hidden="true" />}Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
