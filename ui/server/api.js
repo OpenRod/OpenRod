@@ -140,7 +140,7 @@ async function createSandbox(input) {
   // Files, Landlock and process identity are fixed at creation, and so is the
   // group label. The whole policy (template + organization + group rules) is
   // resolved here from stored policy, never accepted raw from the browser.
-  const plan = await planSandbox({ group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null })
+  const plan = await planSandbox({ name: String(input.name ?? ''), group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null })
   const template = plan.template
   const labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels() }
   await enforcePolicyOnly(client)
