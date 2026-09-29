@@ -157,7 +157,7 @@ export function BoxPanel({ sandbox, stats, events, onOpen, onGraph, onClose, onN
             Open<ArrowUpRight aria-hidden="true" />
           </Button>
           <Button size="sm" variant="outline" onClick={onGraph}><Network aria-hidden="true" />Graph</Button>
-          <Button size="sm" variant="outline" onClick={() => { remember("egress-scope", sandbox.name); onNavigate("egress") }}>Rules</Button>
+          <Button size="sm" variant="outline" onClick={() => { remember("egress-sandbox", sandbox.name); onNavigate("egress") }}>Rules</Button>
         </div>
       </div>
 
@@ -242,7 +242,7 @@ export function PerimeterDialog({ sandbox, events, onClose, onNavigate }) {
         {sandbox && (rules === null
           ? <p role="status" className="py-16 text-center text-sm text-muted-foreground">Reading policy…</p>
           : <Perimeter agents={agentsOf({ ...sandbox, agentInventory: inventory })} agentStatus={agentInventoryLabel({ agentInventory: inventory })} name={name} phase={sandbox.phase} allowed={allowed} denied={denied}
-              onAllow={() => { remember("egress-scope", name); onClose(); onNavigate("egress") }} />)}
+              onAllow={() => { remember("egress-sandbox", name); onClose(); onNavigate("egress") }} />)}
       </DialogContent>
     </Dialog>
   )

@@ -257,7 +257,7 @@ function PolicyRows({ policies, org, sandboxes, groups, onEdit, onEditBlocked })
   )
 }
 
-function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked }) {
+function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
   const [sourceFilter, setSourceFilter] = React.useState("all")
   const [query, setQuery] = React.useState("")
   const [limit, setLimit] = React.useState(100)
@@ -339,7 +339,9 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
 
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
-  const filteredPolicies = policies.filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, groups)].join(" ").toLowerCase().includes(needle))
+  // Opened for one sandbox: only the policies that reach it.
+  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, group: sandboxes.find((s) => s.name === forSandbox)?.labels?.[GROUP_LABEL] ?? null })
+  const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, groups)].join(" ").toLowerCase().includes(needle))
   const count = view === "policies" ? filteredPolicies.length : view === "destinations" ? destinationCount : view === "blocked" ? filteredBlocked.length : filteredBoxes.length
   const allCount = view === "policies" ? policies.length : view === "destinations" ? destinations.length : view === "blocked" ? blocked.length : total
   const filtering = Boolean(query || (view === "destinations" && sourceFilter !== "all"))
@@ -371,12 +373,19 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
         </div>
         {view === "destinations" && <select aria-label="Filter by source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{sourceOptions.map((o) => <option key={o.id} value={o.id}>{o.id === "all" ? "All sources" : o.label}</option>)}</select>}
         {filtering && <Button variant="ghost" size="sm" onClick={clear}><X className="size-3" />Clear</Button>}
+        {forSandbox && view === "policies" && <>
+          <span className="flex items-center gap-1 rounded-md border border-foreground/20 bg-accent py-0.5 pr-0.5 pl-2 text-[12px]">
+            For <span className="font-mono">{forSandbox}</span>
+            <button aria-label="Show every policy" onClick={onClearSandbox} className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => onOpen(forSandbox)}>Rules &amp; history<ArrowUpRight className="size-3" /></Button>
+        </>}
         <Button variant="ghost" size="icon-sm" aria-label="Refresh egress" onClick={onRefresh}><RefreshCw className="size-3.5" /></Button>
         <Button variant="outline" size="sm" onClick={() => onOpen("global")}><Network className="size-3.5" />Global policy</Button>
         <Button size="sm" className="bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus className="size-3.5" />Add policy</Button>
       </div>
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-        {count === 0 && !(view === "policies" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "policies" ? "No egress policies yet" : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "policies" ? "Sandboxes are locked down: nothing leaves them until a policy allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "policies" && <Button className="mt-4 bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add policy</Button>}</div> : (
+        {count === 0 && !(view === "policies" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "policies" ? (forSandbox ? `No policy applies to ${forSandbox} yet` : "No egress policies yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "policies" ? "Sandboxes are locked down: nothing leaves them until a policy allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "policies" && <Button className="mt-4 bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add policy</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
             {view === "policies" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} />}
             {view === "destinations" && <>
@@ -851,12 +860,15 @@ function ruleFor(b) {
 
 // Other pages open a pre-filled rule here: { sandbox, host, port, binary } as JSON.
 export const ALLOW_HANDOFF = "egress-allow"
+// Other pages open the policies that reach one sandbox: its name.
+export const SANDBOX_HANDOFF = "egress-sandbox"
 
 export function EgressView({ onNavigate }) {
   const live = useLive()
-  // Other pages deep-link into one sandbox once; otherwise the page opens on the fleet.
-  const [scope, setScope] = React.useState(() => {
-    try { const s = sessionStorage.getItem("egress-scope"); sessionStorage.removeItem("egress-scope"); return s } catch { return null }
+  const [scope, setScope] = React.useState(null)
+  // Other pages hand over one sandbox to show the policies that reach it.
+  const [forSandbox, setForSandbox] = React.useState(() => {
+    try { const s = sessionStorage.getItem(SANDBOX_HANDOFF); sessionStorage.removeItem(SANDBOX_HANDOFF); return s } catch { return null }
   })
   const [fleet, setFleet] = React.useState(null)
   const [org, setOrg] = React.useState(null)
@@ -932,7 +944,9 @@ export function EgressView({ onNavigate }) {
         ) : !fleet ? <p role="status" className="py-24 text-center text-sm text-muted-foreground">Loading…</p>
         : fleet.error ? <p role="alert" className="py-24 text-center text-sm text-muted-foreground">{fleet.error}</p>
         : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
-            onEditPolicy={(p) => setPolicyEditor({ initial: p })} onAddPolicy={() => setPolicyEditor({ initial: newPolicy() })} onEditBlocked={() => setEditingBlocked(true)} />}
+            onEditPolicy={(p) => setPolicyEditor({ initial: p })} onEditBlocked={() => setEditingBlocked(true)}
+            onAddPolicy={() => setPolicyEditor({ initial: newPolicy(forSandbox ? { appliesTo: { everyone: false, groups: [], sandboxes: [forSandbox] } } : {}) })}
+            forSandbox={forSandbox} onClearSandbox={() => setForSandbox(null)} />}
 
       <PolicyDialog open={Boolean(policyEditor)} onOpenChange={(o) => { if (!o) setPolicyEditor(null) }} initial={policyEditor?.initial}
         groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} knownPrograms={knownPrograms}
