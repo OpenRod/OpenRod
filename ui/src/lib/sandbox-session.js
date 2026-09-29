@@ -1,6 +1,8 @@
 import { AGENTS } from "./image-templates.js"
 
 export const SESSION_LABEL = "openshell.console/session"
+// The folder under /sandbox that a started-from-files sandbox opens in.
+export const PROJECT_LABEL = "openshell.console/project"
 
 // What each session runs when someone connects: a login shell, or an agent by
 // its own command. Labels come from the gateway, so only these ever run.
@@ -22,6 +24,9 @@ export function sessionCommand(sandbox) {
   const session = sandbox.labels?.[SESSION_LABEL]
   // Sandbox names are validated by the server; quote defensively for copied commands.
   const name = `'${sandbox.name.replaceAll("'", "'\\''")}'`
-  if (isSession(session)) return `openshell sandbox exec --name ${name} --tty -- ${SESSIONS[session]}`
+  // Label values are limited to letters, digits, '-', '_' and '.', so the path needs no quoting.
+  const project = sandbox.labels?.[PROJECT_LABEL]
+  const workdir = project ? ` --workdir /sandbox/${project}` : ""
+  if (isSession(session)) return `openshell sandbox exec --name ${name}${workdir} --tty -- ${SESSIONS[session]}`
   return `openshell sandbox connect ${name}`
 }
