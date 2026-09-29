@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle, Box, Check, Copy, FolderLock, Globe, Play, Square, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, Check, Copy, FolderLock, Globe, Play, Square, SquareCode, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -48,6 +48,50 @@ function CopyCommand({ command }) {
   )
 }
 
+// Installed editors don't change while the console is open, so ask once.
+let editorsRequest
+function useEditors() {
+  const [editors, setEditors] = React.useState([])
+  React.useEffect(() => {
+    editorsRequest ??= api.editors().then((list) => list.filter((editor) => editor.installed)).catch(() => { editorsRequest = undefined; return [] })
+    let cancelled = false
+    editorsRequest.then((list) => { if (!cancelled) setEditors(list) })
+    return () => { cancelled = true }
+  }, [])
+  return editors
+}
+
+// Same as `openshell sandbox connect --editor`: OpenShell adds its SSH config
+// and the editor connects over Remote-SSH, so files open in place.
+function OpenInEditor({ name, editors }) {
+  const [opening, setOpening] = React.useState(null)
+  async function open(editor) {
+    setOpening(editor.id)
+    try {
+      await api.openEditor(name, editor.id)
+      toast.success(`Opening ${name} in ${editor.label}`)
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setOpening(null)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      {editors.map((editor) => (
+        <Button key={editor.id} variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(opening)}
+          title="Connects over SSH through OpenShell. The first time, OpenShell adds one Include line to ~/.ssh/config."
+          onClick={() => open(editor)}>
+          {opening === editor.id ? <Spinner className="size-3.5" />
+            : editor.id === "cursor" ? <img src="/logos/cursor.svg" alt="" aria-hidden="true" className="size-3.5" draggable={false} />
+            : <SquareCode className="size-3.5" aria-hidden="true" />}
+          Open in {editor.label}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
 const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules" }
 
 export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
@@ -60,6 +104,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const editors = useEditors()
   const summary = live.sandboxes?.find((s) => s.name === name)
 
   // Re-read the full record whenever the live list reports a change to it:
@@ -120,6 +165,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   }, [scopedEvents])
   const agents = agentsOf(sandbox)
   const phase = sandbox?.phase
+  const attachable = Boolean(sandbox?.tty || sandbox?.labels?.[SESSION_LABEL])
   const rules = detail?.policy?.rules ?? []
 
   return (
@@ -165,9 +211,12 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                         {[["Owner", ownerOf(sandbox)], ["Created by", creatorOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
                     </Section>
-              {phase === "ready" && (sandbox.tty || sandbox.labels?.[SESSION_LABEL]) && (
+              {phase === "ready" && (attachable || (editors.length > 0 && !live.demo)) && (
                 <Section title="Attach">
-                  <CopyCommand command={sessionCommand(sandbox)} />
+                  <div className="space-y-2">
+                    {!live.demo && <OpenInEditor name={name} editors={editors} />}
+                    {attachable && <CopyCommand command={sessionCommand(sandbox)} />}
+                  </div>
                   {sandbox.labels?.[SESSION_LABEL] && <p className="mt-2 text-xs text-muted-foreground">Exiting this session keeps the sandbox running. Use Stop when you’re done.</p>}
                 </Section>
               )}
