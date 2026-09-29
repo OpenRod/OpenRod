@@ -48,15 +48,21 @@ function CopyCommand({ command }) {
   )
 }
 
-// Installed editors don't change while the console is open, so ask once.
+// Installed editors don't change while the console is open, so ask once, and
+// keep retrying while the sheet is open if that first request fails.
 let editorsRequest
 function useEditors() {
   const [editors, setEditors] = React.useState([])
   React.useEffect(() => {
-    editorsRequest ??= api.editors().then((list) => list.filter((editor) => editor.installed)).catch(() => { editorsRequest = undefined; return [] })
     let cancelled = false
-    editorsRequest.then((list) => { if (!cancelled) setEditors(list) })
-    return () => { cancelled = true }
+    let timer
+    const load = () => {
+      editorsRequest ??= api.editors().then((list) => list.filter((editor) => editor.installed))
+      editorsRequest.then((list) => { if (!cancelled) setEditors(list) })
+        .catch(() => { editorsRequest = undefined; if (!cancelled) timer = setTimeout(load, 3000) })
+    }
+    load()
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [])
   return editors
 }
