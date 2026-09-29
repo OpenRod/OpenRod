@@ -8,7 +8,7 @@ import { useLive } from "@/lib/live"
 
 // The gateway's registered settings that change how policy is enforced,
 // described by what they do to a sandbox rather than by their keys.
-const GUARDRAILS = [
+const LOG_SETTINGS = [
   {
     key: "ocsf_json_enabled", type: "bool",
     title: "OCSF JSON audit log",
@@ -35,20 +35,22 @@ function Control({ spec, value, onChange, disabled, busy, compact }) {
   )
 }
 
-export function GuardrailsView() {
+export function AuditLoggingSettings() {
   const live = useLive()
   const sandboxes = (live.sandboxes ?? []).filter((s) => s.phase !== "deleting")
   const [global, setGlobal] = React.useState(null)
   const [perSandbox, setPerSandbox] = React.useState({})
   const [busy, setBusy] = React.useState(null)
+  const [error, setError] = React.useState(null)
 
   const load = React.useCallback(async () => {
+    setError(null)
     try {
       const g = await api.settings()
       setGlobal(g.global)
       const entries = await Promise.all(sandboxes.map(async (s) => [s.name, (await api.settings(s.name).catch(() => ({ sandbox: null }))).sandbox]))
       setPerSandbox(Object.fromEntries(entries))
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { setError(e.message) }
   }, [sandboxes.map((s) => s.name).join(",")]) // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => { load() }, [load])
 
@@ -61,27 +63,30 @@ export function GuardrailsView() {
     } catch (e) { toast.error(e.message) } finally { setBusy(null) }
   }
 
+  if (error) return <div role="alert" className="p-5 text-sm"><p>{error}</p><button onClick={load} className="mt-2 underline">Try again</button></div>
   if (!global) return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
 
   return (
-    <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
-      <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
-        {GUARDRAILS.map((spec) => {
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="space-y-4 p-5">
+        <p className="text-xs leading-relaxed text-muted-foreground">Write OCSF JSON files for external security monitoring. Activity collects events separately; this setting does not control the Activity feed. Use Activity webhooks to forward collected events directly. Retention of these separate log files is configured outside the console.</p>
+        {LOG_SETTINGS.map((spec) => {
           const g = global[spec.key]
           const warning = spec.risk?.(g)
           return (
             <section key={spec.key} className="rounded-lg border border-border bg-card">
-              <div className="grid gap-3 border-b border-border/70 px-5 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+              <div className="grid gap-3 border-b border-border/70 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                 <div>
                   <h2 className="w-fit text-[13px] font-medium" title={`${spec.describe}\n${spec.key}`}>{spec.title}</h2>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{spec.describe}</p>
                 </div>
-                <div className="space-y-1.5 md:text-right">
+                <div className="space-y-1.5 sm:text-right">
                   <p className="text-[10px] font-bold tracking-widest text-faint uppercase">Gateway-wide</p>
-                  <div className="flex items-center gap-2 md:justify-end">
+                  <div className="flex items-center gap-2 sm:justify-end">
                     <Control spec={spec} value={g} busy={busy === `global:${spec.key}`} onChange={(v) => set("global", spec.key, v)} />
                   </div>
                   {g !== null && g !== undefined
-                    ? <button onClick={() => set("global", spec.key, null, true)} title="Let each sandbox choose" className="text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Clear</button>
+                    ? <button onClick={() => set("global", spec.key, null, true)} title="Let each sandbox choose" className="text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Use per-sandbox settings</button>
                     : <p className="text-[10px] text-muted-foreground">Default: {String(spec.type === "choice" ? spec.options.find((o) => o.id === spec.fallback).label.toLowerCase() : spec.fallback ? "on" : "off")}</p>}
                 </div>
               </div>

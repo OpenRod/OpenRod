@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -136,19 +137,26 @@ export function chunkView(sandbox, chunk) {
 // OCSF shorthand lines are the sandbox's audit trail, e.g.
 //   NET:OPEN [MED] DENIED /usr/local/bin/claude(0) -> api.example.com:443 [reason:...]
 //   HTTP:POST [INFO] ALLOWED POST http://api.anthropic.com:443/v1/messages [policy:_provider_x engine:l7]
-const OCSF = /^(NET|HTTP|SSH|FINDING|CONFIG|PROC|FILE|AUTH|EVENT)(?::(\S+))?\s+\[(\w+)\]\s+(ALLOWED|DENIED|BLOCKED)?\s*(.*)$/
+const OCSF = /^(NET|HTTP|SSH|FINDING|CONFIG|PROC|FILE|AUTH|EVENT)(?::(\S+))?\s+\[(\w+)\]\s*(ALLOWED|DENIED|BLOCKED)?\s*(.*)$/
 export function logView(sandbox, line) {
+  const original = JSON.parse(JSON.stringify(line, (_, value) => typeof value === 'bigint' ? value.toString() : value))
   const base = {
+    id: createHash('sha256').update(JSON.stringify([sandbox, original])).digest('hex'),
+    idSource: 'Fingerprint of source envelope; source event ID unavailable',
+    original,
     sandbox,
     at: iso(line.eventTime),
     level: line.level,
     source: line.source,
     target: line.target,
     message: line.message,
+    action: line.fields?.action || null,
+    destination: line.fields?.destination || null,
+    reason: line.fields?.reason || null,
   }
   // Someone ran a command in the sandbox (exec, connect's shell, an SDK call).
   if (line.target === 'openshell_server::grpc::sandbox' && /^ExecSandbox\b.*command started/.test(line.message)) {
-    return { ...base, kind: 'inbound', type: 'command', verdict: 'allowed', detail: 'Command run in the sandbox' }
+    return { ...base, kind: 'inbound', type: 'command', category: 'PROC', action: 'EXEC', outcome: 'unknown', verdict: null, detail: 'Command run in the sandbox' }
   }
   if (line.level !== 'OCSF') return { ...base, kind: 'log' }
   const match = OCSF.exec(line.message)
@@ -170,7 +178,7 @@ export function logView(sandbox, line) {
     const http = /^(\w+)\s+(\S+)/.exec(body)
     if (http) {
       method = http[1]
-      try { const url = new URL(http[2]); destination = `${url.hostname}${url.pathname}` } catch { destination = http[2] }
+      destination = http[2]
     }
   }
   return {
@@ -179,6 +187,8 @@ export function logView(sandbox, line) {
     category,
     action: action ?? null,
     severity,
+    direction: ['NET', 'HTTP'].includes(category) ? 'out' : 'unknown',
+    outcome: action === 'FAIL' ? 'failure' : 'unknown',
     verdict: verdict === 'ALLOWED' ? 'allowed' : verdict ? 'denied' : null,
     binary, destination, method,
     policy,
@@ -196,23 +206,23 @@ export function logView(sandbox, line) {
 //   SSH:OPEN [INFO] ALLOWED                        (a terminal or exec session)
 const INTERNAL_PORTS = new Set(['3128', '17670'])
 function inboundView(base, [, category, action, severity, verdict, rest]) {
-  const common = { ...base, kind: 'inbound', category, action: action ?? null, severity }
+  const common = { ...base, kind: 'inbound', category, action: action ?? null, severity, direction: ['NET', 'HTTP', 'SSH'].includes(category) ? 'in' : 'unknown', outcome: action === 'FAIL' ? 'failure' : 'unknown' }
   if (category === 'CONFIG' && /^SERVICE_ENDPOINT_/.test(action ?? '')) {
     const m = /exposed\s+(\S+?)(?:\/(\S+))?\s+->\s+\S+:(\d+)/.exec(rest) ?? /(\S+?)(?:\/(\S+))?\s*(?:->\s*\S+:(\d+))?$/.exec(rest)
-    return { ...common, type: /CREATED|EXPOSED|UPDATED/.test(action) ? 'service-opened' : 'service-closed', verdict: 'allowed', service: m?.[2] ?? '', port: m?.[3] ? Number(m[3]) : null, detail: rest.trim() }
+    return { ...common, type: /CREATED|EXPOSED|UPDATED/.test(action) ? 'service-opened' : 'service-closed', verdict: null, service: m?.[2] ?? '', port: m?.[3] ? Number(m[3]) : null, detail: rest.trim() }
   }
   if (category === 'SSH' && action === 'OPEN') {
-    return { ...common, type: 'session', verdict: verdict === 'ALLOWED' ? 'allowed' : verdict ? 'denied' : 'allowed', detail: 'Terminal session opened' }
+    return { ...common, type: 'session', verdict: verdict === 'ALLOWED' ? 'allowed' : verdict ? 'denied' : null, detail: 'Terminal session opened' }
   }
   if (category === 'NET' && /\[policy:sandbox_service_relay\b/.test(rest)) {
     const port = Number(/127\.0\.0\.1:(\d+)/.exec(rest)?.[1]) || null
     const reason = /\[reason:([^\]]*)\]/.exec(rest)?.[1] ?? null
-    return { ...common, type: 'visit', verdict: verdict === 'ALLOWED' ? 'allowed' : 'denied', port, reason, detail: reason ?? 'Visit to an exposed service' }
+    return { ...common, type: 'visit', verdict: verdict === 'ALLOWED' ? 'allowed' : verdict ? 'denied' : null, port, reason, detail: reason ?? 'Visit to an exposed service' }
   }
   if (category === 'NET' && (action === 'OPEN' || action === 'FAIL') && base.source === 'sandbox') {
     const m = /^127\.0\.0\.1:(\d+)\/tcp\b/.exec(rest.trim())
     if (m && !INTERNAL_PORTS.has(m[1])) {
-      return { ...common, type: 'visit', verdict: action === 'OPEN' ? 'allowed' : 'denied', port: Number(m[1]), reason: action === 'FAIL' ? 'nothing listening on that port' : null, detail: `Connection into port ${m[1]}` }
+      return { ...common, type: 'visit', verdict: verdict === 'ALLOWED' ? 'allowed' : verdict ? 'denied' : null, port: Number(m[1]), reason: action === 'FAIL' ? 'nothing listening on that port' : null, detail: `Connection into port ${m[1]}` }
     }
   }
   return null

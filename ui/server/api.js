@@ -1,9 +1,15 @@
+import path from 'node:path'
+import { Readable } from 'node:stream'
+import { fileURLToPath } from 'node:url'
+import { createActivityStore } from './activity-store.js'
+import { createActivityDelivery } from './activity-delivery.js'
+import { toOCSF } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { IMAGE_TEMPLATE_ID, IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
 import { sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
-import { WORKSPACE, gateway, logView, policyView, providerView, sandboxView } from './gateway.js'
+import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
@@ -106,18 +112,6 @@ async function sandboxDetail(name) {
   }
 }
 
-async function activity(only) {
-  const { client } = await gateway()
-  const sandboxes = live(await listSandboxes()).filter((s) => !only || s.name === only)
-  const all = await Promise.all(sandboxes.map(async (s) => {
-    try {
-      const logs = await client.raw.getSandboxLogs({ sandbox: s.name, lines: 400, workspaceScope: WORKSPACE })
-      return logs.logs.map((line) => logView(s.name, line))
-    } catch { return [] }
-  }))
-  return all.flat().sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')).slice(0, 800)
-}
-
 // ---- writes -----------------------------------------------------------------
 
 async function createSandbox(input) {
@@ -180,69 +174,111 @@ async function lifecycle(name, action) {
 // One upstream watch per sandbox, shared by every open browser tab. The list
 // itself has no watch RPC, so it is re-read on a short timer and on any status
 // snapshot from a watched sandbox.
-function createHub() {
-  const clients = new Set()
-  const watches = new Map()
-  let timer = null
-  let lastList = ''
-
+export function createHub(store, { connect = gateway, list = listSandboxes, interval = 5000 } = {}) {
+  const clients = new Set(), watches = new Map()
+  let timer = null, healthTimer = null, lastList = '', stopped = false, refreshing = false
   const emit = (event, data) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
-    for (const res of clients) res.write(frame)
+    for (const res of clients) { if (res.destroyed) clients.delete(res); else if (!res.write(frame)) { clients.delete(res); res.destroy() } }
   }
-
+  const health = () => { if (!clients.size || healthTimer || stopped) return; healthTimer = setTimeout(() => { healthTimer = null; if (!stopped) emit('collection', store.coverage()) }, 250) }
+  const status = (id, patch) => { store.source(id, patch); health() }
   async function refresh() {
-    let sandboxes
-    try { sandboxes = await listSandboxes() } catch (error) { emit('gateway-error', { message: error.message }); return }
-    const serialized = JSON.stringify(sandboxes)
-    if (serialized !== lastList) { lastList = serialized; emit('sandboxes', sandboxes) }
-    const wanted = new Set(live(sandboxes).map((s) => s.name))
-    for (const [name, controller] of watches) if (!wanted.has(name)) { controller.abort(); watches.delete(name) }
-    for (const name of wanted) if (!watches.has(name)) watch(name)
-  }
-
-  async function watch(name) {
-    const controller = new AbortController()
-    watches.set(name, controller)
+    if (refreshing || stopped) return
+    refreshing = true
     try {
-      const { client } = await gateway()
-      const stream = client.raw.watchSandbox({
-        sandbox: name, workspaceScope: WORKSPACE,
-        followStatus: true, followLogs: true, followEvents: true,
-        logTailLines: 0, eventTail: 0,
-      }, { signal: controller.signal })
-      for await (const event of stream) {
-        const payload = event.payload
-        if (payload.case === 'log') emit('log', logView(name, payload.value))
-        else if (payload.case === 'sandbox') refresh()
+      const { client, target } = await connect()
+      const sandboxes = await list()
+      if (stopped) return
+      const serialized = JSON.stringify(sandboxes)
+      if (serialized !== lastList) { lastList = serialized; emit('sandboxes', sandboxes) }
+      const wanted = new Set(live(sandboxes).map((s) => `${target.endpoint}|${s.id || s.name}|${s.createdAt || ''}`))
+      for (const old of store.coverage().sources) if (!wanted.has(old.id) && old.status !== 'inactive') store.source(old.id, { status: 'inactive', stoppedAt: new Date().toISOString() })
+      for (const [id, controller] of watches) if (!wanted.has(id)) { controller.abort(); watches.delete(id); status(id, { status: 'inactive', stoppedAt: new Date().toISOString() }) }
+      for (const sandbox of live(sandboxes)) {
+        const id = `${target.endpoint}|${sandbox.id || sandbox.name}|${sandbox.createdAt || ''}`
+        if (!watches.has(id)) watch(client, sandbox, id).catch((error) => emit('gateway-error', { message: `Collection failed: ${error.message}` }))
       }
-    } catch { /* Stream ended or sandbox went away; the next refresh decides. */ }
-    if (watches.get(name) === controller) watches.delete(name)
+      emit('gateway-health', { status: 'connected' })
+      health()
+    } catch (error) { emit('gateway-error', { message: error.message }) }
+    finally { refreshing = false }
   }
-
+  async function watch(client, sandbox, id) {
+    const controller = new AbortController()
+    watches.set(id, controller)
+    const previous = store.getSource(id)
+    status(id, { sandbox: sandbox.name, status: 'connecting', connectedAt: null, gapSince: previous?.gapSince || new Date().toISOString(), gapPossible: true })
+    let cursor = previous?.cursor || ''
+    const save = (line, sourceCursor) => {
+      if (stopped) return
+      const event = store.ingest({ ...logView(sandbox.name, line), ...(sourceCursor ? { sourceCursor } : {}) }, id)
+      if (event) emit('log', event)
+      if (event) store.source(id, { lastEventAt: event.at, lastReceivedAt: new Date().toISOString() })
+    }
+    // Subscribe first with bounded replay. A separate history read confirms source reachability.
+    try {
+      const stream = client.raw.watchSandbox({ sandbox: sandbox.name, workspaceScope: WORKSPACE, followStatus: true, followLogs: true, followEvents: true, logTailLines: 400, eventTail: 400, resumeAfterCursor: cursor }, { signal: controller.signal })
+      const recovery = (async () => {
+        try {
+          const logs = await client.raw.getSandboxLogs({ sandbox: sandbox.name, lines: 400, workspaceScope: WORKSPACE }, { signal: controller.signal })
+          if (stopped || controller.signal.aborted) return
+          for (const line of logs.logs) save(line)
+          status(id, { lastHistoryAt: new Date().toISOString(), historyError: null, replayLines: logs.logs.length, replayMayBeTruncated: logs.logs.length >= 400 })
+        } catch (error) { if (!stopped && !controller.signal.aborted) status(id, { historyError: error.message }) }
+      })()
+      for await (const event of stream) {
+        if (stopped || controller.signal.aborted) break
+        store.source(id, { status: 'watching', error: null, lastContactAt: new Date().toISOString() })
+        const payload = event.payload
+        if (payload.case === 'log') save(payload.value, event.cursor)
+        else if (payload.case === 'sandbox') refresh()
+        else if (payload.case) {
+          const original = JSON.parse(JSON.stringify(payload.value, (_, v) => typeof v === 'bigint' ? v.toString() : v))
+          const saved = store.ingest({ ...(payload.case === 'warning' ? { id: randomUUID() } : {}), sandbox: sandbox.name, kind: 'event', category: 'EVENT', source: original.source || 'gateway-watch', action: payload.case === 'warning' ? 'STREAM_WARNING' : original.reason || payload.case, severity: original.type || (payload.case === 'warning' ? 'WARN' : null), original, message: original.message || JSON.stringify(original), at: iso(original.eventTime), sourceCursor: event.cursor || null }, id)
+          if (payload.case === 'warning') status(id, { gapPossible: true, warning: original.message, gapSince: new Date().toISOString() })
+          if (saved) emit('log', saved)
+        }
+        // Advance only after the corresponding evidence has been persisted.
+        if (event.cursor && event.cursor > cursor) { cursor = event.cursor; store.source(id, { cursor }) }
+      }
+      await recovery
+      if (!stopped && !controller.signal.aborted) status(id, { status: 'disconnected', gapSince: new Date().toISOString(), gapPossible: true })
+    } catch (error) {
+      if (!stopped && !controller.signal.aborted) {
+        const code = error.connectCode ?? error.code ?? error.cause?.code
+        const invalidCursor = Boolean(cursor) && [3, 11].includes(code)
+        status(id, { status: 'disconnected', error: error.message, gapSince: new Date().toISOString(), gapPossible: true, ...(invalidCursor ? { cursor: '', warning: 'Saved cursor is no longer available. Falling back to bounded history replay.' } : {}) })
+        const gap = store.ingest({ id: randomUUID(), sandbox: sandbox.name, at: new Date().toISOString(), kind: 'event', category: 'EVENT', action: 'COLLECTION_INTERRUPTED', severity: 'WARN', source: 'console-collector', message: error.message, reason: invalidCursor ? 'Resume cursor rejected; history may be incomplete' : 'Source stream interrupted; resume will be attempted' }, id)
+        if (gap) emit('log', gap)
+      }
+    }
+    if (watches.get(id) === controller) watches.delete(id)
+  }
   return {
-    add(res) {
-      clients.add(res)
-      if (!timer) { refresh(); timer = setInterval(refresh, 3000) }
-      else if (lastList) res.write(`event: sandboxes\ndata: ${lastList}\n\n`)
+    start() {
+      for (const source of store.coverage().sources) store.source(source.id, { status: 'unverified', gapPossible: true })
+      refresh(); timer = setInterval(refresh, interval)
     },
-    remove(res) {
-      clients.delete(res)
-      if (clients.size) return
-      clearInterval(timer); timer = null; lastList = ''
-      for (const controller of watches.values()) controller.abort()
-      watches.clear()
-    },
+    stop() { stopped = true; clearInterval(timer); clearTimeout(healthTimer); for (const controller of watches.values()) controller.abort(); watches.clear() },
+    add(res) { clients.add(res); if (lastList) res.write(`event: sandboxes\ndata: ${lastList}\n\n`); res.write(`event: collection\ndata: ${JSON.stringify(store.coverage())}\n\n`) },
+    remove(res) { clients.delete(res) },
   }
 }
 
 // ---- router -----------------------------------------------------------------
 
 export function openshellApi() {
-  const hub = createHub()
   return {
     name: 'openshell-console-api',
     configureServer(server) {
+      const store = createActivityStore(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity.sqlite'))
+      const delivery = createActivityDelivery(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity-delivery.sqlite'), store)
+      delivery.start()
+      const hub = createHub(store)
+      if (server.httpServer?.listening) hub.start()
+      else server.httpServer?.once('listening', () => hub.start())
+      server.httpServer?.once('close', () => { hub.stop(); delivery.stop(); store.close() })
       const stopSweeper = startSweeper((message) => server.config.logger.info(`[ingress] ${message}`))
       const stopOrgSweeper = startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
       server.httpServer?.once('close', () => { stopSweeper(); stopOrgSweeper() })
@@ -263,10 +299,34 @@ export function openshellApi() {
             if (parts[0] === 'overview') return send(res, 200, await overview())
             if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await listSandboxes())
             if (parts[0] === 'sandboxes' && parts.length === 2 && NAME.test(parts[1])) return send(res, 200, await sandboxDetail(parts[1]))
+            if (parts[0] === 'activity-destinations' && parts.length === 1) return send(res, 200, delivery.list())
             if (parts[0] === 'activity') {
               const only = url.searchParams.get('sandbox')
               if (only && !NAME.test(only)) throw fail('Unknown sandbox.')
-              return send(res, 200, await activity(only))
+              const options = JSON.parse(url.searchParams.get('query') || '{}')
+              if (only) options.sandboxes = [only]
+              if (parts[1] === 'export') {
+                const format = url.searchParams.get('format') || 'json'
+                if (!['json', 'ocsf'].includes(format)) throw fail('Unknown export format')
+                const first = store.query({ ...options, limit: 500, offset: 0, snapshot: undefined })
+                res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="openshell-activity${format === 'ocsf' ? '-ocsf' : ''}.json"`, 'Cache-Control': 'no-store' })
+                function* chunks() {
+                  yield format === 'ocsf' ? '[' : JSON.stringify({ exportedAt: new Date().toISOString(), query: options, coverage: first.coverage, total: first.total }).slice(0, -1) + ',"events":['
+                  let page = first, comma = ''
+                  while (true) {
+                    for (const event of page.events) { yield comma + JSON.stringify(format === 'ocsf' ? toOCSF(event) : event); comma = ',' }
+                    if (page.nextOffset === null) break
+                    page = store.query({ ...options, limit: 500, snapshot: first.snapshot, offset: page.nextOffset, now: first.now })
+                  }
+                  yield format === 'ocsf' ? ']' : ']}'
+                }
+                const stream = Readable.from(chunks())
+                stream.on('error', (error) => res.destroy(error))
+                res.on('close', () => stream.destroy())
+                stream.pipe(res)
+                return
+              }
+              return send(res, 200, store.query(options))
             }
             const routed = (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
             if (routed !== undefined) return send(res, 200, routed)
@@ -278,6 +338,10 @@ export function openshellApi() {
           }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
           const input = await body(req, parts[0] === 'image-templates' ? 512 * 1024 : 65536)
+          if (parts[0] === 'activity-destinations') {
+            if (parts.length === 1) return send(res, 200, delivery.create(input))
+            if (parts.length === 3) return send(res, 200, parts[2] === 'test' ? await delivery.test(parts[1]) : delivery.change(parts[1], parts[2]))
+          }
           if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await createSandbox(input))
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))

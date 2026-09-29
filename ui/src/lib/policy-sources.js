@@ -11,8 +11,13 @@ export const SOURCE_ORDER = ["org", "group", "own", "secret"]
 export const sourceOf = (key) => (key.startsWith("_provider_") ? "secret" : key.startsWith("org_") ? "org" : key.startsWith("group_") ? "group" : "own")
 export const displayName = (key) => key.replace(/^_provider_/, "").replace(/^(org|group)_/, "").replace(/_/g, "-")
 
-export const hostOf = (d) => d?.split("/")[0]?.replace(/:\d+$/, "") ?? null
-export const portOf = (d) => Number(/:(\d+)/.exec(d?.split("/")[0] ?? "")?.[1]) || 443
+export function hostOf(d) {
+  if (!d) return null
+  try { return new URL(d.includes('://') ? d : `https://${d}`).hostname } catch { return d.split('/')[0].replace(/:\d+$/, '') }
+}
+export function portOf(d) {
+  try { const url = new URL(d.includes('://') ? d : `https://${d}`); return Number(url.port) || (url.protocol === 'http:' ? 80 : 443) } catch { return 443 }
+}
 export const program = (path) => path.split("/").pop()
 export const isIp = (host) => /^\d+\.\d+\.\d+\.\d+$/.test(host)
 

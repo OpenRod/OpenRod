@@ -30,6 +30,7 @@ function DropdownMenuContent({
   side = "bottom",
   sideOffset = 4,
   className,
+  positionerRender,
   ...props
 }) {
   return (
@@ -40,6 +41,7 @@ function DropdownMenuContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        render={positionerRender}
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
@@ -95,10 +97,16 @@ function DropdownMenuItem({
   )
 }
 
-function DropdownMenuSub({
-  ...props
-}) {
-  return <MenuPrimitive.SubmenuRoot data-slot="dropdown-menu-sub" {...props} />
+const SubmenuDirection = React.createContext(null)
+
+function DropdownMenuSub({ side = "right", ...props }) {
+  const [actualSide, setActualSide] = React.useState(side)
+  return <SubmenuDirection.Provider value={{ side, actualSide, setActualSide }}><MenuPrimitive.SubmenuRoot data-slot="dropdown-menu-sub" {...props} /></SubmenuDirection.Provider>
+}
+
+function SubmenuPositioner({ positionerProps, side, onSide }) {
+  React.useLayoutEffect(() => { onSide(side) }, [side, onSide])
+  return <div {...positionerProps} />
 }
 
 function DropdownMenuSubTrigger({
@@ -107,6 +115,8 @@ function DropdownMenuSubTrigger({
   children,
   ...props
 }) {
+  const direction = React.useContext(SubmenuDirection)
+  const opensLeft = ["left", "inline-start"].includes(direction?.actualSide)
   return (
     <MenuPrimitive.SubmenuTrigger
       data-slot="dropdown-menu-sub-trigger"
@@ -117,8 +127,9 @@ function DropdownMenuSubTrigger({
       )}
       {...props}
     >
+      {opensLeft && <ChevronRightIcon className="rotate-180" />}
       {children}
-      <ChevronRightIcon className="ml-auto" />
+      {!opensLeft && <ChevronRightIcon className="ml-auto" />}
     </MenuPrimitive.SubmenuTrigger>
   )
 }
@@ -126,18 +137,20 @@ function DropdownMenuSubTrigger({
 function DropdownMenuSubContent({
   align = "start",
   alignOffset = -3,
-  side = "right",
+  side,
   sideOffset = 0,
   className,
   ...props
 }) {
+  const direction = React.useContext(SubmenuDirection)
   return (
     <DropdownMenuContent
       data-slot="dropdown-menu-sub-content"
       className={cn("w-auto min-w-[96px] rounded-lg bg-popover p-1 text-popover-foreground shadow-lg ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
       align={align}
       alignOffset={alignOffset}
-      side={side}
+      side={side ?? direction?.side ?? "right"}
+      positionerRender={direction ? (props, state) => <SubmenuPositioner positionerProps={props} side={state.side} onSide={direction.setActualSide} /> : undefined}
       sideOffset={sideOffset}
       {...props}
     />
