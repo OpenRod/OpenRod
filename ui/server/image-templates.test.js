@@ -77,3 +77,41 @@ test('an interrupted operation is never reported as available', async () => {
   assert.equal(loaded.status, 'failed')
   assert.match(loaded.error, /server stopped/)
 })
+
+test('every agent choice generates an installer and its required runtime', async () => {
+  const { AGENTS } = await import('../src/lib/image-templates.js')
+  assert.equal(AGENTS.length, 11)
+  assert.equal(AGENTS.filter((a) => a.featured).length, 4)
+  for (const agent of AGENTS) {
+    const recipe = newRecipe({ name: agent.name, agents: [agent.id] })
+    assert.deepEqual(recipeErrors(recipe), {})
+    const dockerfile = dockerfileFor(recipe)
+    if (agent.npm) {
+      assert.ok(dockerfile.includes(agent.npm))
+      assert.match(dockerfile, /COPY --from=node:22-bookworm-slim/)
+    } else if (agent.install) {
+      assert.ok(dockerfile.includes(`RUN ${agent.install} && command -v ${agent.command}`))
+      assert.ok(dockerfile.indexOf(`RUN ${agent.install}`) > dockerfile.indexOf('USER sandbox'))
+    } else assert.ok(dockerfile.includes(agent.id === 'aider' ? 'aider-chat' : 'https://claude.ai/install.sh'))
+  }
+})
+
+test('custom agent install scripts persist and remain separate from Dockerfile instructions', async () => {
+  const command = 'printf "%s\\n" "hello"\n# FROM must not become a Dockerfile directive\nexport AGENT_TEST=1'
+  const saved = await imageTemplateRoute('POST', ['image-templates'], { recipe: newRecipe({ name: 'Custom agent', customAgentInstall: command }) })
+  const loaded = await readImageTemplate(saved.id)
+  assert.equal(loaded.recipe.customAgentInstall, command)
+  const dockerfile = dockerfileFor(loaded.recipe)
+  assert.match(dockerfile, /COPY --chown=1000:1000 custom-agents.sh/)
+  assert.match(dockerfile, /RUN bash -euo pipefail \/tmp\/custom-agents.sh/)
+  assert.ok(dockerfile.indexOf('RUN bash -euo') > dockerfile.indexOf('USER sandbox'))
+  assert.ok(!dockerfile.includes('AGENT_TEST'))
+  assert.ok(!dockerfileFor(newRecipe()).includes('custom-agents.sh'))
+})
+
+test('custom install command rejects malformed and oversized values', async () => {
+  for (const value of [42, 'x'.repeat(12001), 'echo\0bad']) {
+    assert.ok(recipeErrors(newRecipe({ name: 'Custom', customAgentInstall: value })).customAgentInstall)
+  }
+  await assert.rejects(imageTemplateRoute('POST', ['image-templates'], { recipe: newRecipe({ name: 'Custom', customAgentInstall: {} }) }), /Invalid customAgentInstall/)
+})

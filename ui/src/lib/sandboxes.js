@@ -33,7 +33,7 @@ export const canStop = (phase) => ["ready", "provisioning", "starting"].includes
 export const canStart = (phase) => phase === "stopped"
 
 export const commandText = (command) => (command?.length ? command.join(" ") : "Scratch shell")
-export const imageName = (image) => image ?? "Gateway default"
+export const imageName = (image, templateName) => templateName || (/^sha256:[a-f0-9]{64}$/i.test(image ?? "") ? "Unknown template" : image) || "Gateway default"
 
 export function summarize(sandboxes) {
   const status = Object.fromEntries(STATUS_ORDER.map((key) => [key, 0]))
@@ -45,7 +45,7 @@ export const GROUP_LABEL = "openshell.console/group"
 
 export function groupKey(sandbox, by) {
   if (by === "group") return sandbox.labels?.[GROUP_LABEL] ?? "No group"
-  if (by === "image") return imageName(sandbox.image)
+  if (by === "image") return imageName(sandbox.image, sandbox.imageTemplateName)
   if (by === "provider") return sandbox.providers.length ? sandbox.providers.join(", ") : "No provider"
   return PHASE_LABEL[sandbox.phase] ?? "Unknown"
 }
@@ -59,6 +59,7 @@ export function destinationOf(chunk) {
 export const programName = (path) => (path ? path.split("/").pop() : "Unknown program")
 
 export const ownerOf = (sandbox) => sandbox.owner || sandbox.labels?.["openshell.console/owner"] || sandbox.labels?.owner || "Not reported"
+export const creatorOf = (sandbox) => sandbox.createdBy || sandbox.labels?.["openshell.console/created-by"] || "Not reported"
 
 export function elapsedSince(value, now = Date.now()) {
   const time = Date.parse(value)

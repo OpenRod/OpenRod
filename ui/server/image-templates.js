@@ -108,11 +108,11 @@ async function saveDraft(input) {
   if (!input?.recipe || typeof input.recipe !== 'object' || Array.isArray(input.recipe)) throw fail('An image recipe is required.')
   if (input.id && active.has(input.id)) throw fail('Wait for the current operation to finish.', 409)
   const recipe = newRecipe(Object.fromEntries(Object.keys(newRecipe()).filter((key) => key in input.recipe).map((key) => [key, input.recipe[key]])))
-  for (const key of ['name', 'description', 'source', 'base', 'image', 'repository', 'setup', 'command']) if (typeof recipe[key] !== 'string') throw fail(`Invalid ${key}.`)
+  for (const key of ['name', 'description', 'source', 'base', 'image', 'repository', 'setup', 'customAgentInstall', 'command']) if (typeof recipe[key] !== 'string') throw fail(`Invalid ${key}.`)
   for (const key of ['packages', 'runtimes', 'agents', 'npm', 'pip']) if (!Array.isArray(recipe[key]) || recipe[key].length > 80 || recipe[key].some((v) => typeof v !== 'string' || v.length > 200)) throw fail(`Invalid ${key}.`)
   if (!Array.isArray(recipe.files) || recipe.files.length > 20 || recipe.files.some((f) => !f || typeof f.path !== 'string' || typeof f.content !== 'string' || f.path.length > 200 || f.content.length > 16000)) throw fail('Invalid starting files.')
   if (!Array.isArray(recipe.environment) || recipe.environment.length > 40 || recipe.environment.some((e) => !e || typeof e.name !== 'string' || typeof e.value !== 'string' || e.name.length > 128 || e.value.length > 1000)) throw fail('Invalid environment variables.')
-  if (recipe.description.length > 400 || recipe.setup.length > 12000 || recipe.command.length > 512 || recipe.repository.length > 2048 || recipe.image.length > 256) throw fail('One or more recipe fields are too long.')
+  if (recipe.description.length > 400 || recipe.setup.length > 12000 || recipe.customAgentInstall.length > 12000 || recipe.command.length > 512 || recipe.repository.length > 2048 || recipe.image.length > 256) throw fail('One or more recipe fields are too long.')
   if (recipe.environment.some((e) => /secret|token|password|api_?key|credential|auth/i.test(e.name))) throw fail('Keep credentials in Secrets. Image templates accept non-secret variables only.')
   // Drafts may be incomplete; full validation runs before a build or import.
   if (typeof recipe.name !== 'string' || recipe.name.length > 80) throw fail('Template names are limited to 80 characters.')
@@ -144,6 +144,7 @@ async function start(id, archivePath) {
         await fs.mkdir(path.join(temp, 'files'))
         await fs.writeFile(path.join(temp, 'Dockerfile'), dockerfileFor(recipe))
         await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
+        await fs.writeFile(path.join(temp, 'custom-agents.sh'), recipe.customAgentInstall ?? '')
         await Promise.all(recipe.files.map((f, i) => fs.writeFile(path.join(temp, 'files', String(i)), f.content)))
         image = `openshell-template:${id}`
         await run(['build', '--progress=plain', '--tag', image, temp], { job, timeout: 30 * 60_000 })

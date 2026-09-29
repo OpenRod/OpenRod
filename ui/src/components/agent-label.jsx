@@ -7,9 +7,9 @@ export function AgentLabel({ agent = { name: "Not reported" } }) {
   </span>
 }
 
-export function AgentList({ agents = [] }) {
-  if (!agents.length) return <span className="text-muted-foreground">Not reported</span>
-  return <span className="flex min-w-0 flex-col items-start gap-1.5">
+export function AgentList({ agents = [], status = "Agent inventory not checked" }) {
+  if (!agents.length) return <span className="text-muted-foreground">{status}</span>
+  return <span title={status} className="flex min-w-0 flex-col items-start gap-1.5">
     {agents.map((agent) => <AgentLabel key={agent.name} agent={agent} />)}
   </span>
 }

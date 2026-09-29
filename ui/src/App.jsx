@@ -7,7 +7,6 @@ import { IngressView } from "@/components/ingress-view"
 import { SecretsView } from "@/components/secrets-view"
 import { TemplatesView } from "@/components/image-templates-view"
 import { GuardrailsView } from "@/components/guardrails-view"
-import { OrgView } from "@/components/org-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { LiveProvider } from "@/lib/live"
@@ -15,7 +14,6 @@ import { LiveProvider } from "@/lib/live"
 const TITLES = {
   sandboxes: "Sandboxes",
   activity: "Activity",
-  organization: "Organization",
   egress: "Egress",
   ingress: "Ingress",
   secrets: "Secrets",
@@ -75,7 +73,6 @@ export function App() {
           <PageBoundary view={view}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} />}
           {view === "activity" && <ActivityView />}
-          {view === "organization" && <OrgView />}
           {view === "egress" && <EgressView onNavigate={navigate} />}
           {view === "ingress" && <IngressView />}
           {view === "secrets" && <SecretsView />}

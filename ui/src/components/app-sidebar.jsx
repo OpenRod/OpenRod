@@ -23,7 +23,7 @@ const NAV = [
 ]
 
 const POLICIES = [
-  { label: "Organization", icon: Building2, view: "organization" },
+  { label: "Organization", icon: Building2, view: "organization", disabled: true },
   { label: "Egress", icon: Network, view: "egress" },
   { label: "Ingress", icon: DoorOpen, view: "ingress" },
   { label: "Secrets", icon: KeyRound, view: "secrets" },
@@ -73,11 +73,16 @@ export function AppSidebar({ view, onNavigate }) {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {POLICIES.map(({ label, icon: Icon, view: target }) => (
+              {POLICIES.map(({ label, icon: Icon, view: target, disabled }) => (
                 <SidebarMenuItem key={target}>
-                  <SidebarMenuButton isActive={view === target} onClick={() => onNavigate(target)}>
-                    <Icon />
-                    {label}
+                  <SidebarMenuButton disabled={disabled} isActive={!disabled && view === target}
+                    onClick={disabled ? undefined : () => onNavigate(target)}
+                    className={disabled ? "h-auto items-start text-muted-foreground" : undefined}>
+                    <Icon className={disabled ? "mt-0.5" : undefined} />
+                    <span>
+                      <span className="block">{label}</span>
+                      {disabled && <span className="block text-[10px]">Enterprise Version</span>}
+                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

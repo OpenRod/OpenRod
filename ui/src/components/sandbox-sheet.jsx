@@ -15,10 +15,10 @@ import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { SESSION_LABEL, sessionCommand } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
-import { ownerOf, uptimeOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
+import { ownerOf, creatorOf, uptimeOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
-import { agentsOf } from "@/lib/agents"
+import { agentsOf, agentInventoryLabel } from "@/lib/agents"
 import { AgentList } from "@/components/agent-label"
 import { Perimeter } from "@/components/perimeter"
 import { hostOf, sourceOf } from "@/lib/policy-sources"
@@ -70,8 +70,14 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
     setDetail(null); setError(null)
     if (live.demo) return
     let cancelled = false
-    api.sandbox(name).then((d) => { if (!cancelled) { setDetail(d); setError(null) } }).catch((e) => { if (!cancelled) setError(e.message) })
-    return () => { cancelled = true }
+    let timer
+    const refresh = async () => {
+      try { const d = await api.sandbox(name); if (!cancelled) { setDetail(d); setError(null) } }
+      catch (e) { if (!cancelled) setError(e.message) }
+      if (!cancelled) timer = setTimeout(refresh, 30000)
+    }
+    refresh()
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [name, version, live.demo])
 
   const sandbox = detail?.name === name ? detail : summary
@@ -146,7 +152,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <div className="grid min-h-full grid-cols-1 lg:h-full lg:grid-cols-[minmax(0,1fr)_250px]">
                   <div className="flex min-w-0 flex-col p-4 sm:p-5">
               <Section title="Access graph" className="flex flex-1 flex-col">
-                {detail?.policy ? <Perimeter compact fill agents={agents} name={name} phase={phase} allowed={allowed} denied={denied}
+                {detail?.policy ? <Perimeter compact fill agentStatus={agentInventoryLabel(sandbox)} agents={agents} name={name} phase={phase} allowed={allowed} denied={denied}
                   owner={ownerOf(sandbox)} gateway={live.demo ? undefined : live.overview?.gateway}
                   secrets={(sandbox.providers ?? []).map((provider) => live.overview?.providers?.find((item) => item.name === provider) ?? { name: provider })} />
                   : <p className="rounded-lg border border-border p-5 text-sm text-muted-foreground">{live.demo ? "Policy data is unavailable for synthetic sandboxes." : error ? "The access graph is unavailable because the policy could not be loaded." : detail ? "No policy was reported by the gateway." : "Loading access graph…"}</p>}
@@ -156,7 +162,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
                     <Section title="At a glance">
                       <dl className="grid grid-cols-2 gap-4 lg:grid-cols-1">
-                        {[["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
+                        {[["Owner", ownerOf(sandbox)], ["Created by", creatorOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
                     </Section>
               {phase === "ready" && (sandbox.tty || sandbox.labels?.[SESSION_LABEL]) && (
@@ -251,11 +257,12 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               <TabsContent value="details" className="min-h-0 space-y-5 overflow-y-auto p-5">
               <dl className="grid grid-cols-1 gap-5  sm:grid-cols-2">
                 {[
-                  ["Owner", ownerOf(sandbox)],
+                  ["Owner", ownerOf(sandbox)], ["Created by", creatorOf(sandbox)],
                   ["Uptime", uptimeOf(sandbox, now)],
-                  ["Image", imageName(sandbox.image), true],
+                  ["Image", imageName(sandbox.image, sandbox.imageTemplateName), true],
+                  ...(sandbox.image && imageName(sandbox.image, sandbox.imageTemplateName) !== sandbox.image ? [["Image reference", sandbox.image, true]] : []),
                   ["Command", commandText(sandbox.command), true],
-                  [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} />],
+                  [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />],
                   ["Providers", sandbox.providers.join(", ") || "None"],
                   ["Created", absoluteTime(sandbox.createdAt)],
                   ["Workspace", sandbox.workspace],
