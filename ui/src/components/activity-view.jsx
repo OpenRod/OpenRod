@@ -1,3 +1,4 @@
+import { SelectField } from "@/components/ui/select-field"
 import * as React from "react"
 import { ArrowDown, ArrowUp, Check, Copy, Filter, Pause, Play, Search, X, SlidersHorizontal, Download, Webhook, ChevronDown, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -7,7 +8,8 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { exportDocument } from "@/lib/activity-export"
 import { AgentLabel } from "@/components/agent-label"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -69,6 +71,7 @@ export function ActivityView() {
   const [viewName, setViewName] = React.useState('')
   const [destinationsOpen, setDestinationsOpen] = React.useState(false)
   const [viewPanel, setViewPanel] = React.useState('columns')
+  const [exportOptions, setExportOptions] = React.useState(null)
   const [exporting, setExporting] = React.useState(false)
   const [held, setHeld] = React.useState(null)
   const [anchor, setAnchor] = React.useState(Date.now)
@@ -119,14 +122,21 @@ export function ActivityView() {
   function pivot(key, value) {
     applyView({ filters: { [key]: { mode: 'equals', value } } }); setSelected(null)
   }
-  async function exportMatches(exportFormat = 'json') {
+  function openExport(format) {
+    setExportOptions({ format, columns: [...visibleColumns], range, from, to })
+  }
+  const exportInvalid = exportOptions && (!exportOptions.columns.length || (exportOptions.range === 'custom' && ((!exportOptions.from && !exportOptions.to) || (exportOptions.from && !Number.isFinite(Date.parse(exportOptions.from))) || (exportOptions.to && !Number.isFinite(Date.parse(exportOptions.to))) || (exportOptions.from && exportOptions.to && Date.parse(exportOptions.from) > Date.parse(exportOptions.to)))))
+  async function exportMatches() {
+    if (!exportOptions || exportInvalid) return
+    const { format: exportFormat, columns, range, from, to } = exportOptions
+    const exportQuery = { ...investigation, columns, range, from: from ? new Date(from).toISOString() : '', to: to ? new Date(to).toISOString() : '' }
     setExporting(true)
     try {
-      if (live.demo) { download(shown.map((r) => r.event), { ...investigation, demo: true }, exportFormat); return }
+      if (live.demo) { download(filterActivity(rows, { ...exportQuery, now: anchor }).map((r) => r.event), { ...exportQuery, demo: true }, exportFormat); setExportOptions(null); return }
       const link = document.createElement('a')
-      link.href = `/api/os/activity/export?format=${exportFormat}&query=${encodeURIComponent(JSON.stringify(investigation))}`
+      link.href = `/api/os/activity/export?format=${exportFormat}&query=${encodeURIComponent(JSON.stringify(exportQuery))}`
       link.download = exportFormat === 'ocsf' ? 'openshell-activity-ocsf.json' : 'openshell-activity.json'
-      document.body.appendChild(link); link.click(); link.remove()
+      document.body.appendChild(link); link.click(); link.remove(); setExportOptions(null)
     } catch (e) { toast.error(`Export failed: ${e.message}`) } finally { setExporting(false) }
   }
   const hold = () => { if (!held) { setHeld(events); setAnchor(Date.now()) } }
@@ -160,21 +170,21 @@ export function ActivityView() {
     <div className="flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
         <div className="relative min-w-44 flex-1 basis-full sm:basis-44"><Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" /><Input aria-label="Search activity" placeholder="Search activity…" value={query} onChange={(e) => change(setQuery)(e.target.value)} className="h-9 border-transparent bg-muted/50 pl-9 text-xs shadow-none focus-visible:bg-background" /></div>
-        <select aria-label="Time range" className={control} value={range} onChange={(e) => change(setRange)(e.target.value)}>{Object.entries(RANGE).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
-        <Popover><PopoverTrigger className={`${control} flex items-center gap-2 hover:bg-muted`}><Filter className="size-3.5" />Filters{(direction !== 'all' || sandboxes.length > 0 || verdicts.length > 0 || Object.values(filters).some((f) => f.value)) && <span className="rounded bg-foreground px-1.5 text-[10px] text-background">{Number(direction !== 'all') + Number(sandboxes.length > 0) + Number(verdicts.length > 0) + Object.values(filters).filter((f) => f.value).length}</span>}</PopoverTrigger>
+        <Popover><PopoverTrigger className={`${control} flex items-center gap-2 hover:bg-muted`}><Filter className="size-3.5" />Filters{(range !== 'all' || direction !== 'all' || sandboxes.length > 0 || verdicts.length > 0 || Object.values(filters).some((f) => f.value)) && <span className="rounded bg-foreground px-1.5 text-[10px] text-background">{Number(range !== 'all') + Number(direction !== 'all') + Number(sandboxes.length > 0) + Number(verdicts.length > 0) + Object.values(filters).filter((f) => f.value).length}</span>}</PopoverTrigger>
           <PopoverContent align="end" className="max-h-[min(38rem,80svh)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto p-4">
             <p className="text-xs font-medium">Filter activity</p>
+            <label className="grid gap-1.5 text-[11px] text-muted-foreground">Time frame<SelectField aria-label="Time range" className={control} value={range} onChange={(e) => change(setRange)(e.target.value)}>{Object.entries(RANGE).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</SelectField></label>
             <label className="grid gap-1.5 text-[11px] text-muted-foreground">Direction
-              <select aria-label="Direction" className={control} value={direction} onChange={(e) => change(setDirection)(e.target.value)}><option value="all">All directions</option><option value="unknown">Direction not applicable / unknown</option><option value="out">Outbound</option><option value="in">Inbound</option></select>
+              <SelectField aria-label="Direction" className={control} value={direction} onChange={(e) => change(setDirection)(e.target.value)}><option value="all">All directions</option><option value="unknown">Direction not applicable / unknown</option><option value="out">Outbound</option><option value="in">Inbound</option></SelectField>
             </label>
             <label className="grid gap-1.5 text-[11px] text-muted-foreground">Event type
-              <select aria-label="Event category" className={control} value={filters.category?.value || ''} onChange={(e) => change(setFilters)({ ...filters, category: { mode: 'equals', value: e.target.value } })}><option value="">All event types</option>{['Network', 'HTTP', 'Session', 'Configuration', 'Process', 'File', 'Authentication', 'Finding', 'Event', 'Log', 'Unclassified'].map((name) => <option key={name}>{name}</option>)}</select>
+              <SelectField aria-label="Event category" className={control} value={filters.category?.value || ''} onChange={(e) => change(setFilters)({ ...filters, category: { mode: 'equals', value: e.target.value } })}><option value="">All event types</option>{['Network', 'HTTP', 'Session', 'Configuration', 'Process', 'File', 'Authentication', 'Finding', 'Event', 'Log', 'Unclassified'].map((name) => <option key={name}>{name}</option>)}</SelectField>
             </label>
             <label className="grid gap-1.5 text-[11px] text-muted-foreground">Security severity
-              <select aria-label="Security severity" className={control} value={filters.severity?.value || ''} onChange={(e) => change(setFilters)({ ...filters, severity: { mode: 'equals', value: e.target.value } })}><option value="">All severities</option>{['FATAL', 'CRITICAL', 'HIGH', 'MED', 'LOW', 'INFO', 'Not reported'].map((name) => <option key={name}>{name}</option>)}</select>
+              <SelectField aria-label="Security severity" className={control} value={filters.severity?.value || ''} onChange={(e) => change(setFilters)({ ...filters, severity: { mode: 'equals', value: e.target.value } })}><option value="">All severities</option>{['FATAL', 'CRITICAL', 'HIGH', 'MED', 'LOW', 'INFO', 'Not reported'].map((name) => <option key={name}>{name}</option>)}</SelectField>
             </label>
             <label className="grid gap-1.5 text-[11px] text-muted-foreground">Log level
-              <select aria-label="Log level" className={control} value={filters.logLevel?.value || ''} onChange={(e) => change(setFilters)({ ...filters, logLevel: { mode: 'equals', value: e.target.value } })}><option value="">All log levels</option>{['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE', 'Not reported'].map((name) => <option key={name}>{name}</option>)}</select>
+              <SelectField aria-label="Log level" className={control} value={filters.logLevel?.value || ''} onChange={(e) => change(setFilters)({ ...filters, logLevel: { mode: 'equals', value: e.target.value } })}><option value="">All log levels</option>{['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE', 'Not reported'].map((name) => <option key={name}>{name}</option>)}</SelectField>
             </label>
             <div className="mt-1 border-t pt-3"><p className="mb-2 text-[11px] font-medium">Decision</p><div className="grid grid-cols-2 gap-2">{['allowed', 'denied', 'not reported', 'not applicable'].map((value) => <label key={value} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={verdicts.includes(value)} onChange={() => change(setVerdicts)(verdicts.includes(value) ? verdicts.filter((v) => v !== value) : [...verdicts, value])} />{value}</label>)}</div></div>
             <div className="mt-1 flex flex-col gap-2 border-t pt-3"><p className="text-[11px] font-medium">Sandboxes</p><Choices label="Sandboxes" options={options} selected={sandboxes} onChange={change(setSandboxes)} /></div>
@@ -186,18 +196,17 @@ export function ActivityView() {
             {viewPanel === 'columns' ? <div>{COLUMNS.map((column) => <label key={column.id} className="flex items-center gap-2 py-1 text-xs"><input type="checkbox" disabled={column.id === 'time'} checked={visibleColumns.includes(column.id)} onChange={(e) => setVisibleColumns(e.target.checked ? [...visibleColumns, column.id] : visibleColumns.filter((id) => id !== column.id))} />{column.label}</label>)}</div> : <div className="flex max-h-80 flex-col gap-3 overflow-auto"><Input aria-label="View name" value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this investigation…" /><Button size="sm" disabled={!viewName.trim()} onClick={() => { try { const next = [...saved.filter((v) => v.name !== viewName.trim()), { name: viewName.trim(), query: investigation }]; localStorage.setItem('openshell.activity.views', JSON.stringify(next)); setSaved(next); setViewName(''); toast.success('View saved in this browser') } catch { toast.error('Could not save view') } }}>Save view</Button>{saved.map((view) => <div key={view.name} className="flex items-center gap-2"><button className="min-w-0 flex-1 truncate text-left text-xs" onClick={() => applyView(view.query)}>{view.name}</button><button aria-label={`Delete view ${view.name}`} onClick={() => { try { const next = saved.filter((v) => v.name !== view.name); localStorage.setItem('openshell.activity.views', JSON.stringify(next)); setSaved(next) } catch { toast.error('Could not delete view') } }}><X className="size-3" /></button></div>)}{!saved.length && <p className="py-2 text-center text-xs text-muted-foreground">No saved views yet.</p>}</div>}
           </PopoverContent>
         </Popover>
-        <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
-        <Button size="sm" variant="outline" onClick={() => { if (held) { setHeld(null); setAnchor(Date.now()); history.refresh(); virtual.scrollToTop() } else hold() }}>{held ? <Play /> : <Pause />}{held ? 'Resume' : 'Pause'}</Button>
-        {!live.demo && <DropdownMenu><DropdownMenuTrigger disabled={deleteBusy} aria-label="Delete logs" className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"><Trash2 className="size-3.5" />Delete<ChevronDown className="size-3" /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuItem disabled={!checked.size} variant="destructive" onClick={() => reviewDeletion('selected')}>Delete selected logs{checked.size ? ` (${checked.size})` : ''}</DropdownMenuItem>
-          <DropdownMenuItem disabled={Boolean(invalidRange) || history.loading || !history.total} variant="destructive" onClick={() => reviewDeletion('matching')}>Delete matching logs</DropdownMenuItem>
-          <DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onClick={() => reviewDeletion('all')}>Delete all logs</DropdownMenuItem>
-        </DropdownMenuContent></DropdownMenu>}
-        <DropdownMenu><DropdownMenuTrigger aria-label="Export" className="flex h-8 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Export<ChevronDown className="size-3" /></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuSub side="left"><DropdownMenuSubTrigger disabled={exporting || Boolean(invalidRange)}><Download />{exporting ? 'Exporting…' : 'Export matching events'}</DropdownMenuSubTrigger><DropdownMenuSubContent className="w-52"><DropdownMenuItem onClick={() => exportMatches('json')}>Console JSON</DropdownMenuItem><DropdownMenuItem onClick={() => exportMatches('ocsf')}>OCSF JSON · Base Event</DropdownMenuItem></DropdownMenuSubContent></DropdownMenuSub>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setDestinationsOpen(true)}><Webhook />Webhook</DropdownMenuItem>
+        <DropdownMenu><DropdownMenuTrigger aria-label="Activity actions" className={`${control} flex items-center gap-2 hover:bg-muted`}>Actions<ChevronDown className="size-3" /></DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuItem disabled={exporting || Boolean(invalidRange)} onClick={() => openExport('json')}><Download />Export Console JSON</DropdownMenuItem>
+            <DropdownMenuItem disabled={exporting || Boolean(invalidRange)} onClick={() => openExport('ocsf')}><Download />Export OCSF JSON</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDestinationsOpen(true)}><Webhook />Webhooks</DropdownMenuItem>
+            {!live.demo && <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={deleteBusy || !checked.size} variant="destructive" onClick={() => reviewDeletion('selected')}><Trash2 />Delete selected logs{checked.size ? ` (${checked.size})` : ''}</DropdownMenuItem>
+              <DropdownMenuItem disabled={deleteBusy || Boolean(invalidRange) || history.loading || !history.total} variant="destructive" onClick={() => reviewDeletion('matching')}><Trash2 />Delete matching logs</DropdownMenuItem>
+              <DropdownMenuItem disabled={deleteBusy} variant="destructive" onClick={() => reviewDeletion('all')}><Trash2 />Delete all logs</DropdownMenuItem>
+            </>}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -207,6 +216,7 @@ export function ActivityView() {
       <div className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-6 py-2 text-[11px] text-muted-foreground">
         <span><strong className="font-mono text-foreground">{live.demo ? shown.length.toLocaleString() : (history.total || 0).toLocaleString()}</strong> {live.demo ? 'demo events' : 'matching events'}</span>
         <span>{allowed.toLocaleString()} allowed · <span className={denied ? 'text-red-600' : ''}>{denied.toLocaleString()} denied</span> <span className="text-muted-foreground/70">in {shown.length.toLocaleString()} loaded</span></span>
+        <button className="flex min-h-10 items-center gap-1.5 rounded px-2 text-xs hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { if (held) { setHeld(null); setAnchor(Date.now()); history.refresh(); virtual.scrollToTop() } else hold() }}>{held ? <Play className="size-3" /> : <Pause className="size-3" />}{held ? 'Resume' : 'Pause'}</button>
         {held && <span className="flex items-center gap-2"><span>View paused</span><button className="rounded text-foreground underline underline-offset-4 disabled:opacity-40" disabled={live.demo && !pending} onClick={() => { setHeld(live.demo ? live.events : events); setAnchor(Date.now()); history.refresh(); virtual.scrollToTop() }}>{live.demo ? `${pending.toLocaleString()} new events` : 'Refresh'}</button></span>}
         {checked.size > 0 && <span className="flex items-center gap-2">{checked.size.toLocaleString()} selected<button className="underline" onClick={() => setChecked(new Set())}>Clear selection</button></span>}
         <span className="ml-auto">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
@@ -217,8 +227,8 @@ export function ActivityView() {
           <thead className="sticky top-0 z-10 bg-muted"><tr>{!live.demo && <th scope="col" className="h-10 border-b border-border px-3"><input type="checkbox" aria-label="Select loaded logs" disabled={!shown.length || shown.length > 5000} checked={shown.length > 0 && shown.every((row) => checked.has(row.key))} ref={(node) => { if (node) node.indeterminate = shown.some((row) => checked.has(row.key)) && !shown.every((row) => checked.has(row.key)) }} onChange={(e) => { hold(); setChecked(e.target.checked ? new Set(shown.map((row) => row.key)) : new Set()) }} /></th>}{columns.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'} className="h-10 border-b border-border px-3 text-left font-medium text-muted-foreground"><div className="flex items-center gap-1"><button className="flex h-9 flex-1 items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => change(setSort)({ key: c.id, direction: sort.key === c.id && sort.direction === 'asc' ? 'desc' : 'asc' })}>{c.label}{sort.key === c.id && (sort.direction === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>
             <Popover><PopoverTrigger aria-label={`Filter ${c.label}`} className={`rounded p-1 hover:bg-accent ${(c.id === 'time' ? range !== 'all' : c.id === 'sandbox' ? sandboxes.length : c.id === 'verdict' ? verdicts.length : filters[c.id]?.value) ? 'bg-accent text-foreground' : ''}`}><Filter className="size-3" /></PopoverTrigger><PopoverContent align="start">
               <p className="text-xs font-medium">Filter {c.label.toLowerCase()}</p>
-              {c.id === 'sandbox' ? <Choices label="Sandboxes" options={options} selected={sandboxes} onChange={change(setSandboxes)} /> : c.id === 'verdict' ? <Choices label="Decisions" options={['allowed', 'denied', 'not reported', 'not applicable']} selected={verdicts} onChange={change(setVerdicts)} /> : c.id === 'time' ? <><select aria-label="Filter time" className={control} value={range} onChange={(e) => change(setRange)(e.target.value)}>{Object.entries(RANGE).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><p className="text-[11px] text-muted-foreground">Custom dates appear above the table.</p></> : <>
-                <select aria-label={`${c.label} match mode`} className={control} value={filters[c.id]?.mode ?? 'contains'} onChange={(e) => change(setFilters)({ ...filters, [c.id]: { value: filters[c.id]?.value ?? '', mode: e.target.value } })}><option value="equals">Equals</option><option value="contains">Contains</option><option value="excludes">Excludes</option></select>
+              {c.id === 'sandbox' ? <Choices label="Sandboxes" options={options} selected={sandboxes} onChange={change(setSandboxes)} /> : c.id === 'verdict' ? <Choices label="Decisions" options={['allowed', 'denied', 'not reported', 'not applicable']} selected={verdicts} onChange={change(setVerdicts)} /> : c.id === 'time' ? <><SelectField aria-label="Filter time" className={control} value={range} onChange={(e) => change(setRange)(e.target.value)}>{Object.entries(RANGE).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</SelectField><p className="text-[11px] text-muted-foreground">Custom dates appear above the table.</p></> : <>
+                <SelectField aria-label={`${c.label} match mode`} className={control} value={filters[c.id]?.mode ?? 'contains'} onChange={(e) => change(setFilters)({ ...filters, [c.id]: { value: filters[c.id]?.value ?? '', mode: e.target.value } })}><option value="equals">Equals</option><option value="contains">Contains</option><option value="excludes">Excludes</option></SelectField>
                 <Input aria-label={`${c.label} filter value`} placeholder={`Filter ${c.label.toLowerCase()}…`} value={filters[c.id]?.value ?? ''} onChange={(e) => change(setFilters)({ ...filters, [c.id]: { mode: filters[c.id]?.mode ?? 'contains', value: e.target.value } })} className="h-8 text-xs" />
               </>}
             </PopoverContent></Popover>
@@ -239,6 +249,19 @@ export function ActivityView() {
       {!live.demo && history.nextOffset !== null && <div className="flex justify-center border-t py-2"><Button variant="outline" size="sm" disabled={history.loading} onClick={() => { hold(); history.more() }}>{history.loading ? 'Loading…' : 'Load more matching events'}</Button></div>}
       <footer className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border bg-card px-6 py-2 text-[10px] text-muted-foreground"><span className="flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${live.demo || live.connection === 'live' ? 'bg-emerald-500' : 'bg-amber-500'}`} />{status}{held ? ' · paused view' : ''}</span>{!live.demo && <Popover><PopoverTrigger className="rounded text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Collection details</PopoverTrigger><PopoverContent side="top" align="start" className="w-96 max-w-[calc(100vw-2rem)] text-xs"><p className="font-medium">Collection details</p><p className="text-muted-foreground">{coverage?.sources?.filter((s) => s.status === 'watching').length ?? 0} sources watching · {coverage?.sources?.filter((s) => !['watching', 'inactive'].includes(s.status) || Boolean(s.historyError)).length ?? 0} sources need attention</p><p className="mt-2">{coverage?.retention || 'Loading collection status…'} Earlier events and interruption gaps may be missing. Time filters search retained evidence only.</p><p className="mt-1">Archive started: {timestamp(coverage?.startedAt)} · {(coverage?.retained ?? 0).toLocaleString()} retained events</p><div className="mt-2 max-h-44 overflow-auto">{coverage?.sources?.map((source) => <div key={source.id} className="border-t border-border py-2"><strong>{source.sandbox}</strong> · {source.status} · Last received: {timestamp(source.lastReceivedAt)} · Last source contact: {timestamp(source.lastContactAt)} · History checked: {timestamp(source.lastHistoryAt)}{source.gapPossible && <span> · Possible gap since {timestamp(source.gapSince)}</span>}{source.warning && <p>{source.warning}</p>}{source.error && <p>{source.error}</p>}{source.historyError && <p>History unavailable: {source.historyError}</p>}</div>)}</div></PopoverContent></Popover>}<span className="ml-auto">{events.length.toLocaleString()} loaded · {live.demo ? 'synthetic history' : 'local retained history'}</span><span className="w-full">Loaded window: {times.length ? `${timestamp(new Date(Math.min(...times)).toISOString())} – ${timestamp(new Date(Math.max(...times)).toISOString())}` : 'No timestamps available'}</span></footer>
     </div>
+    <Dialog open={Boolean(exportOptions)} onOpenChange={(open) => { if (!open) setExportOptions(null) }}>
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Export {exportOptions?.format === 'ocsf' ? 'OCSF JSON' : 'Console JSON'}</DialogTitle><DialogDescription>Your current columns and time frame are ready to export. Other table filters still apply.</DialogDescription></DialogHeader>
+        {exportOptions && <>
+          <label className="grid gap-2 text-xs font-medium">Time frame<SelectField className={control} value={exportOptions.range} onChange={(e) => setExportOptions({ ...exportOptions, range: e.target.value })}>{Object.entries(RANGE).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</SelectField></label>
+          {exportOptions.range === 'custom' && <div className="grid gap-3 sm:grid-cols-2">{['from', 'to'].map((key) => <label key={key} className="grid gap-1 text-xs"><span>{key === 'from' ? 'From' : 'To'}</span><input type="datetime-local" className={control + ' w-full min-w-0'} value={exportOptions[key]} onChange={(e) => setExportOptions({ ...exportOptions, [key]: e.target.value })} /></label>)}<p className="text-[11px] text-muted-foreground sm:col-span-2">{Intl.DateTimeFormat().resolvedOptions().timeZone} · Leave one end empty for an open range.</p></div>}
+          <fieldset className="space-y-3"><legend className="text-xs font-medium">Columns</legend><div className="grid grid-cols-2 gap-3">{COLUMNS.map((column) => <label key={column.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={exportOptions.columns.includes(column.id)} disabled={column.id === 'time' && exportOptions.format === 'ocsf'} onChange={(e) => setExportOptions({ ...exportOptions, columns: e.target.checked ? [...exportOptions.columns, column.id] : exportOptions.columns.filter((id) => id !== column.id) })} />{column.label}</label>)}</div></fieldset>
+          {exportOptions.format === 'ocsf' && <p className="text-[11px] text-muted-foreground">OCSF includes the required event time and schema fields alongside your selected columns.</p>}
+          {exportInvalid && <p role="alert" className="text-xs text-destructive">Choose at least one column and a valid time frame.</p>}
+          <DialogFooter><Button variant="outline" onClick={() => setExportOptions(null)}>Cancel</Button><Button disabled={exporting || exportInvalid} onClick={exportMatches}><Download />{exporting ? 'Exporting…' : 'Export'}</Button></DialogFooter>
+        </>}
+      </DialogContent>
+    </Dialog>
     <AlertDialog open={Boolean(deletion)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeletion(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{deletion?.mode === 'all' ? 'Delete all retained logs?' : deletion?.mode === 'matching' ? 'Delete matching logs?' : 'Delete selected logs?'}</AlertDialogTitle><AlertDialogDescription>{deletion?.count.toLocaleString()} log{deletion?.count === 1 ? '' : 's'} will be permanently removed from Activity and pending webhook delivery. This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
       <p className="text-xs leading-relaxed text-muted-foreground">{deletion?.mode === 'all' ? 'This includes every sandbox and ignores the current filters. ' : ''}New logs arriving after this review will be kept. Copies in sandbox files, exports, or external systems are not deleted; a webhook request already in flight may still arrive.</p>
       {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}

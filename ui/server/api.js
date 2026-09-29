@@ -3,7 +3,7 @@ import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { createActivityStore } from './activity-store.js'
 import { createActivityDelivery } from './activity-delivery.js'
-import { toOCSF } from '../src/lib/activity-export.js'
+import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { IMAGE_TEMPLATE_ID, IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
@@ -315,7 +315,7 @@ export function openshellApi() {
                   yield format === 'ocsf' ? '[' : JSON.stringify({ exportedAt: new Date().toISOString(), query: options, coverage: first.coverage, total: first.total }).slice(0, -1) + ',"events":['
                   let page = first, comma = ''
                   while (true) {
-                    for (const event of page.events) { yield comma + JSON.stringify(format === 'ocsf' ? toOCSF(event) : event); comma = ',' }
+                    for (const event of page.events) { yield comma + JSON.stringify(exportEvent(event, format, options.columns)); comma = ',' }
                     if (page.nextOffset === null) break
                     page = store.query({ ...options, limit: 500, snapshot: first.snapshot, offset: page.nextOffset, now: first.now })
                   }

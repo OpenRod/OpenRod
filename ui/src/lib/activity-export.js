@@ -1,3 +1,5 @@
+import { activityRow } from './activity-inventory.js'
+
 // Pinned contract: https://github.com/ocsf/ocsf-schema/tree/v1.4.0
 // Base Event is deliberately used: shorthand lacks the evidence required to
 // faithfully populate specialized network/process/authentication classes.
@@ -26,7 +28,25 @@ export function toOCSF(event) {
     unmapped: { openshell: event, time_basis: Number.isFinite(sourceTime) ? 'source_event' : 'collection_time; source timestamp unavailable' },
   }
 }
+export function exportEvent(event, format = 'json', columns) {
+  if (!Array.isArray(columns)) return format === 'ocsf' ? toOCSF(event) : event
+  const values = activityRow(event).values
+  const selected = Object.fromEntries(columns.filter((key) => Object.hasOwn(values, key)).map((key) => [key, values[key]]))
+  if (format !== 'ocsf') return selected
+  const base = toOCSF(event)
+  return {
+    category_uid: 0, class_uid: 0,
+    activity_id: columns.includes('action') ? base.activity_id : 0,
+    type_uid: columns.includes('action') ? base.type_uid : 0,
+    ...(columns.includes('action') && base.activity_name ? { activity_name: base.activity_name } : {}),
+    severity_id: columns.includes('severity') ? base.severity_id : 0,
+    time: base.time,
+    metadata: { version: OCSF_VERSION, product: base.metadata.product },
+    unmapped: { openshell: selected, time_basis: base.unmapped.time_basis },
+  }
+}
 export function exportDocument(events, context, format = 'json') {
-  if (format === 'ocsf') return events.map(toOCSF)
-  return { exportedAt: new Date().toISOString(), context, events }
+  const selected = events.map((event) => exportEvent(event, format, context?.columns))
+  if (format === 'ocsf') return selected
+  return { exportedAt: new Date().toISOString(), context, events: selected }
 }
