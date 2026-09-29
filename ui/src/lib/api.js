@@ -13,6 +13,8 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  previewActivityDeletion: (body) => request('/activity/delete-preview', { method: 'POST', body }),
+  deleteActivity: (token) => request('/activity/delete', { method: 'POST', body: { token } }),
   activityDestinations: () => request('/activity-destinations'),
   createActivityDestination: (body) => request('/activity-destinations', { method: 'POST', body }),
   activityDestinationAction: (id, action) => request(`/activity-destinations/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: {} }),

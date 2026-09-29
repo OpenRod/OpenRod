@@ -4,6 +4,18 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/jetbrains-mono";
 
+@font-face {
+  font-family: "PP Rader";
+  src: url("/fonts/PPRader-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+.sidebar-wordmark {
+  font-family: "PP Rader", "Geist Variable", sans-serif;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /* OpenRod Desk — tokens from the approved "Minimalist Card Flow" design. Light only. */

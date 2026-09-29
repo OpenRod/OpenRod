@@ -46,7 +46,7 @@ export function AppSidebar({ view, onNavigate }) {
       <SidebarHeader className="p-6">
         <div className="flex items-center gap-2">
           <img src="/openrod.svg" alt="" aria-hidden="true" className="h-7 w-auto shrink-0" />
-          <span className="text-lg font-semibold tracking-tight">OpenShell</span>
+          <span className="sidebar-wordmark text-lg font-normal tracking-tight">OpenShell</span>
         </div>
       </SidebarHeader>
 

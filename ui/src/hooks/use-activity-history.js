@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { api } from '@/lib/api'
 
-export function useActivityHistory(options, { paused, demo }) {
+export function useActivityHistory(options, { paused, demo, activityRevision }) {
   const pausedRef = React.useRef(paused)
   pausedRef.current = paused
   const query = JSON.stringify(options)
@@ -29,7 +29,7 @@ export function useActivityHistory(options, { paused, demo }) {
     fetchPage()
     const timer = setInterval(() => { if (!pausedRef.current) fetchPage(true) }, 5000)
     return () => { alive = false; clearInterval(timer) }
-  }, [query, demo, revision])
+  }, [query, demo, revision, activityRevision])
   const more = async () => {
     const version = generation.current
     const ticket = ++request.current

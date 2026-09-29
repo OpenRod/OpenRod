@@ -17,6 +17,8 @@ export function LiveProvider({ children }) {
   const [collection, setCollection] = React.useState(null)
   const [historyError, setHistoryError] = React.useState(null)
   const seen = React.useRef(new Set())
+  const cacheEpoch = React.useRef(0)
+  const [activityRevision, setActivityRevision] = React.useState(0)
 
   const addEvents = React.useCallback((incoming) => {
     const fresh = incoming.filter((e) => {
@@ -39,13 +41,20 @@ export function LiveProvider({ children }) {
   }, [])
 
   const loadHistory = React.useCallback(async () => {
-    try { const result = await api.activity({ limit: 500 }); addEvents(result.events); setCollection(result.coverage); setHistoryError(null) } catch (error) { setHistoryError(error.message) }
+    const epoch = cacheEpoch.current
+    try { const result = await api.activity({ limit: 500 }); if (epoch !== cacheEpoch.current) return; addEvents(result.events); setCollection(result.coverage); setHistoryError(null) } catch (error) { setHistoryError(error.message) }
   }, [addEvents])
 
   React.useEffect(() => {
     loadOverview(); loadHistory()
     const source = new EventSource("/api/os/stream")
-    source.onopen = () => { setConnection("live"); loadHistory() }
+    const resetHistory = () => {
+      cacheEpoch.current++
+      seen.current.clear(); setEvents([]); setActivityRevision((n) => n + 1)
+      loadHistory()
+    }
+    source.onopen = () => { setConnection("live"); resetHistory() }
+    source.addEventListener("activity-deleted", (e) => { setCollection(JSON.parse(e.data).coverage); resetHistory() })
     source.onerror = () => setConnection("reconnecting")
     source.addEventListener("sandboxes", (e) => { setConnection("live"); setSandboxes(JSON.parse(e.data)) })
     source.addEventListener("log", (e) => addEvents([JSON.parse(e.data)]))
@@ -58,9 +67,9 @@ export function LiveProvider({ children }) {
 
   const value = React.useMemo(() => ({
     sandboxes: sandboxes ?? overview?.sandboxes ?? null,
-    overview, events, connection, collection, historyError,
+    overview, events, connection, collection, historyError, activityRevision,
     refresh: () => { loadOverview(); loadHistory() },
-  }), [sandboxes, overview, events, connection, collection, historyError, loadOverview, loadHistory])
+  }), [sandboxes, overview, events, connection, collection, historyError, activityRevision, loadOverview, loadHistory])
 
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>
 }
