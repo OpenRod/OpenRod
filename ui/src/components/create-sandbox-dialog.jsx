@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { sessionCommand } from "@/lib/sandbox-session"
+import { STARTS } from "@/lib/image-templates"
 
 const PRESETS = [
   { id: "claude", label: "Claude Code", command: "claude" },
@@ -49,15 +50,17 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     for (const s of list) if (s.image) counts[s.image] = (counts[s.image] ?? 0) + 1
     setName(nextName(new Set(list.map((s) => s.name))))
     setImage(Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "")
-    setImageTemplate(initialImageTemplate?.id || "")
+    setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
-    api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === 'available'))).catch(() => {})
+    api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
     setChosen(providers.map((p) => p.name))
     setPreset("claude"); setCustom(""); setError(null); setTemplate("locked-down")
     api.templates().then(setTemplates).catch(() => setTemplates([]))
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const command = preset === "custom" ? custom : PRESETS.find((p) => p.id === preset).command
+  const chosenImage = images.find((t) => t.name === imageTemplate)
+  const templateStart = chosenImage?.recipe.command ?? ""
 
   async function submit(event) {
     event.preventDefault()
@@ -93,9 +96,9 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
             <Label htmlFor="sandbox-image-template" className="text-xs">Image template</Label>
             <select id="sandbox-image-template" value={imageTemplate} onChange={(e) => setImageTemplate(e.target.value)} className="h-8 rounded-md border border-input bg-transparent px-2 text-xs">
               <option value="">Use an image reference</option>
-              {images.map((t) => <option key={t.id} value={t.id}>{t.recipe.name}</option>)}
+              {images.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
             </select>
-            {imageTemplate && <p className="text-[11px] text-muted-foreground">Starts with {images.find((t) => t.id === imageTemplate)?.recipe.command || 'a shell'}. Software and launch defaults only; access is selected below.</p>}
+            {imageTemplate && <p className="text-[11px] text-muted-foreground">Starts in {STARTS.find((s) => s.id === templateStart)?.name ?? templateStart}. Software and environment only; access is selected below.</p>}
           </div>
           {!imageTemplate && <div className="grid gap-1.5">
             <Label htmlFor="sandbox-image" className="text-xs">Image reference</Label>
@@ -135,7 +138,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 })}
               </div>
             ) : <p className="text-[11px] text-muted-foreground">No providers</p>}
-            {(imageTemplate ? images.find((t) => t.id === imageTemplate)?.recipe.command === 'claude' : preset === "claude") && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
+            {(imageTemplate ? templateStart === "claude" : preset === "claude") && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
               <p className="text-[11px] text-amber-700">Claude Code needs a claude-code provider</p>
             )}
           </div>
