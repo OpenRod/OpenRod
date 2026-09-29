@@ -24,7 +24,8 @@ import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
 import { GROUP_LABEL, styleOf } from "@/lib/sandboxes"
-import { SOURCE, SOURCE_ORDER, displayName, hostMatches, hostOf, isIp, portOf, program, sourceOf } from "@/lib/policy-sources"
+import { hostMatches } from "@/lib/egress"
+import { SOURCE, SOURCE_ORDER, displayName, hostOf, isIp, portOf, program, sourceOf } from "@/lib/policy-sources"
 import { cn } from "@/lib/utils"
 
 const REVISION = {

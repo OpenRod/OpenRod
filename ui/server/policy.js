@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { WORKSPACE, gateway, iso, policyView, providerView, sandboxView } from './gateway.js'
-import { blockedBy, isManaged, readOrg } from './org.js'
+import { blockedBy, isManaged, managedOpsFor, readOrg } from './org.js'
 
 const exec = promisify(execFile)
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
@@ -193,9 +193,13 @@ async function applyOps(sandbox, ops) {
     if (hit) throw fail(`${hit.host} is blocked by organization policy (${hit.pattern}).`, 403)
   }
   const { client } = await gateway()
+  // A block covers every port the sandbox opens, so a rule that opens a new
+  // port takes the recomputed blocks along in the same revision.
+  const opened = ops.flatMap((op) => (op.kind === 'addRule' ? (op.rule?.endpoints ?? []).flatMap((e) => e.ports ?? []) : ['addAllow', 'addDeny'].includes(op.kind) ? op.ports ?? [] : [])).map(Number)
+  const managed = opened.some((p) => ![443, 80].includes(p)) ? await managedOpsFor(client, sandbox, opened) : []
   const response = await client.raw.updateConfig({
     sandbox, workspaceScope: WORKSPACE, global: false,
-    mergeOperations: ops.map(mergeOp),
+    mergeOperations: [...ops.map(mergeOp), ...managed],
     annotations: { 'console.openshell/change': ops.map((o) => `${o.kind}:${o.ruleName ?? o.rule?.name ?? ''}`).join(',').slice(0, 200) },
     requestId: randomUUID(),
   })

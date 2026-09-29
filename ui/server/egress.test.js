@@ -31,6 +31,13 @@ test('a block denies every request on the host and its subdomains, on every port
   assert.deepEqual(rules.org_blocked.endpoints.map((e) => e.host), ['pastebin.com', '**.pastebin.com'])
 })
 
+test('a block also covers the ports the sandbox opens on its own', () => {
+  const block = validatePolicy({ id: 'b', name: 'B', action: 'block', destinations: ['db.example.com'], appliesTo: { everyone: true } })
+  const rules = compileFor({ name: 'a', group: null }, [block], ['pastebin.com'], [5432, 443])
+  assert.deepEqual(ports(rules.egress_b.endpoints[0]), [80, 443, 5432])
+  assert.deepEqual(ports(rules.org_blocked.endpoints[0]), [80, 443, 5432])
+})
+
 test('a policy reaches only the sandboxes it applies to', () => {
   const p = policy({ appliesTo: { groups: ['coding'], sandboxes: ['one'] } })
   assert.ok(compileFor({ name: 'x', group: 'coding' }, [p]).egress_p)

@@ -11,6 +11,8 @@ import { RequestList, Segmented } from "@/components/rule-editor"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
+export { appliesTo, blockPatterns } from "@/lib/egress"
+
 // An egress policy: a name, destinations and an action. Everything else is
 // Advanced, with defaults that mean "any request from any program on the web
 // ports". The server compiles each one into OpenShell rules (server/egress.js).
@@ -268,13 +270,6 @@ export function PolicyDialog({ open, onOpenChange, initial, groups = [], sandbox
     </Dialog>
   )
 }
-
-export const appliesTo = (policy, sandbox) => policy.appliesTo.everyone
-  || (sandbox.group != null && policy.appliesTo.groups.includes(sandbox.group))
-  || policy.appliesTo.sandboxes.includes(sandbox.name)
-
-// Blocking example.com also blocks its subdomains, as on the server.
-export const blockPatterns = (hosts) => hosts.flatMap((h) => (h.startsWith("*") || !h.includes(".") ? [h] : [h, `**.${h}`]))
 
 // The hosts blocked in every sandbox. They beat every policy.
 export function BlockedHostsDialog({ open, onOpenChange, org, onSaved }) {
