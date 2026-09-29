@@ -280,8 +280,12 @@ export function openshellApi() {
       if (server.httpServer?.listening) hub.start()
       else server.httpServer?.once('listening', () => hub.start())
       server.httpServer?.once('close', () => { hub.stop(); delivery.stop(); store.close() })
-      const stopSweeper = startSweeper((message) => server.config.logger.info(`[ingress] ${message}`))
-      const stopOrgSweeper = startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
+      // Several consoles can share one gateway during development. Only one of
+      // them may run the background passes, or each re-applies its own stored
+      // policy to every sandbox and they undo each other.
+      const passes = process.env.OPENSHELL_CONSOLE_SWEEP !== '0'
+      const stopSweeper = passes ? startSweeper((message) => server.config.logger.info(`[ingress] ${message}`)) : () => {}
+      const stopOrgSweeper = passes ? startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`)) : () => {}
       server.httpServer?.once('close', () => { stopSweeper(); stopOrgSweeper() })
       server.middlewares.use('/api/os', async (req, res) => {
         if (!isLocalApiRequest(req)) { res.writeHead(403).end(); return }
