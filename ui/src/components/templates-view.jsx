@@ -71,12 +71,12 @@ function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
     <Sheet open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <SheetContent className="w-full! overflow-y-auto sm:max-w-[560px]!" aria-describedby={undefined}>
         <SheetHeader className="border-b p-6">
-          <SheetTitle>{initial?.id ? "Edit template" : "New template"}</SheetTitle>
+          <SheetTitle>{initial?.idLocked ? "Edit security preset" : "New security preset"}</SheetTitle>
         </SheetHeader>
         <div className="space-y-5 px-6 pb-6">
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
-              <Label htmlFor="tpl-name" className="text-xs">Name</Label>
+              <Label htmlFor="tpl-name" className="text-xs">Preset name</Label>
               <Input id="tpl-name" value={t.name} onChange={(e) => setT({ ...t, name: e.target.value, id: t.idLocked ? t.id : e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) })} className="text-xs" />
             </div>
             <div className="grid gap-1.5">
@@ -172,7 +172,7 @@ function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
   )
 }
 
-export function TemplatesView() {
+export function SecurityPresetsView() {
   const live = useLive()
   const [templates, setTemplates] = React.useState(null)
   const [editing, setEditing] = React.useState(null)
@@ -193,7 +193,7 @@ export function TemplatesView() {
   if (templates.error) return <p role="alert" className="py-16 text-center text-sm text-muted-foreground">{templates.error}</p>
 
   return (
-    <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
+    <div>
       <div className="flex flex-wrap items-center justify-end gap-2 border-b border-border px-4 py-3 sm:px-6">
         {sandboxes.length > 0 && (
           <select value="" onChange={(e) => e.target.value && fromSandbox(e.target.value)} aria-label="Capture a sandbox's policy"
@@ -203,8 +203,8 @@ export function TemplatesView() {
           </select>
         )}
         <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"
-          onClick={() => duplicate({ ...templates[0], id: "my-template", name: "My template", description: "" })}>
-          <Plus />New template
+          onClick={() => setEditing({ ...structuredClone(templates[0]), id: "my-preset", name: "My preset", description: "", builtin: false })}>
+          <Plus />New security preset
         </Button>
       </div>
       <div className="mx-auto grid max-w-5xl gap-3 px-4 py-6 sm:px-6 lg:grid-cols-2">

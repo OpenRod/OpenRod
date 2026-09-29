@@ -10,11 +10,10 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
-import { ApprovalCard } from "@/components/approval-card"
-import { APPROVALS_SCOPE } from "@/components/approvals-view"
 import { AuditLine } from "@/components/audit-line"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
+import { SESSION_LABEL, sessionCommand } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
 import { ownerOf, uptimeOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
@@ -76,7 +75,6 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   }, [name, version, live.demo])
 
   const sandbox = detail?.name === name ? detail : summary
-  const pending = live.approvals.pending.filter((c) => c.sandbox === name)
   const recent = React.useMemo(() => live.events.filter((e) => e.sandbox === name && e.kind === "audit" && e.verdict).slice(0, 14), [live.events, name])
 
   async function act(action) {
@@ -129,7 +127,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               <span className="truncate">{name}</span>
               {phase && <span className="ml-2 flex shrink-0 items-center gap-1.5 text-xs font-normal text-muted-foreground"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} />{PHASE_LABEL[phase]}</span>}
             </DialogTitle>
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="mr-1 font-sans font-medium text-foreground">{detail?.policy ? allowed.length : "—"}</strong>allowed hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{denied.length}</strong>blocked hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{pending.length}</strong>pending approvals</span></div>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="mr-1 font-sans font-medium text-foreground">{detail?.policy ? allowed.length : "—"}</strong>allowed hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{denied.length}</strong>blocked hosts</span></div>
             </div>
             <DialogDescription className="sr-only">Sandbox access graph, details, rules, and connection activity.</DialogDescription>
           </DialogHeader>
@@ -140,7 +138,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <TabsList variant="line" aria-label="Sandbox information" className="max-w-full">
                   <TabsTrigger value="overview" className="px-3 text-xs">Overview</TabsTrigger>
                   <TabsTrigger value="rules" className="px-3 text-xs">Rules{detail?.policy && <span className="text-muted-foreground">{rules.length}</span>}</TabsTrigger>
-                  <TabsTrigger value="activity" className="px-3 text-xs">Activity{pending.length > 0 && <span className="rounded bg-amber-100 px-1 text-amber-800">{pending.length}</span>}</TabsTrigger>
+                  <TabsTrigger value="activity" className="px-3 text-xs">Activity</TabsTrigger>
                   <TabsTrigger value="details" className="px-3 text-xs">Details</TabsTrigger>
                 </TabsList>
               </div>
@@ -161,9 +159,10 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                         {[["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
                     </Section>
-              {phase === "ready" && sandbox.tty && (
+              {phase === "ready" && (sandbox.tty || sandbox.labels?.[SESSION_LABEL]) && (
                 <Section title="Attach">
-                  <CopyCommand command={`openshell sandbox connect ${name}`} />
+                  <CopyCommand command={sessionCommand(sandbox)} />
+                  {sandbox.labels?.[SESSION_LABEL] && <p className="mt-2 text-xs text-muted-foreground">Exiting this session keeps the sandbox running. Use Stop when you’re done.</p>}
                 </Section>
               )}
 
@@ -239,12 +238,6 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <div className="rounded-lg border border-border p-4"><EgressChart points={points} height={100} title="Outbound decisions per minute" /></div>
                 <p className="mt-2 text-xs text-muted-foreground">Based on the recent event buffer{live.demo ? " · synthetic preview" : ""}.</p>
               </Section>
-              {!live.demo && pending.length > 0 && (
-                <Section title={`Pending · ${pending.length}`}
-                  aside={<button onClick={() => { try { sessionStorage.setItem(APPROVALS_SCOPE, name) } catch { /* optional */ } onClose(); onNavigate("approvals") }} className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Open</button>}>
-                  <div className="space-y-2">{pending.map((chunk) => <ApprovalCard key={chunk.id} chunk={chunk} compact />)}</div>
-                </Section>
-              )}
 
               <Section title="Egress" aside={recent.length ? <button onClick={() => { onClose(); onNavigate("activity") }} className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">All</button> : null}>
                 {recent.length ? (

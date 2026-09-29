@@ -1,4 +1,4 @@
-import { Activity, Box, Building2, DoorOpen, FileLock2, Inbox, KeyRound, Network, ShieldCheck } from "lucide-react"
+import { Activity, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, ShieldCheck } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -18,7 +18,7 @@ import { useLive } from "@/lib/live"
 
 const NAV = [
   { label: "Sandboxes", icon: Box, view: "sandboxes" },
-  { label: "Approvals", icon: Inbox, view: "approvals" },
+  { label: "Templates", icon: Layers3, view: "templates" },
   { label: "Activity", icon: Activity, view: "activity" },
 ]
 
@@ -27,7 +27,6 @@ const POLICIES = [
   { label: "Egress", icon: Network, view: "egress" },
   { label: "Ingress", icon: DoorOpen, view: "ingress" },
   { label: "Secrets", icon: KeyRound, view: "secrets" },
-  { label: "Templates", icon: FileLock2, view: "templates" },
   { label: "Guardrails", icon: ShieldCheck, view: "guardrails" },
 ]
 
@@ -39,8 +38,7 @@ const CONNECTION = {
 }
 
 export function AppSidebar({ view, onNavigate }) {
-  const { approvals, connection, overview } = useLive()
-  const pending = approvals.pending.length
+  const { connection, overview } = useLive()
   const state = CONNECTION[connection] ?? CONNECTION.connecting
   const gateway = overview?.gateway
 
@@ -62,12 +60,6 @@ export function AppSidebar({ view, onNavigate }) {
                   <SidebarMenuButton isActive={view === target} onClick={() => onNavigate(target)}>
                     <Icon />
                     {label}
-                    {target === "approvals" && pending > 0 && (
-                      <span className="ml-auto flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-amber-800"
-                        aria-label={`${pending} waiting for review`}>
-                        {pending}
-                      </span>
-                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

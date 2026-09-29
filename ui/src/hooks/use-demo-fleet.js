@@ -18,7 +18,6 @@ export function useDemoFleet(live) {
     }, 450)
     return () => clearInterval(timer)
   }, [fleet])
-  const pending = React.useMemo(() => (fleet ? fleet.filter((_, i) => i % 97 === 3).map((s, i) => ({ id: `demo-${i}`, sandbox: s.name, endpoints: [{ host: "pastebin.com", port: 443 }] })) : []), [fleet])
   if (!fleet) return live
-  return { ...live, sandboxes: fleet, events, approvals: { ...live.approvals, pending }, demo: true }
+  return { ...live, sandboxes: fleet, events, demo: true }
 }

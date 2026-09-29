@@ -24,16 +24,11 @@ export const GROUP_LABEL = 'openshell.console/group'
 const GROUP_ID = /^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?$/
 const HOST_PATTERN = /^(\*\*?\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i
 
-// What happens to a request no rule covers.
-//   ask:   it waits in Approvals for a person.
-//   auto:  the gateway applies drafts its prover finds clean; the rest wait.
-//   block: the console rejects it on sight; nobody is asked.
-const OUTSIDE = ['ask', 'auto', 'block']
-
+// Connections outside configured policy always stay blocked.
 export const PREFIX = { org: 'org_', group: 'group_' }
 export const isManaged = (key) => key.startsWith(PREFIX.org) || key.startsWith(PREFIX.group)
 
-const EMPTY_ORG = { rules: [], blocked: [], outside: 'ask' }
+const EMPTY_ORG = { rules: [], blocked: [], outside: 'block' }
 
 function validateRules(input, prefix) {
   const rules = (Array.isArray(input) ? input : []).map((r) => {
@@ -98,14 +93,14 @@ export async function readOrg() {
   return {
     rules: validateRules(raw.rules, PREFIX.org),
     blocked: validateBlocked(raw.blocked),
-    outside: OUTSIDE.includes(raw.outside) ? raw.outside : 'ask',
+    outside: 'block',
   }
 }
 
 function validateGroup(input) {
   const id = String(input.id ?? '').trim()
   if (!GROUP_ID.test(id)) throw fail('Group ids use lowercase letters, digits and dashes.')
-  const outside = input.outside === 'inherit' || OUTSIDE.includes(input.outside) ? input.outside : 'inherit'
+  const outside = 'block'
   return {
     id,
     name: String(input.name ?? id).trim().slice(0, 80) || id,
@@ -136,7 +131,7 @@ const write = async (file, value) => {
 
 // ---- composition -------------------------------------------------------------
 
-export const effectiveOutside = (org, group) => (group && group.outside !== 'inherit' ? group.outside : org.outside)
+export const effectiveOutside = () => 'block'
 
 // The rules the console owns in a sandbox's policy, keyed by their policy name.
 function managedRules(org, group) {
@@ -163,18 +158,20 @@ export async function planSandbox({ group: groupId, template: templateId }) {
     policy,
     template,
     labels: group ? { [GROUP_LABEL]: group.id } : {},
-    approvalMode: effectiveOutside(org, group) === 'auto' ? 'auto' : 'manual',
   }
 }
 
-async function setApprovalMode(client, sandbox, mode) {
-  await client.raw.updateConfig({
-    sandbox, workspaceScope: WORKSPACE, global: false,
-    settingKey: 'proposal_approval_mode', settingValue: { value: { case: 'stringValue', value: mode } },
-    requestId: randomUUID(),
-  })
+// Gateway settings take precedence over sandbox overrides, including old auto settings.
+export async function enforcePolicyOnly(client) {
+  const current = await client.raw.getGatewayConfig({})
+  for (const [key, kind, value] of [
+    ['proposal_approval_mode', 'stringValue', 'manual'],
+    ['agent_policy_proposals_enabled', 'boolValue', false],
+  ]) {
+    if (current.settings?.[key]?.value?.value === value) continue
+    await client.raw.updateConfig({ global: true, settingKey: key, settingValue: { value: { case: kind, value } }, requestId: randomUUID() })
+  }
 }
-export { setApprovalMode }
 
 // Rewrites the managed rules of one sandbox to match the stored policy. The
 // sandbox's own rules are never touched.
@@ -185,7 +182,6 @@ async function syncOne(client, sandbox, org, groups, { force = true } = {}) {
   const status = await client.raw.getSandboxPolicyStatus({ sandbox: sandbox.name, workspaceScope: WORKSPACE })
   const current = Object.keys(status.revision?.policy?.networkPolicies ?? {}).filter(isManaged)
   const same = current.length === Object.keys(desired).length && current.every((k) => k in desired)
-  const mode = effectiveOutside(org, group) === 'auto' ? 'auto' : 'manual'
   if (!force && same) return { changed: false }
   const ops = [
     ...current.map((ruleName) => ({ operation: { case: 'removeRule', value: { ruleName } } })),
@@ -200,7 +196,6 @@ async function syncOne(client, sandbox, org, groups, { force = true } = {}) {
     })
     version = response.version
   }
-  await setApprovalMode(client, sandbox.name, mode)
   return { changed: true, version }
 }
 
@@ -230,20 +225,11 @@ export function settledBy(org, group, hosts) {
   return null
 }
 
-export async function policyContext() {
-  const [org, groups] = await Promise.all([readOrg(), listGroups()])
-  return { org, groupOf: (sandbox) => groups.find((g) => g.id === sandbox.labels?.[GROUP_LABEL]) ?? null }
-}
-
-// ---- the background pass ------------------------------------------------------
-//
-// Settles what policy already decided, so people only see what it didn't:
-// requests for blocked hosts and requests from "keep blocked" groups are
-// rejected, approvals of blocked hosts (e.g. by the gateway's auto mode) are
-// taken back, and sandboxes created outside the console get their rules.
-
+// Reconcile configured rules. Legacy proposals are rejected, never approved;
+// historical grants to explicitly blocked hosts are revoked as before.
 async function sweep(log) {
   const { client } = await gateway()
+  await enforcePolicyOnly(client)
   const [org, groups, sandboxes] = await Promise.all([readOrg(), listGroups(), liveSandboxes(client)])
   for (const s of sandboxes) {
     const group = groups.find((g) => g.id === s.labels?.[GROUP_LABEL]) ?? null
@@ -305,7 +291,7 @@ async function saveOrg(input) {
   const org = {
     rules: validateRules(input.rules, PREFIX.org),
     blocked: validateBlocked(input.blocked),
-    outside: OUTSIDE.includes(input.outside) ? input.outside : 'ask',
+    outside: 'block',
   }
   assertNotBlocked(org, org.rules, 'Organization')
   for (const g of await listGroups()) assertNotBlocked(org, g.rules, `Group ${g.name}`)

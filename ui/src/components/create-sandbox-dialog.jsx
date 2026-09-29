@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
+import { sessionCommand } from "@/lib/sandbox-session"
 
 const PRESETS = [
   { id: "claude", label: "Claude Code", command: "claude" },
@@ -23,24 +24,24 @@ function nextName(taken) {
   return ""
 }
 
-const OUTSIDE_TEXT = { block: "rest blocked", auto: "safe auto-approved", ask: "rest needs review" }
 
 // What the sandbox will be allowed before it starts, in one line.
 function groupSummary(org, id, templates) {
   if (!org) return "Organization policy"
   const g = org.groups.find((x) => x.id === id)
   const orgRules = org.org.rules.length
-  if (!g) return `${orgRules} org rules · ${OUTSIDE_TEXT[org.org.outside]}`
-  const outside = g.outside === "inherit" ? org.org.outside : g.outside
+  if (!g) return `${orgRules} org rules · rest blocked`
   const tpl = templates.find((t) => t.id === g.template)?.name ?? g.template
-  return `${tpl} · ${orgRules + g.rules.length} rules · ${OUTSIDE_TEXT[outside]}`
+  return `${tpl} · ${orgRules + g.rules.length} rules · rest blocked`
 }
 
-export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
+export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImageTemplate = null }) {
   const { sandboxes, overview } = useLive()
   const providers = overview?.providers ?? []
   const [name, setName] = React.useState("")
   const [image, setImage] = React.useState("")
+  const [images, setImages] = React.useState([])
+  const [imageTemplate, setImageTemplate] = React.useState("")
   const [chosen, setChosen] = React.useState([])
   const [preset, setPreset] = React.useState("claude")
   const [custom, setCustom] = React.useState("")
@@ -60,6 +61,9 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
     for (const s of list) if (s.image) counts[s.image] = (counts[s.image] ?? 0) + 1
     setName(nextName(new Set(list.map((s) => s.name))))
     setImage(Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "")
+    setImageTemplate(initialImageTemplate?.id || "")
+    setImages(initialImageTemplate ? [initialImageTemplate] : [])
+    api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === 'available'))).catch(() => {})
     setChosen(providers.map((p) => p.name))
     setPreset("claude"); setCustom(""); setError(null); setTemplate("locked-down")
     api.templates().then(setTemplates).catch(() => setTemplates([]))
@@ -74,8 +78,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
     setBusy(true); setError(null)
     try {
       // A group brings its own template; without one the template is picked here.
-      const created = await api.create({ name: name.trim(), image: image.trim(), providers: chosen, command: command.trim().split(/\s+/).filter(Boolean), ...(group ? { group } : { template }) })
-      toast.success(`Creating ${created.name}`, { description: command ? `Attach with: openshell sandbox connect ${created.name}` : undefined })
+      const created = await api.create({ name: name.trim(), ...(imageTemplate ? { imageTemplate } : { image: image.trim(), command: command.trim().split(/\s+/).filter(Boolean) }), providers: chosen, ...(group ? { group } : { template }) })
+      toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
       onOpenChange(false)
       onCreated?.(created.name)
@@ -88,7 +92,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-md">
         <form onSubmit={submit} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>New sandbox</DialogTitle>
@@ -101,11 +105,19 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="sandbox-image" className="text-xs">Image</Label>
-            <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} className="font-mono text-xs" placeholder="Default" title="Local images need Docker running" />
+            <Label htmlFor="sandbox-image-template" className="text-xs">Image template</Label>
+            <select id="sandbox-image-template" value={imageTemplate} onChange={(e) => setImageTemplate(e.target.value)} className="h-8 rounded-md border border-input bg-transparent px-2 text-xs">
+              <option value="">Use an image reference</option>
+              {images.map((t) => <option key={t.id} value={t.id}>{t.recipe.name}</option>)}
+            </select>
+            {imageTemplate && <p className="text-[11px] text-muted-foreground">Starts with {images.find((t) => t.id === imageTemplate)?.recipe.command || 'a shell'}. Software and launch defaults only; access is selected below.</p>}
           </div>
+          {!imageTemplate && <div className="grid gap-1.5">
+            <Label htmlFor="sandbox-image" className="text-xs">Image reference</Label>
+            <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} className="font-mono text-xs" placeholder="Default" title="Local images need Docker running" />
+          </div>}
 
-          <div className="grid gap-1.5">
+          {!imageTemplate && <div className="grid gap-1.5">
             <span className="text-xs font-medium">Runs</span>
             <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
               {PRESETS.map((p) => (
@@ -118,7 +130,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
             {preset === "custom" && (
               <Input value={custom} onChange={(e) => setCustom(e.target.value)} className="font-mono text-xs" placeholder="Command" aria-label="Command" />
             )}
-          </div>
+          </div>}
 
           <div className="grid gap-1.5">
             <span className="text-xs font-medium">Providers</span>
@@ -138,7 +150,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
                 })}
               </div>
             ) : <p className="text-[11px] text-muted-foreground">No providers</p>}
-            {preset === "claude" && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
+            {(imageTemplate ? images.find((t) => t.id === imageTemplate)?.recipe.command === 'claude' : preset === "claude") && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
               <p className="text-[11px] text-amber-700">Claude Code needs a claude-code provider</p>
             )}
           </div>
@@ -151,15 +163,16 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated }) {
               {(org?.groups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
               <option value="">No group</option>
             </select>
-            {group !== null && <p className="text-[11px] text-muted-foreground">{groupSummary(org, group, templates)}</p>}
+            {group !== null && <p className="text-[11px] text-muted-foreground">{group ? 'Group security preset · ' : ''}{groupSummary(org, group, templates)}</p>}
           </div>
 
           {group === "" && <div className="grid gap-1.5">
-            <Label htmlFor="sandbox-template" className="text-xs">Template</Label>
+            <Label htmlFor="sandbox-template" className="text-xs">Security preset</Label>
             <select id="sandbox-template" value={template} onChange={(e) => setTemplate(e.target.value)} title={templates.find((t) => t.id === template)?.description}
               className="h-8 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {(templates.length ? templates : [{ id: "locked-down", name: "Locked down" }]).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
+            <p className="text-[11px] text-muted-foreground">Filesystem and network access. Organization rules still apply.</p>
           </div>}
 
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
