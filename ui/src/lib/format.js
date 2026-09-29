@@ -1,4 +1,4 @@
-// Relative activity ("7m ago") and session uptime ("2h") — spec §7.
+// Relative activity ("7m ago") and session uptime ("2h") - spec §7.
 
 export function relativeTime(iso) {
   const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000)

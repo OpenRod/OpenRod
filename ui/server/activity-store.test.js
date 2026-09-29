@@ -91,3 +91,49 @@ test('archive queries separate log level from security severity', () => {
     assert.equal(logs[0].severity, undefined)
   } finally { store.close() }
 })
+
+test('agent choices reflect archived logs across pages and remain available after agent filtering', () => {
+  const store = createActivityStore(':memory:')
+  try {
+    assert.deepEqual(store.query().agents, [])
+    for (const [id, binary] of [['a', '/bin/claude'], ['b', '/bin/codex'], ['c', '/bin/curl'], ['d', '/bin/claude']]) {
+      store.ingest({ id, sandbox: 'box', binary, at: '2026-09-29T12:00:00Z' })
+    }
+    const page = store.query({ limit: 1, filters: { agent: { mode: 'equals', value: 'Codex' } } })
+    assert.equal(page.total, 1)
+    assert.deepEqual(page.agents, ['Claude Code', 'Codex', 'Unknown'])
+    assert.equal(store.query({ agents: ['Claude Code', 'Codex'] }).total, 3)
+    assert.equal(store.query({ agents: ['Unknown'] }).total, 1)
+    assert.equal(store.query({ agents: [] }).total, 4)
+    assert.equal(store.query({ agents: ['Claude Code', 'Codex'], sandboxes: ['missing'] }).total, 0)
+    assert.throws(() => store.query({ agents: 'Codex' }), /Invalid/)
+
+    store.ingest({ id: 'e', sandbox: 'box', binary: '/bin/gemini' })
+    assert.deepEqual(store.query({ snapshot: page.snapshot }).agents, page.agents)
+    assert.deepEqual(store.query().agents, ['Claude Code', 'Codex', 'Gemini CLI', 'Unknown'])
+  } finally { store.close() }
+})
+
+test('activity pages cover filtered history without overlap and support returning to earlier pages', () => {
+  const store = createActivityStore(':memory:')
+  try {
+    for (let index = 0; index < 123; index++) {
+      store.ingest({ id: `page-${index}`, sandbox: 'box', binary: '/bin/codex', at: new Date(1790683200000 + index * 1000).toISOString() })
+    }
+    store.ingest({ id: 'other-agent', sandbox: 'box', binary: '/bin/claude' })
+    const query = { limit: 50, agents: ['Codex'], sort: { key: 'time', direction: 'asc' } }
+    const first = store.query(query)
+    assert.equal(first.total, 123)
+    assert.equal(first.events.length, 50)
+    store.ingest({ id: 'new-arrival', sandbox: 'box', binary: '/bin/codex' })
+    const stable = { ...query, snapshot: first.snapshot, now: first.now }
+    const second = store.query({ ...stable, offset: 50 })
+    const last = store.query({ ...stable, offset: 100 })
+    assert.equal(second.events.length, 50)
+    assert.equal(last.events.length, 23)
+    assert.equal(last.nextOffset, null)
+    assert.equal(new Set([...first.events, ...second.events, ...last.events].map((event) => event.id)).size, 123)
+    assert.deepEqual(store.query({ ...stable, offset: 0 }).events, first.events)
+    assert.equal(store.query({ ...query, agents: ['Claude Code'] }).total, 1)
+  } finally { store.close() }
+})

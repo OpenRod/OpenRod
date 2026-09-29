@@ -16,7 +16,7 @@ export function AuditLine({ event, dense = false, showSandbox = false }) {
       <span className="w-[4.5rem] shrink-0 tabular-nums text-muted-foreground">{clock(event.at)}</span>
       <span className={`w-12 shrink-0 text-[10px] font-medium tracking-wide uppercase ${denied ? "text-red-600" : "text-emerald-700"}`}>{denied ? "Denied" : "Allowed"}</span>
       {showSandbox && <span className="hidden w-24 shrink-0 truncate text-muted-foreground md:block">{event.sandbox}</span>}
-      {!dense && <span className="hidden w-20 shrink-0 truncate text-muted-foreground lg:block">{event.binary ? event.binary.split("/").pop() : event.category === "HTTP" ? event.method : "—"}</span>}
+      {!dense && <span className="hidden w-20 shrink-0 truncate text-muted-foreground lg:block">{event.binary ? event.binary.split("/").pop() : event.category === "HTTP" ? event.method : "-"}</span>}
       <span className="min-w-0 flex-1 truncate">{event.method && dense ? `${event.method} ` : ""}{event.destination ?? event.detail}</span>
       {!dense && <span className="hidden w-56 shrink-0 truncate text-right text-[10px] text-muted-foreground xl:block">{denied ? reasonText(event.reason) : event.policy?.replace(/^_provider_/, "provider · ")}</span>}
     </div>

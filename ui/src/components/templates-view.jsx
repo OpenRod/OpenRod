@@ -35,12 +35,12 @@ function TemplateSummary({ template }) {
   return (
     <div className="space-y-2 text-[11px]">
       <p><span className="text-muted-foreground">Read & write · </span><span className="font-mono">{[fs.workdir ? "/sandbox" : null, ...fs.readWrite].filter(Boolean).join("  ")}</span></p>
-      <p><span className="text-muted-foreground">Read only · </span><span className="font-mono">{fs.readOnly.join("  ") || "—"}</span></p>
+      <p><span className="text-muted-foreground">Read only · </span><span className="font-mono">{fs.readOnly.join("  ") || "-"}</span></p>
       <p><span className="text-muted-foreground">Landlock · </span><span className="font-mono">{template.landlock === "hard_requirement" ? "required" : "best effort"}</span></p>
       {template.rules.length ? (
         <ul className="space-y-1">{template.rules.map((r) => <li key={r.name}><RuleLine rule={r} /></li>)}</ul>
-      ) : <p><span className="text-muted-foreground">Network · </span><span className="font-mono">—</span></p>}
-      <p><span className="text-muted-foreground">Opens at start · </span>{template.ingress?.length ? <span className="font-mono">{template.ingress.map((d) => `${d.name || "default"}:${d.port}${d.closeAfterMinutes ? ` (${d.closeAfterMinutes >= 60 ? `${d.closeAfterMinutes / 60}h` : `${d.closeAfterMinutes}m`})` : ""}`).join("  ")}</span> : <span className="font-mono">—</span>}</p>
+      ) : <p><span className="text-muted-foreground">Network · </span><span className="font-mono">-</span></p>}
+      <p><span className="text-muted-foreground">Opens at start · </span>{template.ingress?.length ? <span className="font-mono">{template.ingress.map((d) => `${d.name || "default"}:${d.port}${d.closeAfterMinutes ? ` (${d.closeAfterMinutes >= 60 ? `${d.closeAfterMinutes / 60}h` : `${d.closeAfterMinutes}m`})` : ""}`).join("  ")}</span> : <span className="font-mono">-</span>}</p>
     </div>
   )
 }

@@ -262,7 +262,7 @@ export function SecretsView() {
                 <td className={cell}><span className="font-mono text-[11px]">{row.secret.credentialKeys.length || "Access only"}</span></td>
                 <td className={cell}><span className="block truncate" title={row.secret.attachedTo.slice(0, 10).join(", ")}>{row.secret.attachedTo.length === 1 ? row.secret.attachedTo[0] : row.secret.attachedTo.length ? `${row.secret.attachedTo.length.toLocaleString()} sandboxes` : "Unattached"}</span></td>
                 <td className={cell}><span className={row.status === "expired" ? "text-red-600" : row.status === "expiring" ? "text-amber-700" : ""} title={row.expiry ? new Date(row.expiry).toLocaleString() : undefined}>{row.status === "expired" ? "Expired · " : ""}{row.expiry ? new Date(row.expiry).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "No expiry"}</span></td>
-                <td className={cell}><span className="block truncate font-mono text-[11px]" title={row.hosts.join(", ")}>{row.hosts.length === 1 ? row.hosts[0] : row.hosts.length ? `${row.hosts.length} hosts` : "—"}</span></td>
+                <td className={cell}><span className="block truncate font-mono text-[11px]" title={row.hosts.join(", ")}>{row.hosts.length === 1 ? row.hosts[0] : row.hosts.length ? `${row.hosts.length} hosts` : "-"}</span></td>
               </tr>)}
               {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={6} style={{ height: (ordered.length - virtual.end) * 40, padding: 0 }} /></tr>}
             </tbody>
