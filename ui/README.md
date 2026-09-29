@@ -29,11 +29,11 @@ Changes go through the gateway's server-side patch operations (`UpdateConfig.mer
 
 Templates also has an **Image templates** tab. An image template is an OpenShell sandbox template (`openshell sandbox template create`), so the list is the gateway's own and `openshell sandbox create --template <name>` works too.
 
-- One page: a name, the agent (Claude Code, Codex, or both), an optional public repository and a runtime (Node.js, Python). **Advanced** holds what the sandbox starts in, the OS, apt packages, setup commands, non-secret environment variables and the generated Dockerfile. **Use an existing image** takes a local image or a registry reference instead of building one.
+- One page: a name, the agents to install, an optional public repository and a runtime (Node.js, Python). Claude Code, Codex, OpenCode and Gemini CLI are shown; Pi, Cursor, Antigravity, Copilot, Kiro, Factory Droid and Aider are under **More agents**, and any other agent installs through setup commands. **Advanced** holds what the sandbox starts in (any installed agent opens as a session, or a shell, or a custom command), the OS, apt packages, setup commands, non-secret environment variables and the generated Dockerfile. **Use an existing image** takes a local image or a registry reference instead of building one.
 - A build runs in local Docker (tagged `openshell-template/<name>:<id>`, as the non-root UID 1000 sandbox user). On success the console creates the OpenShell template: image and environment go into the template itself; the recipe and start command go into the `openshell.console/recipe` annotation so the console can edit it. Nothing is stored in `.state/`; a running or failed build lives only in server memory.
 - OpenShell has no template update. Editing rebuilds, then deletes and recreates the template under the same name. Existing sandboxes are unaffected; the gateway records which template (and version) each sandbox came from.
-- Names follow OpenShell's sandbox-name rule: lowercase letters, digits and dashes, at most 19 characters.
-- Security presets, providers, group and ingress are chosen in New sandbox, as before; OpenShell templates don't hold policy. CPU and memory aren't offered because the VM driver ignores per-sandbox limits. Templates created with the CLI show up and can be launched, but not edited here.
+- Template and sandbox names follow OpenShell's rule: lowercase letters, digits and dashes, at most 19 characters.
+- Security presets, providers and ingress are chosen in New sandbox, as before; OpenShell templates don't hold policy. CPU and memory aren't offered because the VM driver ignores per-sandbox limits. Templates created with the CLI show up and can be launched, but not edited here.
 
 Run recipe checks with `node --test server/image-templates.test.js` from `ui/`.
 
@@ -62,8 +62,7 @@ the browser, and provider credential values are never returned.
 
 The server binds to 127.0.0.1 only. Every route checks the socket, Host and
 Origin, and each change additionally requires a same-origin POST with
-an `x-openshell-console` header. Ordinary writes use JSON; the image archive
-route accepts a size-limited binary stream with the same origin/header checks.
+an `x-openshell-console` header. Writes use JSON.
 
 ## Notes
 

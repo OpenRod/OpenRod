@@ -63,6 +63,8 @@ export function sandboxView(sandbox) {
     createdAt: iso(meta.createdTime),
     phase: PHASES[status.phase] ?? 'unknown',
     image: spec.template?.image || null,
+    // The gateway's own record of the template a sandbox was created from.
+    workloadTemplate: sandbox.createdFromWorkloadTemplate?.name || null,
     providers: spec.providers ?? [],
     command: spec.command ?? [],
     tty: Boolean(spec.tty),

@@ -1,13 +1,30 @@
+import { AGENTS as AGENT_CATALOG } from './agents.js'
+
 // Shared recipe model. Image recipes never contain or grant security policy.
 export const BASES = [
   { id: 'ubuntu:24.04', name: 'Ubuntu 24.04' },
   { id: 'debian:12-slim', name: 'Debian 12 slim' },
 ]
 export const DEFAULT_PACKAGES = ['git', 'curl', 'ripgrep']
-export const AGENTS = [
-  { id: 'claude', name: 'Claude Code', logo: '/logos/claude-code.svg', command: 'claude' },
-  { id: 'codex', name: 'Codex', logo: '/logos/codex.svg', command: 'codex' },
+const installer = (url, shell = 'bash') => `curl -fsSL ${url} -o /tmp/install-agent.sh && ${shell} /tmp/install-agent.sh && rm /tmp/install-agent.sh`
+const choices = [
+  { id: 'claude', command: 'claude', featured: true },
+  { id: 'codex', command: 'codex', featured: true, npm: '@openai/codex' },
+  { id: 'opencode', command: 'opencode', featured: true, npm: 'opencode-ai' },
+  { id: 'gemini', command: 'gemini', featured: true, npm: '@google/gemini-cli' },
+  { id: 'pi', command: 'pi', npm: '@earendil-works/pi-coding-agent', ignoreScripts: true },
+  { id: 'cursor', command: 'cursor-agent', install: installer('https://cursor.com/install') },
+  { id: 'antigravity', command: 'agy', install: installer('https://antigravity.google/cli/install.sh') },
+  { id: 'copilot', command: 'copilot', npm: '@github/copilot' },
+  { id: 'kiro', command: 'kiro-cli', packages: ['unzip'], install: installer('https://cli.kiro.dev/install') },
+  { id: 'droid', command: 'droid', install: installer('https://app.factory.ai/cli', 'sh') },
+  { id: 'aider', command: 'aider', python: true },
 ]
+export const AGENTS = choices.map((choice) => {
+  const agent = AGENT_CATALOG.find((agent) => agent.commands.includes(choice.command))
+  return { ...choice, name: agent.name, logo: `/logos/agents/${agent.logo}.svg` }
+})
+export const selectedAgents = (recipe) => AGENTS.filter((a) => recipe.agents.includes(a.id))
 export const RUNTIMES = [
   { id: 'node', name: 'Node.js 22', logo: '/logos/templates/nodejs.svg' },
   { id: 'python', name: 'Python 3', logo: '/logos/templates/python.svg' },
@@ -67,15 +84,18 @@ export function recipeErrors(recipe) {
 }
 
 export function dockerfileFor(recipe) {
-  const hasNode = recipe.runtimes.includes('node') || recipe.agents.includes('codex')
-  const hasPython = recipe.runtimes.includes('python')
-  const packages = [...new Set(['ca-certificates', 'curl', 'iproute2', ...recipe.packages, ...(recipe.repository ? ['git'] : []), ...(hasPython ? ['python3', 'python3-venv'] : [])])]
+  const agents = selectedAgents(recipe)
+  const hasNode = recipe.runtimes.includes('node') || agents.some((a) => a.npm)
+  const hasPython = recipe.runtimes.includes('python') || agents.some((a) => a.python)
+  const packages = [...new Set(['ca-certificates', 'curl', 'iproute2', ...recipe.packages, ...agents.flatMap((a) => a.packages ?? []), ...(recipe.repository ? ['git'] : []), ...(hasPython ? ['python3', 'python3-venv'] : [])])]
   const lines = [`FROM ${recipe.base}`, '', 'USER root', 'ENV DEBIAN_FRONTEND=noninteractive', `RUN apt-get update && apt-get install -y --no-install-recommends ${packages.map(quote).join(' ')} && rm -rf /var/lib/apt/lists/*`, 'RUN if getent passwd 1000 >/dev/null; then usermod --login sandbox --home /sandbox --move-home --shell /bin/bash "$(getent passwd 1000 | cut -d: -f1)"; else useradd --uid 1000 --create-home --home-dir /sandbox --shell /bin/bash sandbox; fi && chown -R 1000:1000 /sandbox']
   if (hasNode) lines.push('', 'COPY --from=node:22-bookworm-slim /usr/local/ /usr/local/')
   if (hasPython) lines.push('', 'RUN python3 -m venv /usr/local/venv', 'ENV PATH="/usr/local/venv/bin:${PATH}"')
-  if (recipe.agents.includes('codex')) lines.push('RUN npm install --global @openai/codex')
+  for (const agent of agents.filter((a) => a.npm)) lines.push(`RUN npm install --global ${agent.ignoreScripts ? '--ignore-scripts ' : ''}${agent.npm}`)
+  if (recipe.agents.includes('aider')) lines.push('RUN python3 -m venv /opt/aider && /opt/aider/bin/pip install --no-cache-dir aider-chat && ln -s /opt/aider/bin/aider /usr/local/bin/aider')
   if (recipe.agents.includes('claude')) lines.push('RUN curl -fsSL https://claude.ai/install.sh -o /tmp/install-claude.sh && bash /tmp/install-claude.sh && cp -L /root/.local/bin/claude /usr/local/bin/claude && chmod 0755 /usr/local/bin/claude && rm -rf /root/.local /root/.claude* /tmp/install-claude.sh')
-  lines.push('', 'ENV HOME=/sandbox', 'USER sandbox', 'WORKDIR /sandbox')
+  lines.push('', 'ENV HOME=/sandbox', 'ENV PATH="/sandbox/.local/bin:/sandbox/.npm-global/bin:/sandbox/.opencode/bin:${PATH}"', 'ENV NPM_CONFIG_PREFIX=/sandbox/.npm-global', 'USER sandbox', 'WORKDIR /sandbox')
+  for (const agent of agents.filter((a) => a.install)) lines.push(`RUN ${agent.install} && command -v ${agent.command}`)
   if (recipe.repository) lines.push(`RUN git clone -- ${quote(recipe.repository)} /sandbox/project`, 'WORKDIR /sandbox/project')
   if (recipe.setup.trim()) lines.push('COPY --chown=1000:1000 setup.sh /tmp/template-setup.sh', 'RUN bash -eu /tmp/template-setup.sh')
   // Environment and the start command live in the OpenShell template, not in image layers.
