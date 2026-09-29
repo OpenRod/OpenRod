@@ -21,7 +21,7 @@ import { EgressChart, bucketEgress } from "@/components/egress-chart"
 import { agentsOf, agentInventoryLabel } from "@/lib/agents"
 import { AgentList } from "@/components/agent-label"
 import { Perimeter } from "@/components/perimeter"
-import { hostOf, sourceOf } from "@/lib/policy-sources"
+import { displayName, hostOf, sourceOf } from "@/lib/policy-sources"
 
 function Section({ title, icon: Icon, children, aside, className }) {
   return (
@@ -98,7 +98,8 @@ function OpenInEditor({ name, editors }) {
   )
 }
 
-const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules" }
+const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules", blocked: "blocked" }
+const RULE_TAG = { secret: "from provider", policy: "policy", org: "blocked everywhere", group: "inherited", own: "rule" }
 
 export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const context = useLive()
@@ -153,7 +154,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const allowed = React.useMemo(() => {
     const hosts = new Map()
     for (const rule of detail?.policy?.rules ?? []) for (const endpoint of rule.endpoints) {
-      if (!hosts.has(endpoint.host)) hosts.set(endpoint.host, { host: endpoint.host, source: sourceOf(rule.key) })
+      if (!endpoint.blocked && !hosts.has(endpoint.host)) hosts.set(endpoint.host, { host: endpoint.host, source: sourceOf(rule.key) })
     }
     return [...hosts.values()]
   }, [detail])
@@ -246,7 +247,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               </TabsContent>
               <TabsContent value="rules" className="min-h-0 space-y-6 overflow-y-auto p-5">
               <Section title="Network rules" icon={Globe}
-                aside={<button onClick={() => { try { sessionStorage.setItem("egress-scope", name) } catch { /* optional */ } onClose(); onNavigate("egress") }}
+                aside={<button onClick={() => { try { sessionStorage.setItem("egress-sandbox", name) } catch { /* optional */ } onClose(); onNavigate("egress") }}
                   className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Edit</button>}>
                 {!detail?.policy ? <p className="text-sm text-muted-foreground">{live.demo ? "Policy data is unavailable in this preview." : error ? "Rules could not be loaded. Close and reopen to retry." : detail ? "No policy reported." : "Loading rules…"}</p>
                   : rules.length === 0 ? <p className="text-[11px] text-muted-foreground">No rules. All outbound denied.</p>
@@ -255,13 +256,13 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                       {rules.map((rule) => (
                         <li key={rule.key} className="px-3 py-2">
                           <p className="flex items-center gap-2 text-[11px]">
-                            <span className="truncate font-mono font-medium">{rule.fromProvider ? rule.key.replace(/^_provider_/, "").replace(/_/g, "-") : rule.name}</span>
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{rule.fromProvider ? "from provider" : "rule"}</span>
+                            <span className="truncate font-mono font-medium">{sourceOf(rule.key) === "own" ? rule.name : displayName(rule.key)}</span>
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{RULE_TAG[sourceOf(rule.key)]}</span>
                           </p>
                           <ul className="mt-1.5 space-y-0.5">
                             {rule.endpoints.map((endpoint) => (
                               <li key={`${endpoint.host}:${endpoint.port}`} className="flex items-center gap-2 font-mono text-[11px]">
-                                <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+                                <span className={`size-1.5 shrink-0 rounded-full ${endpoint.blocked ? "bg-red-500" : "bg-emerald-500"}`} aria-hidden="true" />
                                 <span className="min-w-0 flex-1 truncate">{endpoint.host}{endpoint.port ? `:${endpoint.port}` : ""}</span>
                                 <span className="shrink-0 text-[10px] text-muted-foreground">{ACCESS_LABEL[endpoint.access] ?? endpoint.access}{endpoint.enforcement === "audit" ? " · audit only" : ""}</span>
                               </li>

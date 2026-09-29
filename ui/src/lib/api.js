@@ -54,6 +54,8 @@ export const api = {
   saveOrg: (org) => request("/org", { method: "POST", body: org }),
   saveGroup: (group) => request("/org/groups", { method: "POST", body: group }),
   deleteGroup: (id) => request(`/org/groups/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
+  savePolicy: (policy) => request("/egress/policies", { method: "POST", body: policy }),
+  deletePolicy: (id) => request(`/egress/policies/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
   saveTemplate: (template) => request("/templates", { method: "POST", body: template }),
   deleteTemplate: (id) => request(`/templates/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
 
