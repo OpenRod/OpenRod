@@ -6,7 +6,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
+import { CopyCommand } from "@/components/copy-command"
 import { api } from "@/lib/api"
+import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
 import { sessionCommand } from "@/lib/sandbox-session"
 import { STARTS } from "@/lib/image-templates"
@@ -16,6 +18,53 @@ const PRESETS = [
   { id: "shell", label: "Shell", command: "" },
   { id: "custom", label: "Custom", command: null },
 ]
+
+const FILE_STARTS = [
+  { id: "empty", label: "Empty" },
+  { id: "folder", label: "Local folder" },
+  { id: "repo", label: "Git repository" },
+]
+
+// Where the server will clone to; mirrors its naming rule.
+function repoDest(url) {
+  try {
+    const parsed = new URL(url.trim())
+    if (parsed.protocol !== "https:") return null
+    const segment = parsed.pathname.split("/").filter(Boolean).pop()?.replace(/\.git$/, "")
+    if (!segment) return null
+    return `${SANDBOX_ROOT}/${/^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$/.test(segment) ? segment : "repo"}`
+  } catch { return null }
+}
+
+const FILTER = {
+  gitignore: ".gitignore applied",
+  "gitignore-empty": ".gitignore matched nothing, so everything is sent",
+  none: "Not a git repository, so everything is sent",
+}
+const HISTORY = {
+  included: (plan) => `git history included (${formatBytes(plan.gitBytes)})`,
+  worktree: () => "Git worktree: history not included",
+  subfolder: () => "Inside a repository: history not included",
+  none: () => null,
+}
+
+function FolderSummary({ plan, sandbox }) {
+  return (
+    <div className="grid min-w-0 gap-1 text-[11px]">
+      {plan.over
+        ? <p className="text-red-700">Over {formatBytes(plan.limit)}. Add a .gitignore, or upload it from a terminal.</p>
+        : <p>{plan.files.toLocaleString()} {plan.files === 1 ? "file" : "files"} · {formatBytes(plan.bytes)} → <span className="font-mono">{plan.dest}</span></p>}
+      <p className="text-muted-foreground">{[FILTER[plan.filter], HISTORY[plan.git](plan), plan.links ? `${plan.links} ${plan.links === 1 ? "symlink" : "symlinks"} kept as links` : null].filter(Boolean).join(" · ")}</p>
+      {plan.secretCount > 0 && (
+        <p className="text-amber-700">
+          May hold secrets: <span className="font-mono">{plan.secrets.join(", ")}</span>{plan.secretCount > plan.secrets.length ? ` and ${plan.secretCount - plan.secrets.length} more` : ""}. Add {plan.secretCount === 1 ? "it" : "them"} to .gitignore to leave {plan.secretCount === 1 ? "it" : "them"} out.
+        </p>
+      )}
+      <p className="mt-1 text-muted-foreground">From a terminal{plan.git === "included" ? " (without git history)" : ""}:</p>
+      <CopyCommand command={uploadCommand(sandbox || "NAME", plan.display, SANDBOX_ROOT)} />
+    </div>
+  )
+}
 
 function nextName(taken) {
   for (let i = 1; i < 1000; i++) {
@@ -40,6 +89,10 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [error, setError] = React.useState(null)
   const [templates, setTemplates] = React.useState([])
   const [template, setTemplate] = React.useState("locked-down")
+  const [start, setStart] = React.useState("empty")
+  const [folder, setFolder] = React.useState("")
+  const [preview, setPreview] = React.useState(null)
+  const [repository, setRepository] = React.useState("")
 
   // Start from what this gateway already runs: the most-used image and every
   // provider, so the common case is one click.
@@ -55,6 +108,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
     setChosen(providers.map((p) => p.name))
     setPreset("claude"); setCustom(""); setError(null); setTemplate("locked-down")
+    setStart("empty"); setFolder(""); setPreview(null); setRepository("")
     api.templates().then(setTemplates).catch(() => setTemplates([]))
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -62,12 +116,30 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const chosenImage = images.find((t) => t.name === imageTemplate)
   const templateStart = chosenImage?.recipe.command ?? ""
 
+  // The server reads the folder, so it can apply .gitignore and count what it will send.
+  React.useEffect(() => {
+    if (start !== "folder" || !folder.trim()) { setPreview(null); return }
+    let cancelled = false
+    setPreview({ loading: true })
+    const timer = setTimeout(() => {
+      api.localFolder(folder.trim())
+        .then((data) => { if (!cancelled) setPreview({ data }) })
+        .catch((e) => { if (!cancelled) setPreview({ error: e.message }) })
+    }, 400)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [start, folder])
+
+  const cloneDest = start === "repo" ? repoDest(repository) : null
+  const startReady = start === "empty" || (start === "folder" ? Boolean(preview?.data && !preview.data.over) : Boolean(cloneDest))
+
   async function submit(event) {
     event.preventDefault()
     setBusy(true); setError(null)
     try {
-      const created = await api.create({ name: name.trim(), ...(imageTemplate ? { imageTemplate } : { image: image.trim(), command: command.trim().split(/\s+/).filter(Boolean) }), providers: chosen, template })
+      const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
+      const created = await api.create({ name: name.trim(), ...(imageTemplate ? { imageTemplate } : { image: image.trim(), command: command.trim().split(/\s+/).filter(Boolean) }), providers: chosen, template, ...files })
       toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
+      if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
       onOpenChange(false)
       onCreated?.(created.name, { ...created, image: image.trim(), providers: chosen, createdAt: new Date().toISOString() })
@@ -120,6 +192,35 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
             )}
           </div>}
 
+          <div className="grid min-w-0 gap-1.5">
+            <span className="text-xs font-medium">Start with</span>
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+              {FILE_STARTS.map((s) => (
+                <button key={s.id} type="button" onClick={() => setStart(s.id)} aria-pressed={start === s.id}
+                  className={`flex-1 rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${start === s.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            {start === "folder" && (
+              <>
+                <Input value={folder} onChange={(e) => setFolder(e.target.value)} className="font-mono text-xs" placeholder="~/code/my-project" aria-label="Folder on this computer" />
+                {preview?.loading && <p className="text-[11px] text-muted-foreground">Checking the folder…</p>}
+                {preview?.error && <p className="text-[11px] text-red-700">{preview.error}</p>}
+                {preview?.data && <FolderSummary plan={preview.data} sandbox={name} />}
+              </>
+            )}
+            {start === "repo" && (
+              <>
+                <Input value={repository} onChange={(e) => setRepository(e.target.value)} className="font-mono text-xs" placeholder="https://github.com/org/repo" aria-label="Git repository URL" />
+                <p className="text-[11px] text-muted-foreground">
+                  {cloneDest ? <>Cloned into <span className="font-mono">{cloneDest}</span> once the sandbox starts. </> : "An https:// URL. "}
+                  Public repositories only. The security preset must let git reach the host, including POST to /git-upload-pack.
+                </p>
+              </>
+            )}
+          </div>
+
           <div className="grid gap-1.5">
             <span className="text-xs font-medium">Providers</span>
             {providers.length ? (
@@ -156,7 +257,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={busy || !name} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+            <Button type="submit" disabled={busy || !name || !startReady} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
               {busy && <Spinner aria-hidden="true" />}Create
             </Button>
           </DialogFooter>

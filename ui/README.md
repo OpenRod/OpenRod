@@ -54,6 +54,24 @@ immutable audit record. There is no owner reassignment UI yet. Existing sandboxe
 and sandboxes created outside the console retain their existing metadata;
 missing attribution displays “Not reported”.
 
+## Files
+
+- **Start with** in New sandbox: a local folder or a public git repository.
+  - **Local folder:** the server reads a folder under your home folder. It refuses hidden folders such as `~/.ssh` and `~/.config`, `~/Library`, and any folder holding the gateway certificate. Before you create the sandbox it shows what will be sent: file count, size, whether `.gitignore` applied, and files that look like secrets (`.env`, `*.pem`).
+  - Once the sandbox is ready, `openshell sandbox upload` puts the folder in `/sandbox/<folder>`, the same as `sandbox create --upload`. `.git` follows as a second upload, because the CLI's `.gitignore` filter leaves it out; worktrees and subfolders arrive without history.
+  - **Git repository:** cloned inside the sandbox into `/sandbox/<repo>` with `git clone`. The security preset must let git reach the host, and cloning needs POST to `/git-upload-pack`, so a GET-only GitHub rule is not enough.
+  - Sessions open in the project folder (`--workdir`, stored as the `openshell.console/project` label). Progress and a Retry button are in the Files tab. Progress is kept in memory, so a console restart forgets it.
+- **Files tab** in the sandbox popup:
+  - Browse `/sandbox` (listed through `exec`: `realpath` plus `find`, at most 2,000 entries).
+  - Download a file, or a folder as `.tar.gz`, through `openshell sandbox download`, staged in a temp folder and fetched once by token.
+  - Drop files or folders to upload into the current folder. They are staged one request per file, then sent with one `openshell sandbox upload`. Uploads merge: same-name files are replaced after a confirmation, and nothing is deleted.
+- **Limits:**
+  - 1 GB per transfer, and never more than the sandbox's free space. The microVM disk is about 4 GB.
+  - Only `/sandbox` is reachable, symlinks travel as links, and a link that resolves outside `/sandbox` is refused. These are the CLI's own guards, and the listing makes the same check.
+  - Each transfer shows the matching `openshell` command, for anything larger or for scripting.
+- Transfers use the CLI (tar over the gateway's SSH relay) because the SDK's `exec` accepts at most 4 MiB of stdin. The CLI must be on `PATH`, or set `OPENSHELL_BIN`.
+- Tests: `node --test server/files.test.js`.
+
 ## How it connects
 
 The browser only talks to `/api/os/*` on this dev server. `server/` holds an
