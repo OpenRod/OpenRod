@@ -76,7 +76,10 @@ export function recipeErrors(recipe) {
   } else if (recipe.source === 'image') {
     if (!imagePattern.test(recipe.image || '')) errors.image = 'Enter a valid image reference, such as team/workspace:latest.'
   } else errors.source = 'Choose an image source.'
-  if (!Array.isArray(recipe.environment) || recipe.environment.length > 40 || recipe.environment.some((e) => !e || typeof e.name !== 'string' || typeof e.value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(e.name) || /secret|token|password|api_?key|credential|auth/i.test(e.name) || /[\r\n\0]/.test(e.value) || e.value.length > 1000)) errors.environment = 'Use valid non-secret variable names and single-line values. Attach credentials through Secrets when launching.'
+  // The gateway's own rules come first, so a template never fails after its build.
+  if (!Array.isArray(recipe.environment) || recipe.environment.length > 40 || recipe.environment.some((e) => !e || typeof e.name !== 'string' || typeof e.value !== 'string' || e.name.length > 128 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(e.name) || /[\x00-\x1f\x7f]/.test(e.value) || e.value.length > 1000)) errors.environment = 'Use variable names of letters, digits and underscores (up to 128) and single-line values (up to 1,000 characters).'
+  else if (recipe.environment.some((e) => e.name.startsWith('OPENSHELL_'))) errors.environment = 'Variable names starting with OPENSHELL_ are reserved by OpenShell.'
+  else if (recipe.environment.some((e) => /secret|token|password|api_?key|credential|auth/i.test(e.name))) errors.environment = 'Keep credentials out of templates. Attach them through Secrets when you launch.'
   else if (new Set(recipe.environment.map((e) => e.name)).size !== recipe.environment.length) errors.environment = 'Environment variable names must be unique.'
   if (typeof recipe.command !== 'string' || recipe.command.length > 512 || /[\r\n\0]/.test(recipe.command)) errors.command = 'Use a single-line start command, up to 512 characters.'
   if (!Object.keys(errors).length && new TextEncoder().encode(JSON.stringify(storedRecipe(recipe))).length > MAX_RECIPE_BYTES) errors.setup = 'This recipe is too large to store with the template. Shorten the setup commands or package list.'

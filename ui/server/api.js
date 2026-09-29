@@ -122,7 +122,7 @@ async function createSandbox(input) {
   const imageLabels = saved ? { [IMAGE_TEMPLATE_NAME]: saved.name } : {}
   if (saved) {
     const start = saved.recipe.command.trim()
-    input = { ...input, image: '', session: !start ? 'shell' : isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
+    input = { ...input, image: '', session: !start ? 'shell' : start !== 'shell' && isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
@@ -341,7 +341,7 @@ export function openshellApi() {
             return send(res, 404, { error: 'Not found' })
           }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
-          const input = await body(req, parts[0] === 'activity' ? 512 * 1024 : 65536)
+          const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : 65536)
           if (parts[0] === 'activity' && parts.length === 2) {
             if (parts[1] === 'delete-preview') return send(res, 200, store.previewDeletion(input))
             if (parts[1] === 'delete') {

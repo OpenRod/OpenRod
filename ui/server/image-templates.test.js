@@ -30,6 +30,9 @@ test('rejects names OpenShell would refuse, shell options, Dockerfile injection,
     [{ packages: ['git;echo nope'] }, 'packages'],
     [{ image: '--help', source: 'image' }, 'image'],
     [{ environment: [{ name: 'API_KEY', value: 'not-a-real-key' }] }, 'environment'],
+    [{ environment: [{ name: 'OPENSHELL_ENV', value: 'dev' }] }, 'environment'],
+    [{ environment: [{ name: 'X'.repeat(129), value: 'dev' }] }, 'environment'],
+    [{ environment: [{ name: 'MODE', value: 'a\tb' }] }, 'environment'],
     [{ repository: 'https://user:password@example.com/repo' }, 'repository'],
     [{ repository: 'https://example.com/repo\nRUN echo nope' }, 'repository'],
   ]) assert.ok(recipeErrors(newRecipe({ name: 'test', ...patch }))[field], field)
@@ -53,6 +56,12 @@ test('templates read back from the gateway restore the recipe, and CLI templates
   assert.equal(view.recipe.command, 'codex')
   assert.equal(view.recipe.repository, 'https://github.com/example/project.git')
   assert.deepEqual(view.recipe.environment, [{ name: 'MODE', value: 'dev' }])
+  for (const annotation of ['{"command":42}', '{"agents":"claude"}', '[]', 'not json']) {
+    const broken = templateView({ metadata: { name: 'hand-written', annotations: { [RECIPE_ANNOTATION]: annotation } }, spec: { workload: { image: 'alpine:3' } } })
+    assert.equal(broken.managed, false, annotation)
+    assert.equal(broken.recipe.command, '')
+    assert.ok(Array.isArray(broken.recipe.agents))
+  }
   const cli = templateView({ metadata: { name: 'from-cli' }, spec: { workload: { image: 'ghcr.io/example/box:1' } } })
   assert.equal(cli.managed, false)
   assert.equal(cli.recipe.source, 'image')
