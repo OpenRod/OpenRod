@@ -6,14 +6,14 @@ import { createActivityDelivery } from './activity-delivery.js'
 import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
-import { IMAGE_TEMPLATE_ID, IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { sessionLaunch } from '../src/lib/sandbox-session.js'
+import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
+import { isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
-import { imageTemplateRoute, importImageArchive, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
+import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 
 // These routes act with the operator's gateway certificate. A loopback Host
 // header alone is not proof of a local caller when Vite is bound to a LAN
@@ -116,21 +116,23 @@ async function sandboxDetail(name) {
 
 async function createSandbox(input) {
   const { client } = await gateway()
-  let imageLabels = {}
-  if (input.imageTemplate) {
-    const saved = await imageTemplateForLaunch(String(input.imageTemplate))
-    imageLabels = { [IMAGE_TEMPLATE_ID]: saved.id, [IMAGE_TEMPLATE_NAME]: saved.recipe.name }
-    // A content-addressed image cannot silently drift when a tag is rebuilt.
-    input = { ...input, image: saved.inspection.imageId, session: saved.recipe.command?.trim() === 'claude' ? 'claude' : !saved.recipe.command?.trim() ? 'shell' : null, command: saved.recipe.command ? ['/bin/bash', '-lc', saved.recipe.command] : [], environment: Object.fromEntries(saved.recipe.environment.map((e) => [e.name, e.value])) }
+  // An image template is an OpenShell sandbox template: the gateway supplies
+  // its image and environment; the console adds how the sandbox starts.
+  const saved = input.imageTemplate ? await imageTemplateForLaunch(String(input.imageTemplate)) : null
+  const imageLabels = saved ? { [IMAGE_TEMPLATE_NAME]: saved.name } : {}
+  if (saved) {
+    const start = saved.recipe.command.trim()
+    input = { ...input, image: '', session: !start ? 'shell' : start !== 'shell' && isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
   const providers = Array.isArray(input.providers) ? input.providers.map(String) : []
   const command = Array.isArray(input.command) ? input.command.map(String).filter(Boolean) : []
   const session = input.session ?? (command.length === 1 && command[0] === 'claude' ? 'claude' : command.length === 0 ? 'shell' : null)
-  if (session != null && !['claude', 'shell'].includes(session)) throw fail('Unknown session type.')
+  if (session != null && !isSession(session)) throw fail('Unknown session type.')
   const launch = sessionLaunch(session, command)
-  if (!NAME.test(name)) throw fail('Use lowercase letters, digits and dashes for the name.')
+  // OpenShell caps sandbox names at 19 characters.
+  if (!NAME.test(name) || name.length > 19) throw fail('Use lowercase letters, digits and dashes for the name, up to 19 characters.')
   if (image && !IMAGE.test(image)) throw fail('That image reference is not valid.')
   if (!providers.every((p) => NAME.test(p))) throw fail('Unknown provider name.')
   if (command.length > 32 || command.some((part) => part.length > 512)) throw fail('Command is too long.')
@@ -141,17 +143,18 @@ async function createSandbox(input) {
   const template = plan.template
   const labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels() }
   await enforcePolicyOnly(client)
-  const ref = await client.sandbox.create({
+  const spec = {
     policy: plan.policy,
     labels,
     name,
-    ...(image ? { image } : {}),
     providers,
     command: launch.command,
-    ...(input.imageTemplate ? { environment: input.environment } : {}),
     // Interactive sessions run through exec, independently of the main process.
     tty: launch.tty,
-  })
+  }
+  const ref = saved
+    ? await client.sandbox.createFromTemplate({ ...spec, workloadTemplate: saved.name })
+    : await client.sandbox.create({ ...spec, ...(image ? { image } : {}) })
   // Services a template opens at start go through the same path as opening
   // one by hand, so they get the same auto-close deadline.
   const opened = []
@@ -280,8 +283,12 @@ export function openshellApi() {
       if (server.httpServer?.listening) hub.start()
       else server.httpServer?.once('listening', () => hub.start())
       server.httpServer?.once('close', () => { hub.stop(); delivery.stop(); store.close() })
-      const stopSweeper = startSweeper((message) => server.config.logger.info(`[ingress] ${message}`))
-      const stopOrgSweeper = startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
+      // Several consoles can share one gateway during development. Only one of
+      // them may run the background passes, or each re-applies its own stored
+      // policy to every sandbox and they undo each other.
+      const passes = process.env.OPENSHELL_CONSOLE_SWEEP !== '0'
+      const stopSweeper = passes ? startSweeper((message) => server.config.logger.info(`[ingress] ${message}`)) : () => {}
+      const stopOrgSweeper = passes ? startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`)) : () => {}
       server.httpServer?.once('close', () => { stopSweeper(); stopOrgSweeper() })
       server.middlewares.use('/api/os', async (req, res) => {
         if (!isLocalApiRequest(req)) { res.writeHead(403).end(); return }
@@ -332,10 +339,6 @@ export function openshellApi() {
             const routed = (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
             if (routed !== undefined) return send(res, 200, routed)
             return send(res, 404, { error: 'Not found' })
-          }
-          if (req.method === 'POST' && parts[0] === 'image-templates' && parts.length === 3 && parts[2] === 'archive') {
-            if (req.headers.origin !== `http://${req.headers.host}` || req.headers['content-type'] !== 'application/octet-stream' || req.headers['x-openshell-console'] !== '1') return send(res, 403, { error: 'Request rejected' })
-            return send(res, 200, await importImageArchive(req, parts[1]))
           }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
           const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : 65536)
