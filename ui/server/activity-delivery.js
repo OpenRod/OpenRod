@@ -65,7 +65,7 @@ export function createActivityDelivery(filename, store, { send = postEvent, now 
   const all = () => db.prepare('SELECT data FROM destinations').all().map((r) => JSON.parse(r.data))
   const get = (id) => { const row = db.prepare('SELECT data FROM destinations WHERE id=?').get(id); if (!row) throw fail('Destination not found', 404); return JSON.parse(row.data) }
   const save = (d) => db.prepare('INSERT INTO destinations VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(d.id, JSON.stringify(d))
-  const publicView = ({ token, ...d }) => ({ ...d, hasToken: Boolean(token), backlog: Math.max(0, store.head() - d.cursor) })
+  const publicView = ({ token, ...d }) => ({ ...d, hasToken: Boolean(token), backlog: store.countAfter(d.cursor) })
   function create(input) {
     if (!input || typeof input !== 'object') throw fail('Invalid destination')
     if (all().length >= 20) throw fail('Maximum 20 destinations')
@@ -99,15 +99,16 @@ export function createActivityDelivery(filename, store, { send = postEvent, now 
       }
       for (const { seq, event } of store.after(d.cursor, 50)) {
         if (stopped || controller.signal.aborted) break
+        if (!store.has(event.id)) continue
         const matches = [['sandboxes', event.sandbox], ['categories', event.category], ['verdicts', event.verdict]].every(([key, value]) => !d.filters[key].length || d.filters[key].includes(value))
         if (!matches) { d.cursor = seq; d.skipped++; save(d); continue }
         try {
           const result = await send(d, event, controller.signal)
           if (stopped || controller.signal.aborted) break
-          d.cursor = seq; d.delivered++; d.attempts = 0; d.error = null; d.nextAttempt = 0; d.lastStatus = result.status; d.lastDeliveredAt = new Date(now()).toISOString(); save(d)
+          d.cursor = seq; d.delivered++; d.attempts = 0; d.error = null; d.failedEventId = null; d.nextAttempt = 0; d.lastStatus = result.status; d.lastDeliveredAt = new Date(now()).toISOString(); save(d)
         } catch (error) {
           if (stopped || controller.signal.aborted) break
-          d.attempts++; d.error = error.message; d.nextAttempt = now() + Math.min(300000, 1000 * 2 ** d.attempts)
+          d.attempts++; d.failedEventId = event.id; d.error = error.message; d.nextAttempt = now() + Math.min(300000, 1000 * 2 ** d.attempts)
           if (d.attempts >= 8) d.enabled = false
           save(d); break
         }
@@ -129,6 +130,12 @@ export function createActivityDelivery(filename, store, { send = postEvent, now 
   }
   return {
     list: () => all().map(publicView), create, change, tick,
+    logsDeleted() {
+      for (const controller of active.values()) controller.abort()
+      for (const d of all()) if (d.failedEventId && !store.has(d.failedEventId)) {
+        d.failedEventId = null; d.error = null; d.attempts = 0; d.nextAttempt = 0; save(d)
+      }
+    },
     test: (id) => run(get(id), true),
     start() { timer = setInterval(() => { void tick() }, 2000); timer.unref(); void tick() },
     stop() { stopped = true; clearInterval(timer); for (const controller of active.values()) controller.abort(); db.close() },

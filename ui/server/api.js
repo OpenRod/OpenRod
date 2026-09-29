@@ -263,6 +263,7 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
     stop() { stopped = true; clearInterval(timer); clearTimeout(healthTimer); for (const controller of watches.values()) controller.abort(); watches.clear() },
     add(res) { clients.add(res); if (lastList) res.write(`event: sandboxes\ndata: ${lastList}\n\n`); res.write(`event: collection\ndata: ${JSON.stringify(store.coverage())}\n\n`) },
     remove(res) { clients.delete(res) },
+    logsDeleted(result) { emit('activity-deleted', result); health() },
   }
 }
 
@@ -300,7 +301,7 @@ export function openshellApi() {
             if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await listSandboxes())
             if (parts[0] === 'sandboxes' && parts.length === 2 && NAME.test(parts[1])) return send(res, 200, await sandboxDetail(parts[1]))
             if (parts[0] === 'activity-destinations' && parts.length === 1) return send(res, 200, delivery.list())
-            if (parts[0] === 'activity') {
+            if (parts[0] === 'activity' && (parts.length === 1 || (parts.length === 2 && parts[1] === 'export'))) {
               const only = url.searchParams.get('sandbox')
               if (only && !NAME.test(only)) throw fail('Unknown sandbox.')
               const options = JSON.parse(url.searchParams.get('query') || '{}')
@@ -337,7 +338,16 @@ export function openshellApi() {
             return send(res, 200, await importImageArchive(req, parts[1]))
           }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
-          const input = await body(req, parts[0] === 'image-templates' ? 512 * 1024 : 65536)
+          const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : 65536)
+          if (parts[0] === 'activity' && parts.length === 2) {
+            if (parts[1] === 'delete-preview') return send(res, 200, store.previewDeletion(input))
+            if (parts[1] === 'delete') {
+              const result = store.deleteLogs(input.token)
+              delivery.logsDeleted()
+              hub.logsDeleted(result)
+              return send(res, 200, result)
+            }
+          }
           if (parts[0] === 'activity-destinations') {
             if (parts.length === 1) return send(res, 200, delivery.create(input))
             if (parts.length === 3) return send(res, 200, parts[2] === 'test' ? await delivery.test(parts[1]) : delivery.change(parts[1], parts[2]))
