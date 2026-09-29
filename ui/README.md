@@ -27,15 +27,15 @@ Changes go through the gateway's server-side patch operations (`UpdateConfig.mer
 
 ## Image templates
 
-Templates is also a local environment library, with a separate **Image templates** tab:
+Templates also has an **Image templates** tab. An image template is an OpenShell sandbox template (`openshell sandbox template create`), so the list is the gateway's own and `openshell sandbox create --template <name>` works too.
 
-- A six-step builder covers Ubuntu/Debian, system packages, Node/Python, Claude Code/Codex, an optional public repository and small files, build commands, and launch defaults. Recipes compile to an inspectable Dockerfile in an isolated temporary build context. Files and setup commands run as the non-root UID 1000 sandbox user. Build-time networking belongs to Docker; runtime access belongs to the selected security preset.
-- Import an existing local image, pull a registry reference using Docker's existing authentication, or upload a `docker save` archive (`.tar`, `.tar.gz`, `.tgz`, up to 4 GB). VM disk images and rootfs archives are not supported by this importer. Multi-image archives load into Docker but require selecting a single image through the local-image picker afterward.
-- Drafts and results persist in `.state/image-templates/`; in-progress form recovery uses session storage. Images remain in the local Docker engine. Real build/import logs, cancellation, failure recovery, search, duplication, and recipe removal are supported. Removing a recipe does not delete an image or sandbox.
-- “Available locally” means the image exists and passed Linux/architecture inspection, **not** that its OpenShell runtime was tested. Launch uses the inspected image ID, rechecks image availability, and independently resolves organization/group/security-preset policy. Remote gateways and non-local Docker contexts are rejected. The selected gateway must be able to access that local engine.
-- Startup commands and non-secret environment values are launch defaults, not image layers. Credential fields are rejected; attach providers through the existing launch dialog. Compute limits remain the gateway defaults in this version.
+- One page: a name, the agents to install, an optional public repository and a runtime (Node.js, Python). Claude Code, Codex, OpenCode and Gemini CLI are shown; Pi, Cursor, Antigravity, Copilot, Kiro, Factory Droid and Aider are under **More agents**, and any other agent installs through setup commands. **Advanced** holds what the sandbox starts in (any installed agent opens as a session, or a shell, or a custom command), the OS, apt packages, setup commands, non-secret environment variables and the generated Dockerfile. **Use an existing image** takes a local image or a registry reference instead of building one.
+- A build runs in local Docker (tagged `openshell-template/<name>:<id>`, as the non-root UID 1000 sandbox user). On success the console creates the OpenShell template: image and environment go into the template itself; the recipe and start command go into the `openshell.console/recipe` annotation so the console can edit it. Nothing is stored in `.state/`; a running or failed build lives only in server memory.
+- OpenShell has no template update. Editing rebuilds, then deletes and recreates the template under the same name. Existing sandboxes are unaffected: a previous build's image is removed from Docker only if no sandbox or template still points at it, because a stopped sandbox resolves its image again when it starts. The gateway records the template each sandbox came from, but recreating resets the version, so sandboxes from before and after an edit both show `<name>@1`.
+- Template and sandbox names follow OpenShell's rule: lowercase letters, digits and dashes, at most 19 characters.
+- Security presets, providers and ingress are chosen in New sandbox, as before; OpenShell templates don't hold policy. CPU and memory aren't offered because the VM driver ignores per-sandbox limits. Templates created with the CLI show up and can be launched, but not edited here.
 
-Run recipe/storage checks with `node --test server/image-templates.test.js` from `ui/`. Runtime smoke checks have covered a real Node/Python build, uploaded archive, registry pull, local import, and a temporary OpenShell sandbox with working files/environment and writable workspace.
+Run recipe checks with `node --test server/image-templates.test.js` from `ui/`.
 
 ## Sandbox attribution
 
@@ -62,8 +62,7 @@ the browser, and provider credential values are never returned.
 
 The server binds to 127.0.0.1 only. Every route checks the socket, Host and
 Origin, and each change additionally requires a same-origin POST with
-an `x-openshell-console` header. Ordinary writes use JSON; the image archive
-route accepts a size-limited binary stream with the same origin/header checks.
+an `x-openshell-console` header. Writes use JSON.
 
 ## Notes
 
