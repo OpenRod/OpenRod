@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
-import { gateway, resolveGateway, iso } from './gateway.js'
+import { WORKSPACE, gateway, resolveGateway, iso } from './gateway.js'
 
 // Image templates are OpenShell sandbox templates (`openshell sandbox template
 // create`): the gateway stores the name, image and environment, and the recipe
@@ -75,13 +75,15 @@ export function templateView(t) {
   const environment = Object.entries(workload.environment ?? {}).map(([name, value]) => ({ name, value }))
   let stored = null
   try { stored = JSON.parse(meta.annotations?.[RECIPE_ANNOTATION] ?? 'null') } catch { /* edited outside the console */ }
-  const managed = Boolean(stored && typeof stored === 'object')
+  // Annotations can be written with the CLI, so a recipe counts only if it is valid.
+  const recipe = stored && typeof stored === 'object' && !Array.isArray(stored) ? newRecipe({ ...stored, name: meta.name, environment }) : null
+  const managed = Boolean(recipe && !Object.keys(recipeErrors(recipe)).length)
   return {
     name: meta.name,
     image: workload.image || null,
     createdAt: iso(meta.createdTime),
     managed,
-    recipe: newRecipe({ ...(managed ? stored : { source: 'image', image: workload.image || '', agents: [], command: '' }), name: meta.name, environment }),
+    recipe: managed ? recipe : newRecipe({ source: 'image', image: workload.image || '', agents: [], command: '', name: meta.name, environment }),
     status: 'ready',
   }
 }
@@ -158,17 +160,36 @@ async function start(input) {
       }
       await inspect(image, engine)
       if (job.cancelled) throw fail('Operation cancelled.')
-      await saveTemplate(client, recipe, image, previous)
+      job.saving = true
+      try { await saveTemplate(client, recipe, image, previous) } catch (e) {
+        // Nothing points at an image whose template was never saved.
+        if (recipe.source === 'build') await run(['image', 'rm', image], { engine }).catch(() => {})
+        throw e
+      }
       jobs.delete(name)
       const old = previous?.spec?.workload?.image
-      if (old?.startsWith(BUILT_PREFIX) && old !== image) await run(['image', 'rm', old], { engine }).catch(() => {})
+      if (old?.startsWith(BUILT_PREFIX) && old !== image && !(await imageInUse(client, old))) await run(['image', 'rm', old], { engine }).catch(() => {})
     } catch (e) {
-      job.status = 'failed'; job.error = e.message
+      job.status = 'failed'; job.error = e.message; job.saving = false
     } finally {
       if (temp) await fs.rm(temp, { recursive: true, force: true }).catch(() => {})
     }
   })()
   return jobView(job)
+}
+
+// A stopped sandbox resolves its image again when it starts, so an old build
+// stays while any sandbox or template still points at it.
+async function imageInUse(client, image) {
+  try {
+    let pageToken = ''
+    do {
+      const page = await client.raw.listSandboxes({ workspaceScope: WORKSPACE, pageSize: 1000, pageToken })
+      if (page.sandboxes.some((s) => s.spec?.template?.image === image)) return true
+      pageToken = page.nextPageToken
+    } while (pageToken)
+    return (await client.sandboxTemplates.listAll()).some((t) => t.spec?.workload?.image === image)
+  } catch { return true }
 }
 
 // OpenShell has no template update: replace means delete and recreate under
@@ -197,6 +218,7 @@ export async function imageTemplateRoute(method, parts, input) {
   checkName(name)
   if (action === 'cancel') {
     const job = jobs.get(name)
+    if (job?.saving) throw fail('The build finished and the template is being saved. It can no longer be cancelled.', 409)
     if (running(job)) { job.cancelled = true; job.child?.kill('SIGKILL') }
     return { ok: true }
   }
