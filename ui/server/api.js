@@ -7,7 +7,7 @@ import { toOCSF } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { sessionLaunch } from '../src/lib/sandbox-session.js'
+import { isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
@@ -122,16 +122,17 @@ async function createSandbox(input) {
   const imageLabels = saved ? { [IMAGE_TEMPLATE_NAME]: saved.name } : {}
   if (saved) {
     const start = saved.recipe.command.trim()
-    input = { ...input, image: '', session: ['claude', 'codex'].includes(start) ? start : !start ? 'shell' : null, command: start ? ['/bin/bash', '-lc', start] : [] }
+    input = { ...input, image: '', session: !start ? 'shell' : isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
   const providers = Array.isArray(input.providers) ? input.providers.map(String) : []
   const command = Array.isArray(input.command) ? input.command.map(String).filter(Boolean) : []
   const session = input.session ?? (command.length === 1 && command[0] === 'claude' ? 'claude' : command.length === 0 ? 'shell' : null)
-  if (session != null && !['claude', 'codex', 'shell'].includes(session)) throw fail('Unknown session type.')
+  if (session != null && !isSession(session)) throw fail('Unknown session type.')
   const launch = sessionLaunch(session, command)
-  if (!NAME.test(name)) throw fail('Use lowercase letters, digits and dashes for the name.')
+  // OpenShell caps sandbox names at 19 characters.
+  if (!NAME.test(name) || name.length > 19) throw fail('Use lowercase letters, digits and dashes for the name, up to 19 characters.')
   if (image && !IMAGE.test(image)) throw fail('That image reference is not valid.')
   if (!providers.every((p) => NAME.test(p))) throw fail('Unknown provider name.')
   if (command.length > 32 || command.some((part) => part.length > 512)) throw fail('Command is too long.')

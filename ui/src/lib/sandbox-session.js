@@ -1,10 +1,14 @@
+import { AGENTS } from "./image-templates.js"
+
 export const SESSION_LABEL = "openshell.console/session"
 
-// What each session runs when someone connects.
-const SESSIONS = { claude: "claude", codex: "codex", shell: "/bin/bash -l" }
+// What each session runs when someone connects: a login shell, or an agent by
+// its own command. Labels come from the gateway, so only these ever run.
+const SESSIONS = { shell: "/bin/bash -l", ...Object.fromEntries(AGENTS.map((a) => [a.command, a.command])) }
+export const isSession = (session) => Object.hasOwn(SESSIONS, session ?? "")
 
 export function sessionLaunch(session, command) {
-  if (Object.hasOwn(SESSIONS, session ?? "")) {
+  if (isSession(session)) {
     return {
       command: ["/bin/sleep", "infinity"],
       tty: false,
@@ -18,6 +22,6 @@ export function sessionCommand(sandbox) {
   const session = sandbox.labels?.[SESSION_LABEL]
   // Sandbox names are validated by the server; quote defensively for copied commands.
   const name = `'${sandbox.name.replaceAll("'", "'\\''")}'`
-  if (Object.hasOwn(SESSIONS, session ?? "")) return `openshell sandbox exec --name ${name} --tty -- ${SESSIONS[session]}`
+  if (isSession(session)) return `openshell sandbox exec --name ${name} --tty -- ${SESSIONS[session]}`
   return `openshell sandbox connect ${name}`
 }

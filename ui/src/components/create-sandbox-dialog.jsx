@@ -89,7 +89,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
           <div className="grid gap-1.5">
             <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
             <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="font-mono text-xs" required
-              pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" title="Lowercase letters, digits and dashes" autoFocus />
+              pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
           </div>
 
           <div className="grid gap-1.5">

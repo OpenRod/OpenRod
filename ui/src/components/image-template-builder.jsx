@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ArrowLeft, Check, ChevronDown, Download, FileCode2, Package, Plus, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Download, FileCode2, Info, Package, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,10 +8,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Spinner } from '@/components/ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
-import { AGENTS, BASES, PENDING_RECIPE_KEY, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, splitPackages } from '@/lib/image-templates'
+import { AGENTS, BASES, PENDING_RECIPE_KEY, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, selectedAgents, splitPackages } from '@/lib/image-templates'
 
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
-const segment = (on) => `flex-1 rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${on ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`
 
 function Field({ label, hint, htmlFor, children }) {
   return <div className="grid content-start gap-2"><Label htmlFor={htmlFor} className="text-xs">{label}</Label>{children}{hint && <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}</div>
@@ -28,6 +27,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
   const [baseline] = React.useState(() => initial?.baseline ?? JSON.stringify(newRecipe(initial?.recipe)))
   const [advanced, setAdvanced] = React.useState(Boolean(initial?.advanced))
   const [custom, setCustom] = React.useState(() => !STARTS.some((s) => s.id === newRecipe(initial?.recipe).command))
+  const [moreAgents, setMoreAgents] = React.useState(() => AGENTS.some((a) => !a.featured && newRecipe(initial?.recipe).agents.includes(a.id)))
   const [error, setError] = React.useState('')
   const [busy, setBusy] = React.useState(false)
   const [local, setLocal] = React.useState(null)
@@ -54,6 +54,8 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
     patch({ agents, ...(automatic ? { command: AGENTS.find((a) => a.id === agents[0])?.command ?? '' } : {}) })
   }
   const toggleRuntime = (id) => patch({ runtimes: recipe.runtimes.includes(id) ? recipe.runtimes.filter((r) => r !== id) : [...recipe.runtimes, id] })
+  // Runtimes the chosen agents bring along even when not ticked.
+  const bundled = [selectedAgents(recipe).some((a) => a.npm) && !recipe.runtimes.includes('node') && 'Node.js 22', selectedAgents(recipe).some((a) => a.python) && !recipe.runtimes.includes('python') && 'Python 3'].filter(Boolean)
   const starts = STARTS.filter((s) => !build || s.id === '' || recipe.agents.includes(AGENTS.find((a) => a.command === s.id)?.id))
 
   async function submit(event) {
@@ -85,13 +87,20 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
           <Input id="template-name" value={recipe.name} disabled={replace} maxLength={19} onChange={(e) => patch({ name: e.target.value.toLowerCase() })} placeholder="frontend-app" className="font-mono text-xs" autoFocus={!replace} />
         </Field>
         {build ? <>
-          <Field label="Agent" hint="Installed at build time. Attach its credentials when you launch a sandbox.">
-            <div className="grid gap-2 sm:grid-cols-2">{AGENTS.map((a) => <Toggle key={a.id} selected={recipe.agents.includes(a.id)} onClick={() => toggleAgent(a.id)}><img src={a.logo} alt="" className="size-5 object-contain" /><span className="font-medium text-foreground">{a.name}</span></Toggle>)}</div>
+          <Field label="Agents" hint="Installed at build time. Attach their credentials when you launch a sandbox.">
+            <div className="grid gap-2 sm:grid-cols-2">{AGENTS.filter((a) => a.featured).map((a) => <Toggle key={a.id} selected={recipe.agents.includes(a.id)} onClick={() => toggleAgent(a.id)}><img src={a.logo} alt="" className="size-5 object-contain" /><span className="font-medium text-foreground">{a.name}</span></Toggle>)}</div>
+            <button type="button" aria-expanded={moreAgents} onClick={() => setMoreAgents((v) => !v)} className="flex items-center gap-1.5 justify-self-start rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+              <ChevronRight className={`size-3 transition-transform ${moreAgents ? 'rotate-90' : ''}`} />More agents{!moreAgents && AGENTS.some((a) => !a.featured && recipe.agents.includes(a.id)) && ` · ${AGENTS.filter((a) => !a.featured && recipe.agents.includes(a.id)).length} selected`}
+            </button>
+            {moreAgents && <>
+              <div className="grid gap-2 sm:grid-cols-3">{AGENTS.filter((a) => !a.featured).map((a) => <Toggle key={a.id} selected={recipe.agents.includes(a.id)} onClick={() => toggleAgent(a.id)}><img src={a.logo} alt="" className="size-4 object-contain" /><span className="text-foreground">{a.name}</span></Toggle>)}</div>
+              <p className="text-[11px] text-muted-foreground">Another agent? Add its install command to Setup commands under Advanced.</p>
+            </>}
           </Field>
           <Field label="Repository" htmlFor="template-repository" hint="Optional. A public HTTPS repository, cloned into /sandbox/project. Private repositories can be cloned after launch.">
             <Input id="template-repository" value={recipe.repository} onChange={(e) => patch({ repository: e.target.value.trim() })} placeholder="https://github.com/your-team/project.git" className="font-mono text-xs" />
           </Field>
-          <Field label="Runtime">
+          <Field label="Runtime" hint={bundled.length ? `${bundled.join(' and ')} ${bundled.length > 1 ? 'are' : 'is'} included for the selected agents.` : undefined}>
             <div className="grid gap-2 sm:grid-cols-2">{RUNTIMES.map((r) => <Toggle key={r.id} selected={recipe.runtimes.includes(r.id)} onClick={() => toggleRuntime(r.id)}><img src={r.logo} alt="" className="size-5 object-contain" /><span className="font-medium text-foreground">{r.name}</span></Toggle>)}</div>
           </Field>
         </> : <Field label="Image" htmlFor="template-image" hint={local?.error ? local.error : 'An image in local Docker, or a registry reference Docker is signed in to. OpenShell boots it as is.'}>
@@ -133,6 +142,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
       </fieldset>
     </div>
     <footer className="flex items-center justify-end gap-2 border-t bg-card px-5 py-3 sm:px-10">
+      {replace && <p className="mr-auto flex items-center gap-1.5 text-[11px] text-muted-foreground"><Info className="size-3.5 shrink-0" />{build ? 'Rebuilding replaces this template.' : 'Saving replaces this template.'} Sandboxes already running from it keep their current image.</p>}
       <Button type="button" variant="ghost" disabled={busy} onClick={() => dirty ? setLeaveOpen(true) : onClose()}>Cancel</Button>
       <Button type="submit" className={action} disabled={busy}>{busy ? <Spinner /> : <Package />}{build ? (replace ? 'Rebuild template' : 'Build template') : 'Save template'}</Button>
     </footer>
@@ -142,11 +152,11 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
 }
 
 function StartsIn({ starts, recipe, custom, setCustom, patch }) {
-  return <Field label="Starts in" hint={custom ? 'Runs through /bin/bash as the sandbox’s main process.' : 'Opens as a session you connect to. Exiting it keeps the sandbox running.'}>
-    <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-      {starts.map((s) => <button key={s.name} type="button" aria-pressed={!custom && recipe.command === s.id} onClick={() => { setCustom(false); patch({ command: s.id }) }} className={segment(!custom && recipe.command === s.id)}>{s.name}</button>)}
-      <button type="button" aria-pressed={custom} onClick={() => { setCustom(true); patch({ command: '' }) }} className={segment(custom)}>Custom</button>
-    </div>
+  return <Field label="Starts in" htmlFor="template-start" hint={custom ? 'Runs through /bin/bash as the sandbox’s main process.' : 'Opens as a session you connect to. Exiting it keeps the sandbox running.'}>
+    <select id="template-start" value={custom ? 'custom' : recipe.command} onChange={(e) => { const custom = e.target.value === 'custom'; setCustom(custom); patch({ command: custom ? '' : e.target.value }) }} className="h-8 rounded-md border border-input bg-transparent px-2 text-xs">
+      {starts.map((s) => <option key={s.name} value={s.id}>{s.name}</option>)}
+      <option value="custom">Custom command…</option>
+    </select>
     {custom && <Input aria-label="Start command" value={recipe.command} onChange={(e) => patch({ command: e.target.value })} placeholder="npm run dev" className="font-mono text-xs" />}
   </Field>
 }

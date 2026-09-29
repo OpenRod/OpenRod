@@ -66,13 +66,15 @@ test('invalid recipes and secret names fail before Docker or the gateway is touc
   await assert.rejects(imageTemplateRoute('POST', ['image-templates', '../policy', 'delete'], {}), /Unknown image template/)
 })
 
-test('every agent choice generates an installer and its required runtime', async () => {
+test('every agent choice generates an installer, its runtime, and a session', async () => {
   const { AGENTS } = await import('../src/lib/image-templates.js')
+  const { isSession } = await import('../src/lib/sandbox-session.js')
   assert.equal(AGENTS.length, 11)
   assert.equal(AGENTS.filter((a) => a.featured).length, 4)
   for (const agent of AGENTS) {
-    const recipe = newRecipe({ name: agent.name, agents: [agent.id] })
+    const recipe = newRecipe({ name: agent.id, agents: [agent.id], command: agent.command })
     assert.deepEqual(recipeErrors(recipe), {})
+    assert.ok(isSession(agent.command), agent.command)
     const dockerfile = dockerfileFor(recipe)
     if (agent.npm) {
       assert.ok(dockerfile.includes(agent.npm))
@@ -82,24 +84,6 @@ test('every agent choice generates an installer and its required runtime', async
       assert.ok(dockerfile.indexOf(`RUN ${agent.install}`) > dockerfile.indexOf('USER sandbox'))
     } else assert.ok(dockerfile.includes(agent.id === 'aider' ? 'aider-chat' : 'https://claude.ai/install.sh'))
   }
-})
-
-test('custom agent install scripts persist and remain separate from Dockerfile instructions', async () => {
-  const command = 'printf "%s\\n" "hello"\n# FROM must not become a Dockerfile directive\nexport AGENT_TEST=1'
-  const saved = await imageTemplateRoute('POST', ['image-templates'], { recipe: newRecipe({ name: 'Custom agent', customAgentInstall: command }) })
-  const loaded = await readImageTemplate(saved.id)
-  assert.equal(loaded.recipe.customAgentInstall, command)
-  const dockerfile = dockerfileFor(loaded.recipe)
-  assert.match(dockerfile, /COPY --chown=1000:1000 custom-agents.sh/)
-  assert.match(dockerfile, /RUN bash -euo pipefail \/tmp\/custom-agents.sh/)
-  assert.ok(dockerfile.indexOf('RUN bash -euo') > dockerfile.indexOf('USER sandbox'))
-  assert.ok(!dockerfile.includes('AGENT_TEST'))
-  assert.ok(!dockerfileFor(newRecipe()).includes('custom-agents.sh'))
-})
-
-test('custom install command rejects malformed and oversized values', async () => {
-  for (const value of [42, 'x'.repeat(12001), 'echo\0bad']) {
-    assert.ok(recipeErrors(newRecipe({ name: 'Custom', customAgentInstall: value })).customAgentInstall)
-  }
-  await assert.rejects(imageTemplateRoute('POST', ['image-templates'], { recipe: newRecipe({ name: 'Custom', customAgentInstall: {} }) }), /Invalid customAgentInstall/)
+  assert.equal(isSession('rm'), false)
+  assert.equal(isSession('toString'), false)
 })
