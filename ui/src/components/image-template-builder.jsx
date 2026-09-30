@@ -156,7 +156,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
             {build && <Button type="button" variant="outline" size="sm" onClick={() => setCodeOpen(true)}><FileCode2 />View Dockerfile</Button>}
           </BlurFade>}
         </div>
-        <div className="flex gap-3 rounded-lg border bg-muted/30 p-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="text-[11px] leading-relaxed text-muted-foreground">Software only. Network, file and credential access come from the security preset you pick at launch, plus the selected agents' own sign-in and model destinations.</p></div>
+        <div className="flex gap-3 rounded-lg border bg-muted/30 p-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="text-[11px] leading-relaxed text-muted-foreground">Software only. Network, file and credential access come from the policy you pick at launch, plus the selected agents' own sign-in and model destinations.</p></div>
         {error && <p role="alert" className="whitespace-pre-wrap rounded-md border border-red-200 bg-red-50/60 p-3 text-xs text-red-700">{error}</p>}
       </fieldset>
     </div>

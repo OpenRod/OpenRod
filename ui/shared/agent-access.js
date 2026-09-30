@@ -59,7 +59,7 @@ export const AGENT_ACCESS = {
 
 export function agentAccessFor(recipe) {
   // Only built recipes have known installation locations. An existing image
-  // keeps its security preset as chosen; we do not guess what it contains.
+  // keeps its policy as chosen; we do not guess what it contains.
   if (recipe?.source !== 'build') return { profiles: [], unsupported: [] }
   const ids = [...new Set(recipe.agents ?? [])]
   return {
