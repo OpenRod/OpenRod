@@ -1,6 +1,7 @@
 import { AGENTS as AGENT_CATALOG } from './agents.js'
 
-// Shared recipe model. Image recipes never contain or grant security policy.
+// Shared recipe model. Image recipes declare installed agents; their reviewed
+// network access is composed at launch. Recipes never carry policy themselves.
 export const BASES = [
   { id: 'ubuntu:24.04', name: 'Ubuntu 24.04' },
   { id: 'debian:12-slim', name: 'Debian 12 slim' },

@@ -12,6 +12,7 @@ import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
 import { sessionCommand } from "@/lib/sandbox-session"
 import { STARTS } from "@/lib/image-templates"
+import { agentAccessFor } from "../../shared/agent-access.js"
 
 const PRESETS = [
   { id: "claude", label: "Claude Code", command: "claude" },
@@ -115,6 +116,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const command = preset === "custom" ? custom : PRESETS.find((p) => p.id === preset).command
   const chosenImage = images.find((t) => t.name === imageTemplate)
   const templateStart = chosenImage?.recipe.command ?? ""
+  const agentAccess = agentAccessFor(chosenImage?.managed ? chosenImage.recipe : null)
 
   // The server reads the folder, so it can apply .gitignore and count what it will send.
   React.useEffect(() => {
@@ -239,8 +241,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 })}
               </div>
             ) : <p className="text-[11px] text-muted-foreground">No providers</p>}
-            {(imageTemplate ? templateStart === "claude" : preset === "claude") && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
-              <p className="text-[11px] text-amber-700">Claude Code needs a claude-code provider</p>
+            {(imageTemplate ? templateStart === "claude" : preset === "claude") && !agentAccess.profiles.some((p) => p.id === "claude") && template !== "claude-subscription" && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
+              <p className="text-[11px] text-amber-700">Choose the Claude Code subscription security preset or attach a claude-code provider.</p>
             )}
           </div>
 
@@ -250,7 +252,27 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               className="h-8 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {(templates.length ? templates : [{ id: "locked-down", name: "Locked down" }]).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <p className="text-[11px] text-muted-foreground">Filesystem and network access. Shared rules still apply.</p>
+            <p className="text-[11px] text-muted-foreground">{templates.find((t) => t.id === template)?.description || "Filesystem and network access."} Shared rules still apply.</p>
+            {agentAccess.profiles.length > 0 && <div className="mt-2 rounded-md border border-border">
+              <div className="border-b px-3 py-2">
+                <p className="text-xs font-medium">Agent default rules</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">Added to the selected preset, including Locked down. These destinations allow agent sign-in and model connections; credentials may still be required.</p>
+              </div>
+              <div className="max-h-52 divide-y overflow-y-auto">
+                {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
+                  <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · agent-{profile.id}</span></summary>
+                  <ul className="mt-2 space-y-1">
+                    {profile.endpoints.map((endpoint) => <li key={endpoint.host} className="flex flex-wrap items-baseline justify-between gap-x-3 text-[11px]">
+                      <span className="break-all font-mono">{endpoint.host}:{endpoint.ports.join(",")}</span>
+                      <span className="text-muted-foreground">{endpoint.tlsSkip ? "TLS passthrough" : endpoint.access === "read-only" ? "Read only" : "Read & write"}</span>
+                    </li>)}
+                  </ul>
+                  {profile.authentication && <p className="mt-2 text-[11px]">{profile.authentication}</p>}
+                  <p className="mt-2 text-[11px] text-muted-foreground">Allowed programs</p>
+                  <ul className="mt-1 space-y-1 break-all font-mono text-[10px] text-muted-foreground">{profile.binaries.map((binary) => <li key={binary}>{binary}</li>)}</ul>
+                </details>)}
+              </div>
+            </div>}
           </div>
 
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}

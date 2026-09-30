@@ -86,7 +86,7 @@ export function TemplatesView() {
             </div>
           </BlurFade>}
       </TabsContent>
-      <TabsContent value="security" className="m-0"><div className="border-b px-4 py-6 sm:px-8"><h2 className="text-lg font-semibold tracking-tight">The boundaries around your sandbox.</h2><p className="mt-2 max-w-2xl text-xs leading-relaxed text-muted-foreground">Reusable filesystem and network rules. A security preset does not install software or create an image. Shared security rules still apply.</p></div><SecurityPresetsView /></TabsContent>
+      <TabsContent value="security" className="m-0"><SecurityPresetsView /></TabsContent>
     </Tabs>
     <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelectedName(null) }}><DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl">
       {selected && <><DialogHeader><DialogTitle className="font-mono">{selected.name}</DialogTitle><DialogDescription>{selected.managed === false ? 'Created outside the console. Edit it with the openshell CLI.' : 'OpenShell sandbox template'}</DialogDescription></DialogHeader><Status record={selected} />

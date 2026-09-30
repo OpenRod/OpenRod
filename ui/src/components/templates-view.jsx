@@ -1,8 +1,9 @@
 import * as React from "react"
-import { Copy, FileLock2, Pencil, Plus, Trash2 } from "lucide-react"
+import { ArrowRight, Copy, Pencil, Plus, Search, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -176,6 +177,10 @@ export function SecurityPresetsView() {
   const live = useLive()
   const [templates, setTemplates] = React.useState(null)
   const [editing, setEditing] = React.useState(null)
+  const [query, setQuery] = React.useState("")
+  const [selected, setSelected] = React.useState(null)
+  const [remove, setRemove] = React.useState(null)
+  const [busy, setBusy] = React.useState(false)
   const load = React.useCallback(() => api.templates().then(setTemplates).catch((e) => setTemplates({ error: e.message })), [])
   React.useEffect(() => { load() }, [load])
   const knownPrograms = React.useMemo(() => [...new Set(live.events.map((e) => e.binary).filter(Boolean))].sort(), [live.events])
@@ -189,50 +194,73 @@ export function SecurityPresetsView() {
     } catch (e) { toast.error(e.message) }
   }
 
-  if (!templates) return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
-  if (templates.error) return <p role="alert" className="py-16 text-center text-sm text-muted-foreground">{templates.error}</p>
+  const shown = Array.isArray(templates) ? templates.filter((t) =>
+    [t.name, t.description, t.id, ...t.rules.flatMap((r) => r.endpoints.map((e) => e.host))].join(" ").toLowerCase().includes(query.trim().toLowerCase())
+  ) : []
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-end gap-2 border-b border-border px-4 py-3 sm:px-6">
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
+        <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
+          <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
+          <Input aria-label="Search security presets" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
+        </div>
         {sandboxes.length > 0 && (
           <select value="" onChange={(e) => e.target.value && fromSandbox(e.target.value)} aria-label="Capture a sandbox's policy"
-            className="h-8 rounded-md border border-input bg-transparent px-2 text-[11px] text-muted-foreground">
+            className="h-8 rounded-md border border-input bg-card px-2 text-xs">
             <option value="">Capture from sandbox…</option>
             {sandboxes.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
           </select>
         )}
-        <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"
+        <Button size="sm" disabled={!Array.isArray(templates)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"
           onClick={() => setEditing({ ...structuredClone(templates[0]), id: "my-preset", name: "My preset", description: "", builtin: false })}>
           <Plus />New security preset
         </Button>
       </div>
-      <div className="mx-auto grid max-w-5xl gap-3 px-4 py-6 sm:px-6 lg:grid-cols-2">
-        {templates.map((t, i) => (
-          <BlurFade key={t.id} delay={Math.min(i, 6) * 0.03} duration={0.2} offset={3} blur="1px">
-            <div className="flex h-full flex-col rounded-lg border border-border bg-card">
-              <div className="flex items-start gap-2 border-b border-border/70 px-4 py-3">
-                <FileLock2 strokeWidth={1.4} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">{t.name}</p>
-                  <p className="text-[11px] text-muted-foreground">{t.description || <span className="font-mono">{t.id}</span>}</p>
-                </div>
-                {t.builtin ? <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">built-in</span> : <span className="font-mono text-[10px] text-muted-foreground">{t.id}.json</span>}
-              </div>
-              <div className="flex-1 px-4 py-3"><TemplateSummary template={t} /></div>
-              <div className="flex gap-1.5 border-t border-border/70 px-4 py-2">
-                <Button size="xs" variant="ghost" onClick={() => duplicate(t)}><Copy />Duplicate</Button>
-                {!t.builtin && <Button size="xs" variant="ghost" onClick={() => setEditing({ ...t, idLocked: true })}><Pencil />Edit</Button>}
-                {!t.builtin && (
-                  <Button size="xs" variant="ghost" className="ml-auto text-muted-foreground hover:text-destructive" onClick={async () => {
-                    try { await api.deleteTemplate(t.id); toast.success(`Deleted ${t.name}`); load() } catch (e) { toast.error(e.message) }
-                  }}><Trash2 />Delete</Button>
-                )}
-              </div>
+      {templates?.error ? <div role="alert" className="px-4 py-6 text-xs sm:px-8"><p>{templates.error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>
+        : !templates ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
+        : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground"><p>No matching presets.</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => setQuery('')}>Clear search</Button></div>
+        : <BlurFade duration={0.15} offset={0} blur="0px">
+          <div className="overflow-x-auto">
+            <table aria-label="Security presets" className="w-full min-w-[580px] text-left">
+              <thead className="border-b text-[11px] text-muted-foreground">
+                <tr><th className="px-4 py-2 font-normal sm:pl-8">Name</th><th className="px-4 py-2 font-normal">Network access</th><th className="px-4 py-2 font-normal">Type</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
+              </thead>
+              <tbody className="divide-y">{shown.map((t) => {
+                const hosts = [...new Set(t.rules.flatMap((r) => r.endpoints.map((e) => e.host)))]
+                return <tr key={t.id} className="hover:bg-muted/40">
+                  <td className="max-w-72 px-4 py-2 sm:pl-8"><button className="block max-w-full truncate rounded text-left text-xs font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelected(t)}>{t.name}</button></td>
+                  <td className="px-4 py-2"><span className="block max-w-72 truncate font-mono text-[11px] text-muted-foreground" title={hosts.join(', ') || 'No preset network rules'}>{hosts.join(', ') || 'Attached secrets only'}</span></td>
+                  <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px]"><span className={`size-1.5 rounded-full ${t.builtin ? 'bg-stone-300' : 'bg-emerald-500'}`} />{t.builtin ? 'Built-in' : 'Custom'}</span></td>
+                  <td className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="xs" onClick={() => setSelected(t)}>View preset<ArrowRight /></Button></td>
+                </tr>
+              })}</tbody>
+            </table>
+          </div>
+        </BlurFade>}
+      <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelected(null) }}>
+        <DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl">
+          {selected && <>
+            <DialogHeader><DialogTitle>{selected.name}</DialogTitle><DialogDescription>{selected.description || 'Reusable filesystem and network rules.'}</DialogDescription></DialogHeader>
+            <div className="rounded-lg border bg-muted/25 p-4"><TemplateSummary template={selected} /></div>
+            <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+              <Button variant="ghost" size="sm" onClick={() => { duplicate(selected); setSelected(null) }}><Copy />Duplicate</Button>
+              {!selected.builtin && <>
+                <Button variant="ghost" size="sm" onClick={() => { setEditing({ ...selected, idLocked: true }); setSelected(null) }}><Pencil />Edit preset</Button>
+                <Button variant="ghost" size="icon-sm" aria-label="Remove security preset" onClick={() => setRemove(selected)}><Trash2 /></Button>
+              </>}
             </div>
-          </BlurFade>
-        ))}
-      </div>
+          </>}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(remove)} onOpenChange={(open) => { if (!open) setRemove(null) }}>
+        <DialogContent><DialogHeader><DialogTitle>Remove this preset?</DialogTitle><DialogDescription>The saved preset will be removed. Existing sandboxes keep their current policy.</DialogDescription></DialogHeader>
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setRemove(null)}>Keep preset</Button><Button variant="destructive" disabled={busy} onClick={async () => {
+            setBusy(true)
+            try { await api.deleteTemplate(remove.id); toast.success(`Deleted ${remove.name}`); setRemove(null); setSelected(null); await load() } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+          }}>{busy && <Spinner />}Remove preset</Button></div>
+        </DialogContent>
+      </Dialog>
       <TemplateEditor open={Boolean(editing)} initial={editing} onClose={() => setEditing(null)} onSaved={load} knownPrograms={knownPrograms} />
     </div>
   )

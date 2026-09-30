@@ -1,16 +1,18 @@
 // Where an egress rule comes from decides who may change it. The prefixes are
-// written by the gateway (_provider_), by egress policies (egress_) and for the
-// shared blocked hosts (org_; group_ is from before egress policies).
+// written by the gateway (_provider_), by egress policies (egress_), for the
+// shared blocked hosts (org_; group_ is from before egress policies) and for
+// an agent's own destinations at launch (agent-).
 export const SOURCE = {
   own: { label: "Sandbox", swatch: "bg-stone-700", beam: ["#a8a29e", "#44403c"] },
+  agent: { label: "Agent defaults", swatch: "bg-indigo-500", beam: ["#a5b4fc", "#6366f1"] },
   org: { label: "Shared", swatch: "bg-[#4a5568]", beam: ["#94a3b8", "#4a5568"] },
   group: { label: "Inherited", swatch: "bg-teal-600", beam: ["#5eead4", "#0f766e"] },
   policy: { label: "Policy", swatch: "bg-indigo-600", beam: ["#a5b4fc", "#4338ca"] },
   secret: { label: "Secret", swatch: "bg-amber-600", beam: ["#fcd34d", "#b45309"] },
 }
-export const SOURCE_ORDER = ["org", "policy", "group", "own", "secret"]
+export const SOURCE_ORDER = ["org", "policy", "group", "agent", "own", "secret"]
 
-export const sourceOf = (key) => (key.startsWith("_provider_") ? "secret" : key.startsWith("egress_") ? "policy" : key.startsWith("org_") ? "org" : key.startsWith("group_") ? "group" : "own")
+export const sourceOf = (key) => (key.startsWith("_provider_") ? "secret" : key.startsWith("egress_") ? "policy" : key.startsWith("org_") ? "org" : key.startsWith("group_") ? "group" : key.startsWith("agent-") ? "agent" : "own")
 export const displayName = (key) => key.replace(/^_provider_/, "").replace(/^(org|group|egress)_/, "").replace(/_/g, "-")
 
 export function hostOf(d) {

@@ -101,7 +101,7 @@ function OpenInTerminal({ name, disabled }) {
 }
 
 const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules", blocked: "blocked" }
-const RULE_TAG = { secret: "from provider", policy: "policy", org: "blocked everywhere", group: "inherited", own: "rule" }
+const RULE_TAG = { secret: "from provider", policy: "policy", org: "blocked everywhere", group: "inherited", agent: "agent defaults", own: "rule" }
 
 export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const context = useLive()
@@ -266,7 +266,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                               <li key={`${endpoint.host}:${endpoint.port}`} className="flex items-center gap-2 font-mono text-[11px]">
                                 <span className={`size-1.5 shrink-0 rounded-full ${endpoint.blocked ? "bg-red-500" : "bg-emerald-500"}`} aria-hidden="true" />
                                 <span className="min-w-0 flex-1 truncate">{endpoint.host}{endpoint.port ? `:${endpoint.port}` : ""}</span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground">{ACCESS_LABEL[endpoint.access] ?? endpoint.access}{endpoint.enforcement === "audit" ? " · audit only" : ""}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground">{ACCESS_LABEL[endpoint.access] ?? endpoint.access}{endpoint.tlsSkip ? " · TLS passthrough" : ""}{endpoint.protocol !== "tcp" && endpoint.enforcement === "audit" ? " · audit only" : ""}</span>
                               </li>
                             ))}
                           </ul>
