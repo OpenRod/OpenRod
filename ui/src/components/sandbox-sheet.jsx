@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle, Box, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Terminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -15,7 +15,7 @@ import { CopyCommand } from "@/components/copy-command"
 import { FilesView } from "@/components/files-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
-import { SESSION_LABEL, sessionCommand } from "@/lib/sandbox-session"
+import { SESSION_LABEL, defaultSession, sessionCommand, sessionName, terminalHref } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
 import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
@@ -84,6 +84,16 @@ function OpenInEditor({ name, editors }) {
         </Button>
       ))}
     </div>
+  )
+}
+
+// The session opens in a new browser tab, so this stays a plain link.
+function OpenWebTerminal({ name, sandbox }) {
+  return (
+    <Button variant="outline" size="sm" className="w-full justify-start text-xs" nativeButton={false}
+      render={<a href={terminalHref(name)} target="_blank" rel="noreferrer" />}>
+      <Terminal className="size-3.5" aria-hidden="true" />Open in browser<span className="ml-auto text-[11px] text-muted-foreground">{sessionName(defaultSession(sandbox))}</span>
+    </Button>
   )
 }
 
@@ -220,6 +230,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                       <Section title="Attach">
                         <div className="space-y-2">
                           {!live.demo && <OpenInEditor name={name} editors={editors} />}
+                          {attachable && !live.demo && <OpenWebTerminal name={name} sandbox={sandbox} />}
                           {attachable && !live.demo && <OpenInTerminal name={name} />}
                           {attachable && <CopyCommand command={sessionCommand(sandbox)} />}
                         </div>
