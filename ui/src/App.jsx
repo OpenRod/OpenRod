@@ -1,4 +1,5 @@
 import * as React from "react"
+import { SetupsView } from "@/components/setups-view"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
 import { ActivityView } from "@/components/activity-view"
@@ -22,6 +23,7 @@ const TITLES = {
   ingress: "Ingress",
   secrets: "Secrets",
   templates: "Templates",
+  setups: "Setups",
 }
 
 // One page failing to render must not take the console down with it.
@@ -104,6 +106,7 @@ export function App() {
           {view === "ingress" && <IngressView />}
           {view === "secrets" && <SecretsView />}
           {view === "templates" && <TemplatesView />}
+          {view === "setups" && <SetupsView />}
           </PageBoundary>
         </SidebarInset>
         <Toaster position="bottom-right" />

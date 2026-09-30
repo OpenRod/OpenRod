@@ -13,6 +13,17 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  setups: () => request('/setups'),
+  discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
+  reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),
+  setupFile: (token, item, path) => request('/setups/file', { method: 'POST', body: { token, item, path } }),
+  saveSetup: (token, name, acknowledged) => request('/setups/save', { method: 'POST', body: { token, name, acknowledged } }),
+  deleteSetup: (id, revision) => request(`/setups/${id}/delete`, { method: 'POST', body: { revision } }),
+  deleteSetupItem: (id, item, revision) => request(`/setups/${id}/delete-item`, { method: 'POST', body: { item, revision } }),
+  previewSetup: (id, sandbox, targets) => request(`/setups/${id}/preview`, { method: 'POST', body: { sandbox, targets } }),
+  enableSetup: (id, sandbox, token) => request(`/setups/${id}/enable`, { method: 'POST', body: { sandbox, token } }),
+  removeSetup: (id, sandbox, token) => request(`/setups/${id}/remove`, { method: 'POST', body: { sandbox, token } }),
+  setupJobs: (id) => request(`/setups/${id}/jobs`),
   previewActivityDeletion: (body) => request('/activity/delete-preview', { method: 'POST', body }),
   deleteActivity: (token) => request('/activity/delete', { method: 'POST', body: { token } }),
   activityDestinations: () => request('/activity-destinations'),
