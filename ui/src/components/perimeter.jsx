@@ -2,9 +2,9 @@ import * as React from "react"
 import { motion, useReducedMotion } from "motion/react"
 import { Ban, Bot, Box, Check, ChevronDown, KeyRound, Network, Server, UserRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SOURCE, brandOf } from "@/lib/policy-sources"
-import { PHASE_LABEL, styleOf } from "@/lib/sandboxes"
 import { cn } from "@/lib/utils"
 
 export function HostTile({ host, tone = "default", className }) {
@@ -51,12 +51,13 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
   const [expanded, setExpanded] = React.useState({})
   const [active, setActive] = React.useState(null)
   const toggle = (key) => setExpanded((previous) => ({ ...previous, [key]: !previous[key] }))
-  const allOpen = Object.keys(groups).filter((key) => key !== "agents").every((key) => expanded[key])
+  const expandableGroups = ["secrets", "blocked", "allowed"]
+  const allOpen = expandableGroups.every((key) => expanded[key])
   return <TooltipProvider delay={150}>
     <div className={cn("@container flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card font-sans", fill && "flex-1")} aria-label={`Access graph for ${name}`}>
       <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-1.5">
         <span className="text-[10px] text-muted-foreground">Select a group to explore its access</span>
-        <button type="button" onClick={() => setExpanded(Object.fromEntries(Object.keys(groups).filter((key) => key !== "agents").map((key) => [key, !allOpen])))} className="rounded px-1 text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">{allOpen ? "Collapse all" : "Expand all"}</button>
+        <button type="button" onClick={() => setExpanded(Object.fromEntries(expandableGroups.map((key) => [key, !allOpen])))} className="rounded px-1 text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">{allOpen ? "Collapse all" : "Expand all"}</button>
       </div>
       <div ref={container} className={cn("relative mx-auto grid w-full flex-1 max-w-[1020px] grid-cols-1 items-center gap-5 px-4 @2xl:grid-cols-[minmax(0,1fr)_160px_minmax(0,1.3fr)] @2xl:gap-x-8 @2xl:gap-y-7 @2xl:px-6", compact ? "py-3" : "py-7")}>
         <div ref={groups.agents} aria-label="Agent types" className="relative z-10 order-3 flex flex-col items-center gap-7 @2xl:order-none @2xl:col-start-1 @2xl:row-start-1 @2xl:row-span-4">
@@ -65,13 +66,16 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
             <span className="max-w-full break-words text-center text-xs font-medium">{agent.name}</span>
           </div>)}
         </div>
-        <Group ref={groups.owner} title="Owner" icon={UserRound} summary={owner} open={!!expanded.owner} onToggle={() => toggle("owner")} className="@2xl:col-start-2 @2xl:row-start-1">
-          <p className="rounded-xl border border-border/70 bg-card px-3 py-2 text-[11px] break-words">{owner}</p>
-        </Group>
+        <Card ref={groups.owner} role="group" aria-label="Owner" className="relative z-10 w-max min-w-0 max-w-full justify-self-center gap-1.5 border-stone-200 bg-[#f7f7f5] px-3 py-2.5 shadow-[0_2px_6px_#1c191703] @2xl:col-start-2 @2xl:row-start-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <UserRound className="size-3 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+            <span>Owner</span>
+          </div>
+          <p className="min-w-0 whitespace-normal text-[11px] font-medium leading-relaxed [overflow-wrap:anywhere]">{owner}</p>
+        </Card>
         <div ref={hub} className="relative z-10 flex min-w-0 flex-col items-center justify-self-center rounded-xl px-3 @2xl:col-start-2 @2xl:row-start-2">
           <div ref={core} className="flex size-14 items-center justify-center rounded-2xl border border-stone-300 bg-card shadow-[0_3px_8px_#1c191708]"><Box className="size-6 text-stone-600" strokeWidth={1.3} /></div>
           <p className="mt-2 max-w-[156px] truncate text-xs font-medium" title={name}>{name}</p>
-          <p className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground"><span className={cn("size-1 rounded-full", styleOf(phase).bar)} />{PHASE_LABEL[phase] ?? "Unknown"}</p>
 
         </div>
         <div className="relative z-10 flex justify-center @2xl:col-start-2 @2xl:row-start-3">
@@ -105,38 +109,51 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
 // One edge per group. Observe animated bounds so connections stay attached as
 // the clusters expand, collapse, or reflow with the viewport.
 function Connections({ container, core, hub, groups }) {
+  const svg = React.useRef(null)
   const [paths, setPaths] = React.useState([])
   React.useLayoutEffect(() => {
     function measure() {
       if (!container.current || !core.current || !hub.current) return
-      const bounds = container.current.getBoundingClientRect()
-      const box = core.current.getBoundingClientRect()
-      const body = hub.current.getBoundingClientRect()
-      const cx = box.left + box.width / 2 - bounds.left
-      const cy = box.top + box.height / 2 - bounds.top
+      const matrix = svg.current?.getScreenCTM()
+      if (!matrix) return
+      // DOM bounds include the dialog's opening scale. Convert them back into
+      // SVG coordinates so every endpoint stays centered throughout animation.
+      const inverse = matrix.inverse()
+      const localBounds = (element) => {
+        const rect = element.getBoundingClientRect()
+        const topLeft = new DOMPoint(rect.left, rect.top).matrixTransform(inverse)
+        const bottomRight = new DOMPoint(rect.right, rect.bottom).matrixTransform(inverse)
+        return { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y }
+      }
+      const box = localBounds(core.current)
+      const body = localBounds(hub.current)
+      const cx = box.left + box.width / 2
+      const cy = box.top + box.height / 2
       setPaths(Object.entries(groups).flatMap(([key, ref]) => {
-        const rect = ref.current?.getBoundingClientRect()
+        const rect = ref.current ? localBounds(ref.current) : null
         if (!rect) return []
         if (key === "owner" || key === "secrets") {
-          const sy = (key === "owner" ? box.top : body.bottom) - bounds.top
-          const ty = (key === "owner" ? rect.bottom : rect.top) - bounds.top
-          return [{ key, d: `M ${cx} ${sy} V ${ty}`, x: cx, y: ty }]
+          const sy = (key === "owner" ? box.top : body.bottom)
+          const ty = (key === "owner" ? rect.bottom : rect.top)
+          const tx = rect.left + rect.width / 2
+          const my = (sy + ty) / 2
+          return [{ key, d: `M ${cx} ${sy} C ${cx} ${my}, ${tx} ${my}, ${tx} ${ty}`, x: tx, y: ty }]
         }
         if (key === "agents") {
           return [...ref.current.querySelectorAll("[data-agent-node]")].map((node, index) => {
-            const agent = node.getBoundingClientRect()
-            const sx = box.left - bounds.left
-            const tx = agent.right - bounds.left
-            const ty = agent.top + agent.height / 2 - bounds.top
+            const agent = localBounds(node)
+            const sx = box.left
+            const tx = agent.right
+            const ty = agent.top + agent.height / 2
             const mx = (sx + tx) / 2
             return { key: `agent-${index}`, d: `M ${sx} ${cy} C ${mx} ${cy}, ${mx} ${ty}, ${tx} ${ty}`, x: tx, y: ty }
           })
         }
-        const sx = box.right - bounds.left
-        const tx = rect.left - bounds.left
+        const sx = box.right
+        const tx = rect.left
         // Connect to each section's header, even when its host list expands.
-        const header = ref.current.querySelector("button").getBoundingClientRect()
-        const ty = header.top + header.height / 2 - bounds.top
+        const header = localBounds(ref.current.querySelector("button"))
+        const ty = header.top + header.height / 2
         const branch = sx + (tx - sx) * 0.4
         const bend = branch + (tx - branch) * 0.5
         return [{ key, d: `M ${sx} ${cy} H ${branch} C ${bend} ${cy}, ${bend} ${ty}, ${tx} ${ty}`, x: tx, y: ty }]
@@ -147,7 +164,7 @@ function Connections({ container, core, hub, groups }) {
     ;[container.current, core.current, hub.current, ...Object.values(groups).map((ref) => ref.current)].filter(Boolean).forEach((element) => observer.observe(element))
     return () => observer.disconnect()
   }, [container, core, hub, groups])
-  return <svg className="pointer-events-none absolute inset-0 hidden size-full overflow-visible @2xl:block" aria-hidden="true" fill="none">
+  return <svg ref={svg} className="pointer-events-none absolute inset-0 hidden size-full overflow-visible @2xl:block" aria-hidden="true" fill="none">
     {paths.map((path) => <g key={path.key}><path d={path.d} stroke={path.key === "blocked" ? "#dfc4c0" : path.key === "allowed" ? "#b9d6c9" : "#d6d3d1"} strokeWidth="1.5" strokeLinecap="round" /><circle cx={path.x} cy={path.y} r="2.5" fill="var(--card)" stroke="#c9c5c0" /></g>)}
   </svg>
 }

@@ -1,0 +1,29 @@
+{
+  "id": "cursor",
+  "name": "Cursor",
+  "action": "allow",
+  "destinations": [
+    "cursor.com",
+    "**.cursor.com",
+    "**.cursor.sh",
+    "**.cursorapi.com"
+  ],
+  "appliesTo": {
+    "everyone": false,
+    "groups": [
+      "coding-agents"
+    ],
+    "sandboxes": []
+  },
+  "advanced": {
+    "ports": [
+      443
+    ],
+    "programs": [],
+    "requests": "any",
+    "allow": [],
+    "deny": [],
+    "enforcement": "enforce",
+    "privateIps": []
+  }
+}

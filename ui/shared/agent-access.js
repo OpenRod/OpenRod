@@ -34,7 +34,6 @@ export const AGENT_ACCESS = {
     // server inside the sandbox, which the browser cannot reach.
     authentication: 'Attach a Codex credential, or run codex after connecting and choose “Sign in with Device Code” (ChatGPT plan) or “Provide your own API key”. “Sign in with ChatGPT” can’t complete from a sandbox.',
   },
-  // Legacy saved images retain their launch policy; this agent is no longer offered.
   gemini: profile('Gemini CLI', [...node, '/usr/local/bin/gemini'], google),
   // Hosts for Pi's built-in /login flows (pi-ai dist/auth/oauth/*.js).
   pi: {
@@ -59,9 +58,9 @@ export const AGENT_ACCESS = {
 }
 
 export function agentAccessFor(recipe) {
-  // Only wizard recipes provide verified installation locations. Imported images
-  // retain their explicit security preset; we do not guess what they contain.
-  if (recipe?.source !== 'wizard') return { profiles: [], unsupported: [] }
+  // Only built recipes have known installation locations. An existing image
+  // keeps its security preset as chosen; we do not guess what it contains.
+  if (recipe?.source !== 'build') return { profiles: [], unsupported: [] }
   const ids = [...new Set(recipe.agents ?? [])]
   return {
     profiles: ids.filter(id => AGENT_ACCESS[id]).map(id => ({ id, ...AGENT_ACCESS[id] })),

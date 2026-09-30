@@ -93,7 +93,7 @@ export function describeRule(input) {
   return `${who} may ${parts.join("; and ")}${denies.length ? `, except ${denies.join(", ")}` : ""}.${audit ? " Audit only: violations are logged but allowed." : ""}`
 }
 
-function Segmented({ options, value, onChange, label }) {
+export function Segmented({ options, value, onChange, label }) {
   return (
     <div role="radiogroup" aria-label={label} className="flex items-center gap-1 rounded-md border border-border p-0.5">
       {options.map((o) => (
@@ -106,7 +106,7 @@ function Segmented({ options, value, onChange, label }) {
   )
 }
 
-function RequestList({ items, onChange, kind }) {
+export function RequestList({ items, onChange, kind }) {
   return (
     <div className="space-y-1.5">
       {items.map((r, i) => (
