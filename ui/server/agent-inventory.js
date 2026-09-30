@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { AGENTS } from '../src/lib/agents.js'
+
+const resourceProbe = readFileSync(new URL('./agent-resources.py', import.meta.url), 'utf8')
 
 // Inspect executables without starting an agent, reading credentials, or sourcing
 // user profile scripts. The same check finds image contents and later installs.
@@ -24,7 +27,7 @@ if ! report_agent "$p" '${command}'; then
   for d in /usr/local/bin /usr/bin /opt/bin "$HOME/.local/bin" "$HOME/.npm-global/bin" "$HOME/.bun/bin" "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.cargo/bin" "$HOME"/.nvm/versions/node/*/bin /opt/node/bin; do
     if report_agent "$d/${command}" '${command}'; then break; fi
   done
-fi`).join('\n') + '\nprintf "openshell-agent-scan-complete\\n"\n'
+fi`).join('\n') + `\npython3 - <<'OPENSHELL_RESOURCES' 2>/dev/null\n${resourceProbe}\nOPENSHELL_RESOURCES\nprintf 'openshell-agent-scan-complete\\n'\n`
 
 export function createAgentInventory({ now = Date.now, ttl = 20_000 } = {}) {
   const cache = new Map()
@@ -33,7 +36,7 @@ export function createAgentInventory({ now = Date.now, ttl = 20_000 } = {}) {
     let entry = cache.get(key)
     if (sandbox.phase !== 'ready') {
       if (entry) entry.expires = 0
-      return { status: 'unavailable', agents: entry?.result?.agents ?? null, checkedAt: entry?.result?.checkedAt ?? null }
+      return { status: 'unavailable', agents: entry?.result?.agents ?? null, resources: null, checkedAt: entry?.result?.checkedAt ?? null }
     }
     if (entry?.pending) return entry.pending
     if (entry?.expires > now()) return entry.result
@@ -52,9 +55,12 @@ export function createAgentInventory({ now = Date.now, ttl = 20_000 } = {}) {
         const lines = result.stdout.toString().trim().split('\n')
         if (result.exitCode !== 0 || lines.at(-1) !== 'openshell-agent-scan-complete') throw new Error('Incomplete scan')
         const agents = AGENTS.filter((agent) => agent.commands.some((command) => lines.includes(command))).map(({ name }) => name)
-        entry.result = { status: 'checked', agents, checkedAt: new Date(now()).toISOString() }
+        const resourceLine = lines.find((line) => line.startsWith('openshell-agent-resources:'))
+        let resources = null
+        try { resources = JSON.parse(resourceLine?.slice('openshell-agent-resources:'.length)) } catch { /* Resource scans can fail independently. */ }
+        entry.result = { status: 'checked', agents, resources, checkedAt: new Date(now()).toISOString() }
       } catch {
-        entry.result = { status: 'unavailable', agents: entry.result?.agents ?? null, checkedAt: entry.result?.checkedAt ?? null }
+        entry.result = { status: 'unavailable', agents: entry.result?.agents ?? null, resources: null, checkedAt: entry.result?.checkedAt ?? null }
       }
       entry.expires = now() + ttl
       return entry.result

@@ -26,7 +26,7 @@ export function agentsOf(sandbox) {
   const values = Array.isArray(installed) ? installed : explicit ? names : executable && executable !== "agent" ? [executable] : []
   const agents = values.flatMap((value) => {
     const known = AGENTS.find((agent) => agent.name.toLowerCase() === value.toLowerCase() || agent.commands.includes(value.toLowerCase()) || agent.aliases?.some((alias) => alias.toLowerCase() === value.toLowerCase()))
-    if (known) return [{ name: known.name, logo: `/logos/agents/${known.logo}.svg` }]
+    if (known) return [{ resources: sandbox?.agentInventory?.resources?.[known.name], name: known.name, logo: `/logos/agents/${known.logo}.svg` }]
     return explicit ? [{ name: value, logo: null }] : []
   })
   return agents.filter((agent, index) => agents.findIndex((item) => item.name.toLowerCase() === agent.name.toLowerCase()) === index)
