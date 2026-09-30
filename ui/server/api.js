@@ -6,8 +6,9 @@ import { createActivityDelivery } from './activity-delivery.js'
 import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
+import { execFile, spawn } from 'node:child_process'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
+import { SESSION_LABEL, isSession, sessionCommand, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
@@ -170,6 +171,28 @@ async function lifecycle(name, action) {
   if (action === 'stop') await client.raw.stopSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
   else if (action === 'start') await client.raw.startSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
   else if (action === 'delete') return client.sandbox.delete(name)
+  return { ok: true }
+}
+
+// Open the attach command in a new local terminal window. The command is
+// rebuilt from the gateway's record, never taken from the browser.
+async function openTerminal(name) {
+  const { client } = await gateway()
+  const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
+  if (sandbox.phase !== 'ready' || !(sandbox.tty || sandbox.labels?.[SESSION_LABEL])) throw fail('This sandbox has no interactive session to open.', 409)
+  const command = sessionCommand(sandbox)
+  if (process.platform === 'darwin') {
+    const script = `tell application "Terminal" to do script "${command.replace(/[\\"]/g, '\\$&')}"`
+    await new Promise((resolve, reject) => execFile('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], { timeout: 10000 },
+      (error) => error ? reject(fail('Could not open Terminal. Allow the console to control Terminal in System Settings → Privacy & Security → Automation.', 502)) : resolve()))
+  } else if (process.platform === 'linux') {
+    // The emulator lives as long as the session, so detach instead of waiting.
+    await new Promise((resolve, reject) => {
+      const child = spawn('x-terminal-emulator', ['-e', 'sh', '-c', command], { detached: true, stdio: 'ignore' })
+      child.once('error', () => reject(fail('No terminal emulator found. Copy the command instead.', 501)))
+      child.once('spawn', () => { child.unref(); resolve() })
+    })
+  } else throw fail('Opening a terminal is supported on macOS and Linux only.', 501)
   return { ok: true }
 }
 
@@ -356,6 +379,7 @@ export function openshellApi() {
             if (parts.length === 3) return send(res, 200, parts[2] === 'test' ? await delivery.test(parts[1]) : delivery.change(parts[1], parts[2]))
           }
           if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await createSandbox(input))
+          if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && parts[2] === 'terminal') return send(res, 200, await openTerminal(parts[1]))
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
