@@ -15,7 +15,7 @@ import { CopyCommand } from "@/components/copy-command"
 import { FilesView } from "@/components/files-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
-import { SESSION_LABEL, defaultSession, sessionCommand, sessionName, terminalHref } from "@/lib/sandbox-session"
+import { defaultSession, sessionName, terminalHref } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
 import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
@@ -97,16 +97,92 @@ function OpenWebTerminal({ name, sandbox }) {
   )
 }
 
-function OpenInTerminal({ name, disabled }) {
+function NativeSsh({ name }) {
+  const [connection, setConnection] = React.useState(null)
+  const [error, setError] = React.useState(null)
+  const [mode, setMode] = React.useState("exec")
   const [opening, setOpening] = React.useState(false)
+  const [loadingConfig, setLoadingConfig] = React.useState(false)
+  const [config, setConfig] = React.useState(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    setConnection(null); setError(null); setMode("exec"); setConfig(null)
+    api.sshConnection(name)
+      .then((value) => { if (!cancelled) setConnection(value) })
+      .catch((e) => { if (!cancelled) setError(e.message) })
+    return () => { cancelled = true }
+  }, [name])
+
+  if (error) return <p role="alert" className="text-[11px] text-destructive">{error}</p>
+  if (!connection) return <p role="status" className="text-[11px] text-muted-foreground">Checking SSH…</p>
+
+  const plan = connection.modes[mode] ?? connection.modes.exec
+  const unavailable = !connection.cliInstalled ? "Install the openshell CLI to connect."
+    : !connection.sshInstalled ? "Install OpenSSH to connect."
+    : !connection.terminalSupported ? "Opening a system terminal is supported on macOS and Linux."
+    : null
+
+  async function open() {
+    setOpening(true)
+    try {
+      await api.openSshTerminal(name, mode)
+      toast.success(`Opening ${name} over SSH`)
+    } catch (e) {
+      toast.error("Couldn’t open SSH terminal", { description: e.message })
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  async function showConfig() {
+    setLoadingConfig(true)
+    try { setConfig(await api.sshConfig(name)) }
+    catch (e) { toast.error("Couldn’t generate SSH config", { description: e.message }) }
+    finally { setLoadingConfig(false) }
+  }
+
   return (
-    <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={disabled || opening}
-      onClick={async () => {
-        setOpening(true)
-        try { await api.openTerminal(name) } catch (e) { toast.error("Couldn’t open terminal", { description: e.message }) } finally { setOpening(false) }
-      }}>
-      {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" aria-hidden="true" />}Open in terminal
-    </Button>
+    <>
+      <div className="rounded-md border border-border bg-background p-2.5">
+        <div className="mb-2 flex items-center justify-between gap-2 text-[11px]">
+          <span className="font-medium">Native SSH</span>
+          <span className="truncate text-muted-foreground" title={connection.gateway.endpoint}>{connection.gateway.remote ? "Remote" : "Local"} gateway · {connection.gateway.name}</span>
+        </div>
+        {connection.modes.attach && (
+          <div className="mb-2 grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+            <Button type="button" variant={mode === "exec" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("exec")}>New session</Button>
+            <Button type="button" variant={mode === "attach" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("attach")}>Attach</Button>
+          </div>
+        )}
+        <div className="space-y-1.5">
+          <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={!connection.canOpenTerminal || opening} onClick={open}>
+            {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" aria-hidden="true" />}Open in terminal
+          </Button>
+          {plan && <CopyCommand command={plan.command} />}
+          <Button variant="ghost" size="sm" className="w-full justify-start text-xs" disabled={!connection.cliInstalled || loadingConfig} onClick={showConfig}>
+            {loadingConfig ? <Spinner className="size-3.5" /> : <SquareCode className="size-3.5" aria-hidden="true" />}Show SSH config
+          </Button>
+        </div>
+        {unavailable && <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">{unavailable}</p>}
+      </div>
+      <Dialog open={Boolean(config)} onOpenChange={(open) => { if (!open) setConfig(null) }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>SSH config for {name}</DialogTitle>
+            <DialogDescription>The console does not change ~/.ssh/config. Review and add this Host block yourself, then connect with the command below.</DialogDescription>
+          </DialogHeader>
+          {config && <>
+            <pre className="max-h-[50svh] overflow-auto whitespace-pre rounded-md border bg-muted/30 p-3 font-mono text-[11px]">{config.config}</pre>
+            <CopyCommand command={config.command} />
+            <Button variant="outline" onClick={async () => {
+              try { await navigator.clipboard.writeText(config.config); toast.success("SSH config copied") }
+              catch { toast.error("Couldn’t copy SSH config") }
+            }}>Copy Host block</Button>
+          </>}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -184,7 +260,6 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   }, [scopedEvents])
   const agents = agentsOf(sandbox)
   const phase = sandbox?.phase
-  const attachable = Boolean(sandbox?.tty || sandbox?.labels?.[SESSION_LABEL])
   const rules = detail?.policy?.rules ?? []
 
   return (
@@ -226,13 +301,12 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && (attachable || (editors.length > 0 && !live.demo)) && (
-                      <Section title="Attach">
+                    {phase === "ready" && (
+                      <Section title="Connect">
                         <div className="space-y-2">
                           {!live.demo && <OpenInEditor name={name} editors={editors} />}
-                          {attachable && !live.demo && <OpenWebTerminal name={name} sandbox={sandbox} />}
-                          {attachable && !live.demo && <OpenInTerminal name={name} />}
-                          {attachable && <CopyCommand command={sessionCommand(sandbox)} />}
+                          {!live.demo && <OpenWebTerminal name={name} sandbox={sandbox} />}
+                          {!live.demo && <NativeSsh name={name} />}
                         </div>
                       </Section>
                     )}
