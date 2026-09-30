@@ -93,7 +93,7 @@ function FirstRun({ onCreate, onPolicy }) {
       </ol>
       <BlurFade delay={0.34}>
         <div className="mt-6 flex flex-wrap items-center gap-2">
-          <Button onClick={onCreate} className="bg-[var(--action)] text-white hover:bg-[var(--action)]/90"><Plus />Create your first group</Button>
+          <Button onClick={onCreate} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus />Create your first group</Button>
           <Button variant="ghost" onClick={onPolicy} className="text-muted-foreground">Egress policies<ArrowRight /></Button>
         </div>
       </BlurFade>
@@ -222,7 +222,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
               <Label htmlFor="edit-group-description" className="text-xs">Description</Label>
               <Textarea id="edit-group-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className="text-xs" />
             </div>
-            {dirty && <Button size="sm" className="w-fit bg-[var(--action)] text-white hover:bg-[var(--action)]/90" disabled={busy} onClick={save}>{busy && <Spinner />}Save</Button>}
+            {dirty && <Button size="sm" className="w-fit bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" disabled={busy} onClick={save}>{busy && <Spinner />}Save</Button>}
           </section>
 
           <section className="grid gap-2">
@@ -368,7 +368,7 @@ export function GroupsView({ onNavigate }) {
           ))}
         </div>
         <p className="mx-3 hidden max-w-sm text-[11px] leading-relaxed text-muted-foreground lg:block">Egress policies aimed at a group reach every sandbox in it. A sandbox is in one group at a time.</p>
-        <Button size="sm" className="ml-auto bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={() => setCreating(true)}><Plus className="size-3.5" />New group</Button>
+        <Button size="sm" className="ml-auto bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => setCreating(true)}><Plus className="size-3.5" />New group</Button>
       </div>
 
       <section aria-label="Groups" className="grid gap-3 px-4 py-5 sm:grid-cols-2 sm:px-6 xl:grid-cols-3">

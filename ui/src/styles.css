@@ -18,8 +18,17 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* OpenRod Desk - tokens from the approved "Minimalist Card Flow" design. Light only. */
+/* Shared appearance tokens. */
 :root {
+  --graph-neutral: #f7f7f5;
+  --graph-allowed: #f3f9f6;
+  --graph-blocked: #fcf6f5;
+  --edge-neutral: #d6d3d1;
+  --edge-allowed: #b9d6c9;
+  --edge-blocked: #dfc4c0;
+  --frame-highlight: #ffffff;
+  --button-highlight: #ffffff;
+  --button-shine: #ffffff;
   --paper: #fafaf9;
   --paper-sidebar: #f5f5f4;
   --surface: #ffffff;
@@ -70,6 +79,66 @@
   --status-sleeping: #a8a29e;
   --status-provisioning: #f59e0b;
   --status-error: #ef4444;
+}
+
+.dark {
+  color-scheme: dark;
+  --button-highlight: #ffffff14;
+  --button-shine: #ffffff;
+  --paper: #171717;
+  --paper-sidebar: #1c1c1c;
+  --surface: #222222;
+  --ink: #f2f0ed;
+  --ink-muted: #aaa6a1;
+  --ink-faint: #8f8b86;
+  --hairline: #353432;
+  --hairline-strong: #494642;
+  --action: #b4c0d2;
+  --action-foreground: #171b22;
+  --connection: #6ad5b3;
+  --graph-neutral: #262625;
+  --graph-allowed: #1c2d26;
+  --graph-blocked: #302322;
+  --edge-neutral: #55514c;
+  --edge-allowed: #446e5c;
+  --edge-blocked: #79524c;
+  --frame-highlight: #4b4844;
+
+  /* Existing utility accents share the same appearance palette. */
+  --color-stone-50: #262625;
+  --color-stone-100: #2c2b29;
+  --color-stone-200: #3a3835;
+  --color-stone-300: #504c47;
+  --color-stone-400: #827b72;
+  --color-stone-500: #aaa29a;
+  --color-stone-600: #c7c0b8;
+  --color-stone-700: #ddd7d0;
+  --color-stone-800: #ece8e3;
+  --color-stone-900: #f5f3f0;
+  --color-red-50: #30201f;
+  --color-red-100: #402725;
+  --color-red-200: #653732;
+  --color-red-600: #fb8e88;
+  --color-red-700: #fca5a0;
+  --color-red-800: #fec8c3;
+  --color-emerald-50: #1a2d26;
+  --color-emerald-100: #213e32;
+  --color-emerald-200: #2b5844;
+  --color-emerald-600: #61d5a7;
+  --color-emerald-700: #83e0bb;
+  --color-emerald-800: #a5ebcf;
+  --color-amber-50: #30291b;
+  --color-amber-100: #423620;
+  --color-amber-200: #64512b;
+  --color-amber-600: #eac16b;
+  --color-amber-700: #f0d18f;
+  --color-amber-800: #f6dfb2;
+  --color-blue-50: #1b2938;
+  --color-blue-100: #22394d;
+  --color-blue-200: #305571;
+  --color-blue-600: #83baf0;
+  --color-blue-700: #a2cef5;
+  --color-blue-800: #c3e0fa;
 }
 
 @theme inline {
@@ -138,11 +207,20 @@
       transform: translateZ(0) rotate(360deg);
     }
   }
+  --animate-shine: shine var(--duration) infinite linear;
+  @keyframes shine {
+    0%, 100% {
+      background-position: 0% 0%;
+    }
+    50% {
+      background-position: 100% 100%;
+    }
+  }
 }
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  html { @apply bg-background; color-scheme: light; }
+  html { @apply bg-background; }
   body {
     @apply m-0 min-w-80 bg-background font-sans text-foreground antialiased;
     letter-spacing: -0.005em;

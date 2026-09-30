@@ -78,7 +78,7 @@ function OpenInEditor({ name, editors }) {
           title="Connects over SSH through OpenShell. The first time, OpenShell adds one Include line to ~/.ssh/config."
           onClick={() => open(editor)}>
           {opening === editor.id ? <Spinner className="size-3.5" />
-            : editor.id === "cursor" ? <img src="/logos/cursor.svg" alt="" aria-hidden="true" className="size-3.5" draggable={false} />
+            : editor.id === "cursor" ? <img src="/logos/cursor.svg" alt="" aria-hidden="true" className="size-3.5 dark:invert" draggable={false} />
             : <SquareCode className="size-3.5" aria-hidden="true" />}
           Open in {editor.label}
         </Button>
