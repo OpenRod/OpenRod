@@ -1,10 +1,13 @@
 import * as React from "react"
 import { toast } from "sonner"
+import { ChevronRight, Info, Terminal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
@@ -12,21 +15,30 @@ import { api } from "@/lib/api"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
 import { sessionCommand } from "@/lib/sandbox-session"
-import { STARTS } from "@/lib/image-templates"
+import { AGENTS } from "@/lib/image-templates"
+import { QUICK_AGENTS, quickRecipe, compatibleProviders, prepareQuickTemplate } from "@/lib/quick-setup"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { policiesFor } from "@/lib/groups"
 import { agentAccessFor } from "../../shared/agent-access.js"
-
-const PRESETS = [
-  { id: "claude", label: "Claude Code", command: "claude" },
-  { id: "shell", label: "Shell", command: "" },
-  { id: "custom", label: "Custom", command: null },
-]
 
 const FILE_STARTS = [
   { id: "empty", label: "Empty" },
   { id: "folder", label: "Local folder" },
   { id: "repo", label: "Git repository" },
 ]
+
+function SetupSection({ title, summary, children, ...props }) {
+  return (
+    <details className="group/setup min-w-0 border-t border-border" {...props}>
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-sm py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/setup:rotate-90" aria-hidden="true" />
+        <span className="shrink-0 text-xs font-medium">{title}</span>
+        <span className="ml-auto truncate text-right text-[11px] text-muted-foreground" title={summary}>{summary}</span>
+      </summary>
+      <div className="grid min-w-0 gap-4 pb-4 pt-1">{children}</div>
+    </details>
+  )
+}
 
 // Where the server will clone to; mirrors its naming rule.
 function repoDest(url) {
@@ -63,8 +75,11 @@ function FolderSummary({ plan, sandbox }) {
           May hold secrets: <span className="font-mono">{plan.secrets.join(", ")}</span>{plan.secretCount > plan.secrets.length ? ` and ${plan.secretCount - plan.secrets.length} more` : ""}. Add {plan.secretCount === 1 ? "it" : "them"} to .gitignore to leave {plan.secretCount === 1 ? "it" : "them"} out.
         </p>
       )}
-      <p className="mt-1 text-muted-foreground">From a terminal{plan.git === "included" ? " (without git history)" : ""}:</p>
-      <CopyCommand command={uploadCommand(sandbox || "NAME", plan.display, SANDBOX_ROOT)} />
+      <details className="mt-1">
+        <summary className="cursor-pointer text-muted-foreground">Upload from a terminal instead</summary>
+        {plan.git === "included" && <p className="mt-1 text-muted-foreground">Without git history.</p>}
+        <CopyCommand command={uploadCommand(sandbox || "NAME", plan.display, SANDBOX_ROOT)} />
+      </details>
     </div>
   )
 }
@@ -85,30 +100,33 @@ function GroupField({ org, value, onChange, onCreated, name }) {
           : org.groups.length ? "Groups let egress policies follow sandboxes. You can change the group later on the Groups page."
           : "Create a group to share network access between sandboxes. Egress policies can then target the whole group."}
       </p>
-      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the security preset (<span className="font-mono">{chosen.template}</span>), which replaces the choice below.</p>}
+      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the security preset (<span className="font-mono">{chosen.template}</span>), which overrides your security preset.</p>}
     </div>
   )
 }
 
-function nextName(taken) {
+function nextName(taken, prefix = "sandbox") {
   for (let i = 1; i < 1000; i++) {
-    const name = `claude-${i}`
+    const name = `${prefix}-${i}`
     if (!taken.has(name)) return name
   }
   return ""
 }
 
-
 export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImageTemplate = null }) {
   const { sandboxes, overview } = useLive()
   const providers = overview?.providers ?? []
   const [name, setName] = React.useState("")
-  const [image, setImage] = React.useState("")
   const [images, setImages] = React.useState([])
   const [imageTemplate, setImageTemplate] = React.useState("")
   const [chosen, setChosen] = React.useState([])
-  const [preset, setPreset] = React.useState("claude")
-  const [custom, setCustom] = React.useState("")
+  const [mode, setMode] = React.useState("quick")
+  const [agentId, setAgentId] = React.useState("terminal")
+  const [quickProvider, setQuickProvider] = React.useState("")
+  const [progress, setProgress] = React.useState("")
+  const [preparing, setPreparing] = React.useState(false)
+  const preparation = React.useRef(null)
+  const buildName = React.useRef(null)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [templates, setTemplates] = React.useState([])
@@ -120,30 +138,37 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [org, setOrg] = React.useState(null)
   const [group, setGroup] = React.useState(null)
 
-  // Start from what this gateway already runs: the most-used image and every
-  // provider, so the common case is one click.
+  // A fresh sandbox starts in Quick setup; launching a saved template opens its tab.
   React.useEffect(() => {
     if (!open) return
     const list = sandboxes ?? []
-    const counts = {}
-    for (const s of list) if (s.image) counts[s.image] = (counts[s.image] ?? 0) + 1
     setName(nextName(new Set(list.map((s) => s.name))))
-    setImage(Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "")
+    setMode(initialImageTemplate ? "template" : "quick")
+    setAgentId("terminal"); setQuickProvider(""); setProgress("")
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
     setChosen(providers.map((p) => p.name))
-    setPreset("claude"); setCustom(""); setError(null); setTemplate("locked-down")
+    setError(null); setTemplate("locked-down")
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
     api.templates().then(setTemplates).catch(() => setTemplates([]))
     setGroup(null)
     api.org().then(setOrg).catch(() => setOrg(null))
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const command = preset === "custom" ? custom : PRESETS.find((p) => p.id === preset).command
-  const chosenImage = images.find((t) => t.name === imageTemplate)
-  const templateStart = chosenImage?.recipe.command ?? ""
-  const agentAccess = agentAccessFor(chosenImage?.managed ? chosenImage.recipe : null)
+  const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
+  const selectedAgent = QUICK_AGENTS.find((agent) => agent.id === agentId)
+  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentId) : chosenImage?.managed ? chosenImage.recipe : null)
+  const connections = compatibleProviders(providers, agentId)
+  const attachedProviders = mode === "quick" ? (connections.some((p) => p.name === quickProvider) ? [quickProvider] : []) : chosen
+  const templateAgents = chosenImage?.managed && chosenImage.recipe.source === "build" ? AGENTS.filter((agent) => chosenImage.recipe.agents.includes(agent.id)) : null
+
+  function chooseAgent(id) {
+    setAgentId(id); setQuickProvider(""); setError(null)
+    if (/^(sandbox|terminal|claude|codex|cursor|opencode|pi|antigravity|copilot|kiro|droid|aider)-\d+$/.test(name)) setName(nextName(new Set((sandboxes ?? []).map((s) => s.name)), id))
+  }
+
+  React.useEffect(() => () => { preparation.current?.abort() }, [])
 
   // The server reads the folder, so it can apply .gitignore and count what it will send.
   React.useEffect(() => {
@@ -163,157 +188,223 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const cloneDest = start === "repo" ? repoDest(repository) : null
   const startReady = start === "empty" || (start === "folder" ? Boolean(preview?.data && !preview.data.over) : Boolean(cloneDest))
 
+  const effectivePreset = pinnedPreset || template
+  const securityName = templates.find((t) => t.id === effectivePreset)?.name || (effectivePreset === "locked-down" ? "Locked down" : effectivePreset)
+  const filesSummary = start === "folder" ? folder.trim() : start === "repo" ? repository.trim() : ""
+
   async function submit(event) {
     event.preventDefault()
-    setBusy(true); setError(null)
+    if (busy || (mode === "template" && !chosenImage)) return
+    setBusy(true); setError(null); setProgress("")
+    const controller = new AbortController()
+    preparation.current = controller
+    buildName.current = null
     try {
       const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
-      const created = await api.create({ name: name.trim(), ...(imageTemplate ? { imageTemplate } : { image: image.trim(), command: command.trim().split(/\s+/).filter(Boolean) }), providers: chosen, template, ...(group ? { group } : {}), ...files })
+      let environment = chosenImage
+      if (mode === "quick") {
+        setPreparing(true)
+        environment = await prepareQuickTemplate(api, agentId, {
+          signal: controller.signal, onProgress: setProgress,
+          onBuild: (value) => {
+            buildName.current = value
+            if (controller.signal.aborted) void api.cancelImageBuild(value).catch(() => {})
+          },
+        })
+      }
+      if (controller.signal.aborted) return
+      setPreparing(false); setProgress("Creating sandbox…")
+      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, providers: attachedProviders, template, ...(group ? { group } : {}), ...files })
       toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
       onOpenChange(false)
-      onCreated?.(created.name, { ...created, image: image.trim(), providers: chosen, createdAt: new Date().toISOString() })
+      onCreated?.(created.name, { ...created, image: environment.image, providers: attachedProviders, createdAt: new Date().toISOString() })
     } catch (e) {
-      setError(e.message)
+      if (e.name !== "AbortError") setError(e.message)
     } finally {
-      setBusy(false)
+      setBusy(false); setPreparing(false); setProgress(""); preparation.current = null; buildName.current = null
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-md">
-        <form onSubmit={submit} className="grid gap-4">
-          <DialogHeader>
+    <Dialog open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value) }}>
+      <DialogContent showCloseButton={!busy} className="max-h-[90svh] overflow-hidden sm:max-w-md">
+        <form onSubmit={submit} className="flex max-h-[calc(90svh-2rem)] min-h-0 flex-col gap-4">
+          <DialogHeader className="shrink-0">
             <DialogTitle>New sandbox</DialogTitle>
           </DialogHeader>
 
-          <div className="grid gap-1.5">
-            <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
-            <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="font-mono text-xs" required
-              pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
-          </div>
+          <Tabs value={mode} onValueChange={(value) => { if (!busy) { setMode(value); setError(null) } }} className="contents">
+            <TabsList className="w-full shrink-0" aria-label="Sandbox creation method">
+              <TabsTrigger value="quick" disabled={busy}>Quick setup</TabsTrigger>
+              <TabsTrigger value="template" disabled={busy}>From template</TabsTrigger>
+            </TabsList>
+          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto overscroll-contain px-1">
+          <fieldset disabled={busy} className="grid min-w-0 gap-4 pb-3">
 
-          <div className="grid gap-1.5">
-            <Label htmlFor="sandbox-image-template" className="text-xs">Image template</Label>
-            <select id="sandbox-image-template" value={imageTemplate} onChange={(e) => setImageTemplate(e.target.value)} className="h-8 rounded-md border border-input bg-transparent px-2 text-xs">
-              <option value="">Use an image reference</option>
-              {images.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
-            </select>
-            {imageTemplate && <p className="text-[11px] text-muted-foreground">Starts in {STARTS.find((s) => s.id === templateStart)?.name ?? templateStart}. Software and environment only; access is selected below.</p>}
-          </div>
-          {!imageTemplate && <div className="grid gap-1.5">
-            <Label htmlFor="sandbox-image" className="text-xs">Image reference</Label>
-            <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} className="font-mono text-xs" placeholder="Default" title="Local images need Docker running" />
-          </div>}
-
-          {!imageTemplate && <div className="grid gap-1.5">
-            <span className="text-xs font-medium">Runs</span>
-            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-              {PRESETS.map((p) => (
-                <button key={p.id} type="button" onClick={() => setPreset(p.id)} aria-pressed={preset === p.id}
-                  className={`flex-1 rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${preset === p.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-                  {p.label}
-                </button>
-              ))}
+            <div className="grid gap-1.5">
+              <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
+              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="font-mono text-xs" required
+                pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
-            {preset === "custom" && (
-              <Input value={custom} onChange={(e) => setCustom(e.target.value)} className="font-mono text-xs" placeholder="Command" aria-label="Command" />
-            )}
-          </div>}
 
-          <div className="grid min-w-0 gap-1.5">
-            <span className="text-xs font-medium">Start with</span>
-            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-              {FILE_STARTS.map((s) => (
-                <button key={s.id} type="button" onClick={() => setStart(s.id)} aria-pressed={start === s.id}
-                  className={`flex-1 rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${start === s.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            {start === "folder" && (
-              <>
-                <Input value={folder} onChange={(e) => setFolder(e.target.value)} className="font-mono text-xs" placeholder="~/code/my-project" aria-label="Folder on this computer" />
-                {preview?.loading && <p className="text-[11px] text-muted-foreground">Checking the folder…</p>}
-                {preview?.error && <p className="text-[11px] text-red-700">{preview.error}</p>}
-                {preview?.data && <FolderSummary plan={preview.data} sandbox={name} />}
-              </>
-            )}
-            {start === "repo" && (
-              <>
-                <Input value={repository} onChange={(e) => setRepository(e.target.value)} className="font-mono text-xs" placeholder="https://github.com/org/repo" aria-label="Git repository URL" />
-                <p className="text-[11px] text-muted-foreground">
-                  {cloneDest ? <>Cloned into <span className="font-mono">{cloneDest}</span> once the sandbox starts. </> : "An https:// URL. "}
-                  Public repositories only. The security preset must let git reach the host, including POST to /git-upload-pack.
-                </p>
-              </>
-            )}
-          </div>
-
-          <div className="grid gap-1.5">
-            <span className="text-xs font-medium">Providers</span>
-            {providers.length ? (
-              <div className="flex flex-wrap gap-1.5">
-                {providers.map((p) => {
-                  const on = chosen.includes(p.name)
-                  return (
-                    <button key={p.name} type="button" aria-pressed={on}
-                      onClick={() => setChosen((c) => (on ? c.filter((n) => n !== p.name) : [...c, p.name]))}
-                      className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${on ? "border-foreground/25 bg-accent" : "border-border text-muted-foreground hover:text-foreground"}`}>
-                      <span className={`size-1.5 rounded-full ${on ? "bg-emerald-500" : "bg-stone-300"}`} aria-hidden="true" />
-                      <span className="font-mono">{p.name}</span>
-                      <span className="text-muted-foreground">{p.type}</span>
-                    </button>
-                  )
-                })}
+            <TabsContent value="quick" className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="quick-agent" className="text-xs">Agent</Label>
+                <Select value={agentId} onValueChange={(value) => { if (value) chooseAgent(value) }} disabled={busy}>
+                  <SelectTrigger id="quick-agent" className="w-full text-xs">
+                    <SelectValue>
+                      {selectedAgent ? <img src={selectedAgent.logo} alt="" className="size-4 object-contain" /> : <Terminal className="size-4" aria-hidden="true" />}
+                      {selectedAgent?.name || "Terminal only"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
+                    <SelectItem value="terminal" className="text-xs"><Terminal className="size-4" />Terminal only</SelectItem>
+                    {QUICK_AGENTS.map((agent) => <SelectItem key={agent.id} value={agent.id} className="text-xs"><img src={agent.logo} alt="" className="size-4 object-contain" />{agent.name}</SelectItem>)}
+                  </SelectGroup></SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">{selectedAgent ? `Installs ${selectedAgent.name} in its own environment.` : "A clean environment with a terminal, Git, and basic tools."}</p>
               </div>
-            ) : <p className="text-[11px] text-muted-foreground">No providers</p>}
-            {(imageTemplate ? templateStart === "claude" : preset === "claude") && !agentAccess.profiles.some((p) => p.id === "claude") && template !== "claude-subscription" && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
-              <p className="text-[11px] text-amber-700">Choose the Claude Code subscription security preset or attach a claude-code provider.</p>
-            )}
-          </div>
-
-          {org && <GroupField org={org} value={group} onChange={setGroup} name={name}
-            onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />}
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="sandbox-template" className="text-xs">Security preset</Label>
-            <select id="sandbox-template" value={pinnedPreset || template} onChange={(e) => setTemplate(e.target.value)} disabled={Boolean(pinnedPreset)} title={templates.find((t) => t.id === (pinnedPreset || template))?.description}
-              className="h-8 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              {(templates.length ? templates : [{ id: "locked-down", name: "Locked down" }]).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              {pinnedPreset && !templates.some((t) => t.id === pinnedPreset) && <option value={pinnedPreset}>{pinnedPreset}</option>}
-            </select>
-            <p className="text-[11px] text-muted-foreground">{templates.find((t) => t.id === (pinnedPreset || template))?.description || "Filesystem and network access."} Shared rules still apply.</p>
-            {agentAccess.profiles.length > 0 && <div className="mt-2 rounded-md border border-border">
-              <div className="border-b px-3 py-2">
-                <p className="text-xs font-medium">Agent default rules</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">Added to the selected preset, including Locked down. These destinations allow agent sign-in and model connections; credentials may still be required.</p>
+              {selectedAgent && connections.length > 0 && <div className="grid gap-1.5">
+                <Label htmlFor="quick-sign-in" className="text-xs">Sign-in</Label>
+                {connections.length > 0 && <Select value={quickProvider} onValueChange={(value) => setQuickProvider(value ?? "")} disabled={busy}>
+                  <SelectTrigger id="quick-sign-in" className="w-full text-xs"><SelectValue>{quickProvider || "Set up after creation"}</SelectValue></SelectTrigger>
+                  <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
+                    <SelectItem value="" className="text-xs">Set up after creation</SelectItem>
+                    {connections.map((provider) => <SelectItem key={provider.name} value={provider.name} className="text-xs">{provider.name}</SelectItem>)}
+                  </SelectGroup></SelectContent>
+                </Select>}
+                <p className="text-[11px] text-muted-foreground">{quickProvider ? "Saved credential will be attached. Connection has not been verified." : agentId === "codex" ? "After connecting, run codex and choose Device Code or provide an API key." : agentAccess.profiles[0]?.authentication || `Configure sign-in or a model provider inside ${selectedAgent.name} after connecting.`}</p>
+              </div>}
+            </TabsContent>
+            <TabsContent value="template" className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="sandbox-image-template" className="text-xs">Environment</Label>
+                <Select value={imageTemplate} onValueChange={(value) => setImageTemplate(value ?? "")} disabled={busy}>
+                  <SelectTrigger id="sandbox-image-template" className="w-full text-xs"><SelectValue>{imageTemplate || "Choose a template"}</SelectValue></SelectTrigger>
+                  <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
+                    {images.map((item) => <SelectItem key={item.name} value={item.name} className="text-xs">{item.name}</SelectItem>)}
+                  </SelectGroup></SelectContent>
+                </Select>
+                {!images.length && <p className="text-[11px] text-muted-foreground">No ready templates. Use Quick setup or create one in Templates.</p>}
+                {chosenImage && <p className="text-[11px] text-muted-foreground">{templateAgents ? `Included tools: ${[...templateAgents.map((agent) => agent.name), ...(chosenImage.recipe.customAgents ?? []).map((agent) => agent.name), "Terminal"].join(", ")}` : "Installed tools are not reported by this template."}</p>}
               </div>
-              <div className="max-h-52 divide-y overflow-y-auto">
-                {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
-                  <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · agent-{profile.id}</span></summary>
-                  <ul className="mt-2 space-y-1">
-                    {profile.endpoints.map((endpoint) => <li key={endpoint.host} className="flex flex-wrap items-baseline justify-between gap-x-3 text-[11px]">
-                      <span className="break-all font-mono">{endpoint.host}:{endpoint.ports.join(",")}</span>
-                      <span className="text-muted-foreground">{endpoint.tlsSkip ? "TLS passthrough" : endpoint.access === "read-only" ? "Read only" : "Read & write"}</span>
-                    </li>)}
-                  </ul>
-                  {profile.authentication && <p className="mt-2 text-[11px]">{profile.authentication}</p>}
-                  <p className="mt-2 text-[11px] text-muted-foreground">Allowed programs</p>
-                  <ul className="mt-1 space-y-1 break-all font-mono text-[10px] text-muted-foreground">{profile.binaries.map((binary) => <li key={binary}>{binary}</li>)}</ul>
-                </details>)}
-              </div>
+            </TabsContent>
+
+            {mode === "template" && <div className="grid gap-1.5">
+              <span className="text-xs font-medium">Providers</span>
+              {providers.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {providers.map((p) => {
+                    const on = chosen.includes(p.name)
+                    return (
+                      <button key={p.name} type="button" aria-pressed={on}
+                        onClick={() => setChosen((c) => (on ? c.filter((n) => n !== p.name) : [...c, p.name]))}
+                        className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${on ? "border-foreground/25 bg-accent" : "border-border text-muted-foreground hover:text-foreground"}`}>
+                        <span className={`size-1.5 rounded-full ${on ? "bg-emerald-500" : "bg-stone-300"}`} aria-hidden="true" />
+                        <span className="font-mono">{p.name}</span>
+                        <span className="text-muted-foreground">{p.type}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : <p className="text-[11px] text-muted-foreground">No providers</p>}
+
             </div>}
+
+            <div className="grid gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="sandbox-template" className="text-xs">Security preset</Label>
+                <Tooltip>
+                  <TooltipTrigger type="button" aria-label="About this security preset" className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><Info className="size-3.5" aria-hidden="true" /></TooltipTrigger>
+                  <TooltipContent>{templates.find((t) => t.id === effectivePreset)?.description || "Filesystem and network access."} Shared rules still apply.</TooltipContent>
+                </Tooltip>
+              </div>
+              <Select value={effectivePreset} onValueChange={(value) => { if (value) setTemplate(value) }} disabled={busy || Boolean(pinnedPreset)}>
+                <SelectTrigger id="sandbox-template" className="w-full text-xs">
+                  <SelectValue className="min-w-0 truncate">{securityName}</SelectValue>
+                </SelectTrigger>
+                <SelectContent align="start" alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    {(templates.length ? templates : [{ id: "locked-down", name: "Locked down" }]).map((t) => <SelectItem key={t.id} value={t.id} className="text-xs">{t.name}</SelectItem>)}
+                    {pinnedPreset && !templates.some((t) => t.id === pinnedPreset) && <SelectItem value={pinnedPreset} className="text-xs">{pinnedPreset}</SelectItem>}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              {agentAccess.profiles.length > 0 && <p className="text-[11px] text-muted-foreground">Agent network rules: {agentAccess.profiles.map((profile) => `${profile.name} (${profile.endpoints.length} destinations)`).join(", ")}</p>}
+
+            </div>
+
+
+            <div className="grid min-w-0">
+              <SetupSection title="Add project files" summary={filesSummary}>
+                <div className="grid min-w-0 gap-1.5">
+                  <span className="text-xs font-medium">Start with</span>
+                  <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+                    {FILE_STARTS.map((s) => (
+                      <button key={s.id} type="button" onClick={() => setStart(s.id)} aria-pressed={start === s.id}
+                        className={`flex-1 rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${start === s.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  {start === "folder" && (
+                    <>
+                      <Input value={folder} onChange={(e) => setFolder(e.target.value)} className="font-mono text-xs" placeholder="~/code/my-project" aria-label="Folder on this computer" />
+                      {preview?.loading && <p className="text-[11px] text-muted-foreground">Checking the folder…</p>}
+                      {preview?.error && <p className="text-[11px] text-red-700">{preview.error}</p>}
+                      {preview?.data && <FolderSummary plan={preview.data} sandbox={name} />}
+                    </>
+                  )}
+                  {start === "repo" && (
+                    <>
+                      <Input value={repository} onChange={(e) => setRepository(e.target.value)} className="font-mono text-xs" placeholder="https://github.com/org/repo" aria-label="Git repository URL" />
+                      <p className="text-[11px] text-muted-foreground">
+                        {cloneDest ? <>Cloned into <span className="font-mono">{cloneDest}</span> once the sandbox starts. </> : "An https:// URL. "}
+                        Public repositories only. Your access rules must allow Git connections to this host.
+                      </p>
+                    </>
+                  )}
+                </div>
+
+              </SetupSection>
+                  {agentAccess.profiles.length > 0 && <SetupSection title="Agent default rules" summary={agentAccess.profiles.map((profile) => profile.name).join(", ")}>
+                    <div className="max-h-52 divide-y overflow-y-auto">
+                      {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
+                        <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · agent-{profile.id}</span></summary>
+                        <ul className="mt-2 space-y-1">
+                          {profile.endpoints.map((endpoint) => <li key={endpoint.host} className="flex flex-wrap items-baseline justify-between gap-x-3 text-[11px]">
+                            <span className="break-all font-mono">{endpoint.host}:{endpoint.ports.join(",")}</span>
+                            <span className="text-muted-foreground">{endpoint.tlsSkip ? "TLS passthrough" : endpoint.access === "read-only" ? "Read only" : "Read & write"}</span>
+                          </li>)}
+                        </ul>
+                        {profile.authentication && <p className="mt-2 text-[11px]">{profile.authentication}</p>}
+                        <p className="mt-2 text-[11px] text-muted-foreground">Allowed programs</p>
+                        <ul className="mt-1 space-y-1 break-all font-mono text-[10px] text-muted-foreground">{profile.binaries.map((binary) => <li key={binary}>{binary}</li>)}</ul>
+                      </details>)}
+                    </div>
+                  </SetupSection>}
+                {org && <SetupSection title="Advanced options" summary={org.groups.find((item) => item.id === group)?.name}><GroupField org={org} value={group} onChange={setGroup} name={name}
+                  onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} /></SetupSection>}
+            </div>
+
+            {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
+
+          </fieldset>
           </div>
 
-          {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
-
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={busy || !name || !startReady} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
-              {busy && <Spinner aria-hidden="true" />}Create
+          </Tabs>
+          {progress && <p role="status" className="text-xs text-muted-foreground">{progress}</p>}
+          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none bg-popover px-0 pb-0">
+            <Button type="button" variant="ghost" disabled={busy && !preparing} onClick={() => {
+              if (preparing) {
+                preparation.current?.abort()
+                if (buildName.current) void api.cancelImageBuild(buildName.current).catch((e) => toast.error(e.message))
+              } else onOpenChange(false)
+            }}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
+            <Button type="submit" disabled={busy || !name || !startReady || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+              {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
             </Button>
           </DialogFooter>
         </form>
