@@ -11,7 +11,6 @@ import { GroupPicker } from "@/components/group-picker"
 import { api } from "@/lib/api"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
-import { sessionCommand } from "@/lib/sandbox-session"
 import { STARTS } from "@/lib/image-templates"
 import { policiesFor } from "@/lib/groups"
 import { agentAccessFor } from "../../shared/agent-access.js"
@@ -169,7 +168,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     try {
       const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
       const created = await api.create({ name: name.trim(), ...(imageTemplate ? { imageTemplate } : { image: image.trim(), command: command.trim().split(/\s+/).filter(Boolean) }), providers: chosen, template, ...(group ? { group } : {}), ...files })
-      toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
+      toast.success(`Creating ${created.name}`)
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
       onOpenChange(false)

@@ -88,6 +88,33 @@ The server binds to 127.0.0.1 only. Every route checks the socket, Host and
 Origin, and each change additionally requires a same-origin POST with
 an `x-openshell-console` header. Writes use JSON.
 
+### SSH connections
+
+The sandbox popup's **Connect** section uses the gateway already selected by
+the console, whether its endpoint is local or remote. Every generated CLI
+command includes `--gateway <name>` so changing the CLI's active gateway cannot
+redirect a connection.
+
+- **Open in browser** keeps the SDK-backed xterm session inside the console.
+- **Native SSH → New session** opens the sandbox's configured shell or agent in
+  the project directory with `openshell sandbox exec --tty`.
+- **Native SSH → Attach** uses `openshell sandbox connect` for sandboxes whose
+  canonical process owns a TTY. It is omitted otherwise.
+- **Show SSH config** runs `openshell sandbox ssh-config` and displays the Host
+  block for review and copying. It never changes `~/.ssh/config`. The existing
+  editor action follows OpenShell's `sandbox connect --editor` behavior, which
+  may install OpenShell's managed SSH config.
+
+Native terminal launch requires the `openshell` CLI and OpenSSH on the console
+machine. Set `OPENSHELL_BIN` to an executable path when the CLI is not on
+`PATH`. Opening a terminal is supported on macOS and Linux; other platforms can
+copy the pinned command and generated config. The browser receives gateway
+location metadata and commands, never mTLS material, SSH session tokens, or
+provider credentials.
+
+Focused checks:
+`node --test server/openshell-cli.test.js server/editor.test.js server/files.test.js server/ssh.test.js server/terminal.test.js src/lib/sandbox-session.test.js`.
+
 ## Notes
 
 - Sandboxes from a locally built image (such as `claude-sandbox:latest`) need
