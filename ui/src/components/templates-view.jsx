@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { SelectField } from "@/components/ui/select-field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -145,10 +146,10 @@ function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
                   <Input value={d.name} onChange={(e) => update({ name: e.target.value.toLowerCase() })} className="h-7 w-28 font-mono text-[11px]" aria-label="Service name" placeholder="name" />
                   <span className="text-[11px] text-muted-foreground">port</span>
                   <Input value={d.port} onChange={(e) => update({ port: Number(e.target.value.replace(/\D/g, "")) || "" })} className="h-7 w-20 font-mono text-[11px]" aria-label="Port inside" inputMode="numeric" />
-                  <select value={String(d.closeAfterMinutes)} onChange={(e) => update({ closeAfterMinutes: e.target.value === "null" ? null : Number(e.target.value) })} aria-label="Close automatically"
+                  <SelectField value={String(d.closeAfterMinutes)} onChange={(e) => update({ closeAfterMinutes: e.target.value === "null" ? null : Number(e.target.value) })} aria-label="Close automatically"
                     className="h-7 rounded-md border border-input bg-transparent px-1.5 text-[11px]">
                     {DURATIONS.map((o) => <option key={String(o.minutes)} value={String(o.minutes)}>{o.minutes ? `closes after ${o.label}` : "until closed"}</option>)}
-                  </select>
+                  </SelectField>
                   <Button size="icon-xs" variant="ghost" className="ml-auto" aria-label="Remove service" onClick={() => setT({ ...t, ingress: t.ingress.filter((_, j) => j !== i) })}><Trash2 /></Button>
                 </div>
               )
@@ -206,11 +207,11 @@ export function SecurityPresetsView() {
           <Input aria-label="Search security presets" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
         </div>
         {sandboxes.length > 0 && (
-          <select value="" onChange={(e) => e.target.value && fromSandbox(e.target.value)} aria-label="Capture a sandbox's policy"
+          <SelectField value="" onChange={(e) => e.target.value && fromSandbox(e.target.value)} aria-label="Capture a sandbox's policy"
             className="h-8 rounded-md border border-input bg-card px-2 text-xs">
             <option value="">Capture from sandbox…</option>
             {sandboxes.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-          </select>
+          </SelectField>
         )}
         <Button size="sm" disabled={!Array.isArray(templates)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"
           onClick={() => setEditing({ ...structuredClone(templates[0]), id: "my-preset", name: "My preset", description: "", builtin: false })}>

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ArrowRight, Copy, Pencil, Plus, RotateCw, Search, Trash2, X } from 'lucide-react'
+import { ArrowRight, Copy, HardDrive, Pencil, Plus, RotateCw, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -44,8 +44,8 @@ export function TemplatesView() {
   function edit(recipe, replace) { setSelectedName(null); setEditor({ recipe, replace }) }
   function closeEditor() { try { sessionStorage.removeItem(PENDING_RECIPE_KEY) } catch {} setEditor(null) }
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
-  if (editor) return <ImageTemplateBuilder key={editor.recipe?.name || 'new'} initial={editor} onClose={closeEditor} onStarted={(record) => { closeEditor(); setSelectedName(record.name); load() }} />
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
+    {editor && <ImageTemplateBuilder key={editor.recipe?.name || 'new'} initial={editor} onClose={closeEditor} onStarted={(record) => { closeEditor(); setSelectedName(record.name); load() }} />}
     <Tabs value={tab} onValueChange={setTab} className="gap-0">
       <div className="border-b bg-card px-4 sm:px-8">
         <TabsList variant="line" className="h-11! gap-5 p-0">
@@ -75,7 +75,7 @@ export function TemplatesView() {
                 </thead>
                 <tbody className="divide-y">{shown.map((t) => <tr key={t.name} className="hover:bg-muted/40">
                   <td className="max-w-72 px-4 py-2 sm:pl-8">
-                    <button className="block max-w-full truncate rounded text-left font-mono text-xs font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedName(t.name)}>{t.name}</button>
+                    <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedName(t.name)}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
                   </td>
                   <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '—' : startsIn(t.recipe.command)}</td>
                   <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
@@ -94,7 +94,7 @@ export function TemplatesView() {
           ['Image', <span key="i" className="break-all font-mono">{selected.image || (selected.recipe.source === 'image' ? selected.recipe.image : 'Not built yet')}</span>],
           ...(selected.managed === false ? [] : [['Starts in', startsIn(selected.recipe.command)]]),
           ...(selected.recipe.source === 'build' && selected.managed !== false ? [
-            ['Agents', selected.recipe.agents.map((id) => AGENTS.find((a) => a.id === id)?.name).join(', ') || 'None'],
+            ['Agents', [...selected.recipe.agents.map((id) => AGENTS.find((a) => a.id === id)?.name), ...(selected.recipe.customAgents ?? []).map((a) => a.name)].join(', ') || 'None'],
             ['Repository', selected.recipe.repository ? <span key="r" className="break-all font-mono">{selected.recipe.repository}</span> : 'None'],
           ] : []),
           ['Environment', selected.recipe.environment.length ? <span key="e" className="font-mono">{selected.recipe.environment.map((e) => e.name).join(', ')}</span> : 'None'],
