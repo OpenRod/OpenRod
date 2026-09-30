@@ -3,7 +3,6 @@ export const AGENTS = [
   { name: "Codex", logo: "codex", commands: ["codex"] },
   { name: "GitHub Copilot", logo: "copilot", commands: ["copilot"] },
   { name: "Cursor", logo: "cursor", commands: ["cursor-agent", "agent"], aliases: ["Cursor CLI"] },
-  { name: "Gemini CLI", logo: "gemini", commands: ["gemini"] },
   { name: "OpenCode", logo: "opencode", commands: ["opencode"] },
   { name: "OpenClaw", logo: "openclaw-color", commands: ["openclaw"] },
   { name: "Pi", logo: "pi", commands: ["pi"] },

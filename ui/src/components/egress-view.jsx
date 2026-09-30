@@ -35,7 +35,7 @@ const REVISION = {
 }
 const ACCESS_LABEL = { "read-only": "Read only", "read-write": "Read & write", full: "Any request", custom: "Specific requests", connect: "Connection", none: "No access" }
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "*"]
-const ICON = { own: Globe2, org: Building2, group: Users, secret: KeyRound }
+const ICON = { own: Globe2, agent: Box, org: Building2, group: Users, secret: KeyRound }
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
 const slug = (host) => host.replace(/^\*\*?\./, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 56)
 
@@ -398,7 +398,7 @@ function RuleRow({ rule, onOp, onDelete, busy, locked, managedBy, onManage }) {
   const source = sourceOf(rule.key)
   const Icon = ICON[source]
   const hosts = rule.endpoints.map((e) => e.host)
-  const risky = rule.endpoints.some((e) => e.enforcement === "audit" || e.credentialRisk)
+  const risky = rule.endpoints.some((e) => (e.protocol !== "tcp" && e.enforcement === "audit") || e.credentialRisk)
 
   return (
     <div>
@@ -427,15 +427,16 @@ function RuleRow({ rule, onOp, onDelete, busy, locked, managedBy, onManage }) {
         {open && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }} className="overflow-hidden">
             <div className="space-y-4 px-5 pt-1 pb-5 pl-[4.25rem]">
+              {source === "agent" && <p className="text-xs text-muted-foreground">Included for this agent at launch. Only the destinations and programs listed here are allowed by this rule.</p>}
               {rule.endpoints.map((e) => (
                 <div key={`${e.host}:${e.ports.join(",")}:${e.path ?? ""}`} className="space-y-2">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[12.5px] font-medium">{e.host}<span className="text-muted-foreground">{e.ports.length ? `:${e.ports.join(",")}` : ""}</span>{e.path ? ` ${e.path}` : ""}</span>
                     <Chip>{e.protocol}</Chip>
                     <Chip>{(ACCESS_LABEL[e.access] ?? e.access).toLowerCase()}</Chip>
-                    {e.enforcement === "audit" && <Chip tone="border-amber-500/40 bg-amber-50 text-amber-800" title={e.enforcementUnset ? "Unset, treated as audit" : undefined}>audit only</Chip>}
+                    {e.protocol !== "tcp" && e.enforcement === "audit" && <Chip tone="border-amber-500/40 bg-amber-50 text-amber-800" title={e.enforcementUnset ? "Unset, treated as audit" : undefined}>audit only</Chip>}
                     {e.allowedIps.length > 0 && <Chip title="Private addresses allowed">ips {e.allowedIps.join(", ")}</Chip>}
-                    {e.credentialRisk && <Chip tone="border-red-200 bg-red-50 text-red-700" title="TLS skipped or credentials uninspected">uninspected</Chip>}
+                    {e.credentialRisk && <Chip tone="border-amber-500/40 bg-amber-50 text-amber-800" title={e.tlsSkip ? "Encrypted traffic passes through without request inspection" : "Credentials are uninspected"}>{e.tlsSkip ? "TLS passthrough" : "uninspected"}</Chip>}
                     {!locked && rule.endpoints.length > 1 && (
                       <button onClick={() => onOp({ kind: "removeEndpoint", ruleName: rule.key, host: e.host, port: e.port })} disabled={busy}
                         className="ml-auto text-[12px] text-faint outline-none hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring">Remove</button>
@@ -740,9 +741,9 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, rel
                 {shown.map((rule) => {
                   const source = sourceOf(rule.key)
                   return (
-                    <RuleRow key={rule.key} rule={rule} busy={busy} locked={source !== "own" || globalActive}
-                      onOp={(op) => apply([op])} onDelete={source === "own" ? () => setDeleting(rule.key) : null}
-                      managedBy={source === "secret" ? "Secrets" : source !== "own" ? "Organization" : null}
+                    <RuleRow key={rule.key} rule={rule} busy={busy} locked={!["own", "agent"].includes(source) || globalActive}
+                      onOp={(op) => apply([op])} onDelete={["own", "agent"].includes(source) ? () => setDeleting(rule.key) : null}
+                      managedBy={source === "secret" ? "Secrets" : ["org", "group"].includes(source) ? "Organization" : null}
                       onManage={source === "secret" ? () => onNavigate("secrets") : undefined} />
                   )
                 })}

@@ -52,6 +52,7 @@ export function ruleToProto(spec) {
     const deny = (e.deny ?? []).map((r) => l7Match(r, where))
     const access = e.access && !allow.length ? ACCESS[e.access] : 0
     if (protocol === 'tcp' && (allow.length || deny.length || access)) throw fail(`${where}: plain TCP cannot inspect requests. Pick an HTTP protocol to add request rules.`)
+    if (e.tlsSkip && protocol !== 'tcp') throw fail(`${where}: TLS passthrough requires plain TCP without request inspection.`)
     if (L7_PROTOCOLS.includes(protocol) && !access && !allow.length) throw fail(`${where}: choose an access level or add at least one allowed request.`)
     const allowedIps = (e.allowedIps ?? []).map(String).filter(Boolean)
     for (const ip of allowedIps) if (!CIDR.test(ip)) throw fail(`${where}: "${ip}" is not an IP or CIDR.`)
@@ -59,6 +60,7 @@ export function ruleToProto(spec) {
       host,
       ...(ports.length === 1 ? { port: ports[0] } : { ports }),
       protocol: protocol === 'tcp' ? '' : protocol,
+      ...(e.tlsSkip ? { tls: 1 } : {}),
       enforcement: e.enforcement === 'audit' ? 2 : 1,
       access,
       rules: allow.map((a) => ({ allow: a })),
@@ -433,8 +435,19 @@ const SYSTEM_RO = ['/bin', '/usr', '/lib', '/proc', '/dev/urandom', '/etc', '/va
 export const BUILTIN_TEMPLATES = [
   {
     id: 'locked-down', builtin: true, name: 'Locked down',
-    description: 'The gateway default. Work folder and /tmp are writable, system folders read-only, and no network beyond attached secrets.',
+    description: 'The gateway default. Work folder and /tmp are writable, system folders read-only, and network limited to attached secrets and included agent connections.',
     filesystem: { workdir: true, readOnly: SYSTEM_RO, readWrite: ['/tmp', '/dev/null'] }, landlock: 'best_effort', rules: [],
+  },
+  {
+    id: 'claude-subscription', builtin: true, name: 'Claude Code subscription',
+    description: 'Sign in with your Claude subscription. Allows Claude Code to reach Anthropic API and sign-in endpoints without an API-key provider. Run claude and choose your subscription account after connecting.',
+    filesystem: { workdir: true, readOnly: SYSTEM_RO, readWrite: ['/tmp', '/dev/null'] }, landlock: 'best_effort',
+    rules: [
+      { name: 'claude-subscription', binaries: ['/usr/bin/claude', '/usr/local/bin/claude'],
+        endpoints: ['api.anthropic.com', 'platform.claude.com', 'claude.ai'].map((host) => (
+          { host, ports: [443], protocol: 'rest', access: 'read-write', enforcement: 'enforce' }
+        )) },
+    ],
   },
   {
     id: 'claude-github-readonly', builtin: true, name: 'Claude Code + GitHub read-only',

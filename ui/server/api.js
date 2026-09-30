@@ -1,3 +1,4 @@
+import { agentAccessRules } from '../shared/agent-access.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -6,7 +7,7 @@ import { createActivityDelivery } from './activity-delivery.js'
 import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
-import { IMAGE_TEMPLATE_ID, IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
+import { imageTemplateLabels, nameSandboxImages } from '../src/lib/sandbox-images.js'
 import { sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
@@ -117,9 +118,11 @@ async function sandboxDetail(name) {
 async function createSandbox(input) {
   const { client } = await gateway()
   let imageLabels = {}
+  let agentRules = []
   if (input.imageTemplate) {
     const saved = await imageTemplateForLaunch(String(input.imageTemplate))
-    imageLabels = { [IMAGE_TEMPLATE_ID]: saved.id, [IMAGE_TEMPLATE_NAME]: saved.recipe.name }
+    try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) }
+    imageLabels = imageTemplateLabels(saved)
     // A content-addressed image cannot silently drift when a tag is rebuilt.
     input = { ...input, image: saved.inspection.imageId, session: saved.recipe.command?.trim() === 'claude' ? 'claude' : !saved.recipe.command?.trim() ? 'shell' : null, command: saved.recipe.command ? ['/bin/bash', '-lc', saved.recipe.command] : [], environment: Object.fromEntries(saved.recipe.environment.map((e) => [e.name, e.value])) }
   }
@@ -137,7 +140,7 @@ async function createSandbox(input) {
   // Files, Landlock and process identity are fixed at creation, and so is the
   // group label. The whole policy (template + organization + group rules) is
   // resolved here from stored policy, never accepted raw from the browser.
-  const plan = await planSandbox({ group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null })
+  const plan = await planSandbox({ group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null, agentRules })
   const template = plan.template
   const labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels() }
   await enforcePolicyOnly(client)

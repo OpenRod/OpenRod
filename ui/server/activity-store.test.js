@@ -108,9 +108,9 @@ test('agent choices reflect archived logs across pages and remain available afte
     assert.equal(store.query({ agents: ['Claude Code', 'Codex'], sandboxes: ['missing'] }).total, 0)
     assert.throws(() => store.query({ agents: 'Codex' }), /Invalid/)
 
-    store.ingest({ id: 'e', sandbox: 'box', binary: '/bin/gemini' })
+    store.ingest({ id: 'e', sandbox: 'box', binary: '/bin/opencode' })
     assert.deepEqual(store.query({ snapshot: page.snapshot }).agents, page.agents)
-    assert.deepEqual(store.query().agents, ['Claude Code', 'Codex', 'Gemini CLI', 'Unknown'])
+    assert.deepEqual(store.query().agents, ['Claude Code', 'Codex', 'OpenCode', 'Unknown'])
   } finally { store.close() }
 })
 

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ArrowRight, Copy, Plus, Search, Trash2, Upload, X } from 'lucide-react'
+import { ArrowRight, Copy, HardDrive, Plus, Search, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,7 +77,7 @@ export function TemplatesView() {
                 </thead>
                 <tbody className="divide-y">{shown.map((t) => <tr key={t.id} className="hover:bg-muted/40">
                   <td className="max-w-72 px-4 py-2 sm:pl-8">
-                    <button className="block max-w-full truncate rounded text-left text-xs font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => t.status === 'draft' ? setEditor(t) : setSelectedId(t.id)}>{t.recipe.name || 'Untitled template'}</button>
+                    <button className="group flex max-w-full items-center gap-2 rounded text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => t.status === 'draft' ? setEditor(t) : setSelectedId(t.id)}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.recipe.name || 'Untitled template'}</span></button>
                   </td>
                   <td className="px-4 py-2"><span className="block max-w-72 truncate font-mono text-[11px] text-muted-foreground" title={t.image || t.recipe.image || t.recipe.base}>{t.image || t.recipe.image || (t.recipe.source === 'wizard' ? t.recipe.base : 'Image archive')}</span></td>
                   <td className="px-4 py-2"><Status record={t} /></td>
@@ -87,7 +87,7 @@ export function TemplatesView() {
             </div>
           </BlurFade>}
       </TabsContent>
-      <TabsContent value="security" className="m-0"><div className="border-b px-4 py-6 sm:px-8"><h2 className="text-lg font-semibold tracking-tight">The boundaries around your sandbox.</h2><p className="mt-2 max-w-2xl text-xs leading-relaxed text-muted-foreground">Reusable filesystem and network rules. A security preset does not install software or create an image. Shared security rules still apply.</p></div><SecurityPresetsView /></TabsContent>
+      <TabsContent value="security" className="m-0"><SecurityPresetsView /></TabsContent>
     </Tabs>
     <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelectedId(null) }}><DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl">
       {selected && <><DialogHeader><DialogTitle>{selected.recipe.name || 'Untitled template'}</DialogTitle><DialogDescription>{selected.recipe.description || 'Local image template'}</DialogDescription></DialogHeader><Status record={selected} />
