@@ -233,7 +233,10 @@ export function SecurityPresetsView() {
                   <td className="max-w-72 px-4 py-2 sm:pl-8"><button className="block max-w-full truncate rounded text-left text-xs font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelected(t)}>{t.name}</button></td>
                   <td className="px-4 py-2"><span className="block max-w-72 truncate font-mono text-[11px] text-muted-foreground" title={hosts.join(', ') || 'No preset network rules'}>{hosts.join(', ') || 'Attached secrets only'}</span></td>
                   <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px]"><span className={`size-1.5 rounded-full ${t.builtin ? 'bg-stone-300' : 'bg-emerald-500'}`} />{t.builtin ? 'Built-in' : 'Custom'}</span></td>
-                  <td className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="xs" onClick={() => setSelected(t)}>View preset<ArrowRight /></Button></td>
+                  <td className="px-4 py-2 text-right sm:pr-8"><div className="flex items-center justify-end gap-1">
+                    {!t.builtin && <Button variant="ghost" size="xs" aria-label={`Edit ${t.name}`} onClick={() => setEditing({ ...t, idLocked: true })}><Pencil />Edit</Button>}
+                    <Button variant="ghost" size="xs" onClick={() => setSelected(t)}>View preset<ArrowRight /></Button>
+                  </div></td>
                 </tr>
               })}</tbody>
             </table>
