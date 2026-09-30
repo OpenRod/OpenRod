@@ -17,6 +17,7 @@ import { expose, ingressRoute, startSweeper } from './ingress.js'
 import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 import { editorRoute } from './editor.js'
 import { terminalRoute, terminalUpgrade } from './terminal.js'
+import { createTerminalQueue, macTerminalScript, terminalLaunchError } from './local-terminal.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
 
@@ -195,17 +196,17 @@ async function lifecycle(name, action) {
   return { ok: true }
 }
 
-// Open the attach command in a new local terminal window. The command is
+// Open the attach command in a new tab, or a window if none is open. The command is
 // rebuilt from the gateway's record, never taken from the browser.
+const queueTerminal = createTerminalQueue()
 async function openTerminal(name) {
   const { client } = await gateway()
   const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
   if (sandbox.phase !== 'ready' || !(sandbox.tty || sandbox.labels?.[SESSION_LABEL])) throw fail('This sandbox has no interactive session to open.', 409)
   const command = sessionCommand(sandbox)
   if (process.platform === 'darwin') {
-    const script = `tell application "Terminal" to do script "${command.replace(/[\\"]/g, '\\$&')}"`
-    await new Promise((resolve, reject) => execFile('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], { timeout: 10000 },
-      (error) => error ? reject(fail('Could not open Terminal. Allow the console to control Terminal in System Settings → Privacy & Security → Automation.', 502)) : resolve()))
+    await queueTerminal(() => new Promise((resolve, reject) => execFile('osascript', ['-e', macTerminalScript(command)], { timeout: 15000 },
+      (error, stdout, stderr) => error ? reject(fail(terminalLaunchError(error, stderr), 502)) : resolve())))
   } else if (process.platform === 'linux') {
     // The emulator lives as long as the session, so detach instead of waiting.
     await new Promise((resolve, reject) => {
