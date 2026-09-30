@@ -177,7 +177,7 @@ export function addAgentAccess(policy, agentRules, org) {
   assertNotBlocked(org, agentRules, 'Agent access')
   for (const spec of agentRules) {
     const { name, rule } = ruleToProto(spec)
-    if (policy.networkPolicies[name]) throw fail(`Security preset rule "${name}" conflicts with required agent access. Rename that rule.`)
+    if (policy.networkPolicies[name]) throw fail(`Policy rule "${name}" conflicts with required agent access. Rename that rule.`)
     policy.networkPolicies[name] = rule
   }
   return policy
@@ -282,8 +282,8 @@ export function settledBy(org, group, hosts, sandbox = null, policies = []) {
   const hit = blockedBy(org, hosts)
   if (hit) return `Blocked by organization policy (${hit.pattern}).`
   const byPolicy = sandbox && blockedByPolicy(policies, { name: sandbox, group: group?.id ?? null }, hosts, hostMatches)
-  if (byPolicy) return `Blocked by egress policy "${byPolicy.policy.name}".`
-  if (effectiveOutside(org, group) === 'block') return 'No egress policy allows it. Add one on the Egress page to allow it.'
+  if (byPolicy) return `Blocked by network rule "${byPolicy.policy.name}".`
+  if (effectiveOutside(org, group) === 'block') return 'No network rule allows it. Add one on the Network page to allow it.'
   return null
 }
 

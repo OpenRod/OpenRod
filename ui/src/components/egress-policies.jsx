@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 
 export { appliesTo, blockPatterns } from "@/lib/egress"
 
-// An egress policy: a name, destinations and an action. Everything else is
+// A network rule: a name, destinations and an action. Everything else is
 // Advanced, with defaults that mean "any request from any program on the web
 // ports". The server compiles each one into OpenShell rules (server/egress.js).
 
@@ -138,8 +138,8 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-xl">
         <form onSubmit={submit} className="grid gap-5">
           <DialogHeader>
-            <DialogTitle>{isNew ? "Add egress policy" : `Edit ${initial.name}`}</DialogTitle>
-            <DialogDescription className="text-xs">Sandboxes start locked down: nothing leaves them unless a policy allows it. A block beats every allow.</DialogDescription>
+            <DialogTitle>{isNew ? "Add network rule" : `Edit ${initial.name}`}</DialogTitle>
+            <DialogDescription className="text-xs">Sandboxes start locked down: nothing leaves them unless a rule allows it. A block beats every allow.</DialogDescription>
           </DialogHeader>
 
           {isNew && (
@@ -212,7 +212,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
               <span>
                 {scope === "everyone" ? `Every sandbox on this gateway, including new ones${sandboxes.length ? ` (${sandboxes.length} today)` : ""}.`
                   : reached.length ? <>Reaches {reached.length === 1 ? "1 sandbox" : `${reached.length} sandboxes`} today: <span className="font-mono text-foreground">{reached.slice(0, 6).join(", ")}</span>{reached.length > 6 ? ` and ${reached.length - 6} more` : ""}.{scope === "groups" ? " Sandboxes added to these groups later get it too." : ""}</>
-                  : scope === "groups" && form.appliesTo.groups.length ? "No sandboxes in these groups yet. Add some on the Groups page or when you create a sandbox; they get this policy automatically."
+                  : scope === "groups" && form.appliesTo.groups.length ? "No sandboxes in these groups yet. Add some on the Groups page or when you create a sandbox; they get this rule automatically."
                   : scope === "groups" ? "Pick one or more groups." : "Pick the sandboxes it applies to."}
               </span>
             </p>
@@ -278,13 +278,13 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
           <DialogFooter className="sm:justify-between">
             {!isNew ? (
               confirmDelete
-                ? <Button type="button" variant="destructive" disabled={busy} onClick={remove}>Delete policy</Button>
+                ? <Button type="button" variant="destructive" disabled={busy} onClick={remove}>Delete rule</Button>
                 : <Button type="button" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(true)}>Delete</Button>
             ) : <span />}
             <span className="flex gap-2">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button type="submit" disabled={busy || !form.name.trim() || !lines(form.destinations).length} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
-                {busy && <Spinner aria-hidden="true" />}{isNew ? "Add policy" : "Save policy"}
+                {busy && <Spinner aria-hidden="true" />}{isNew ? "Add rule" : "Save rule"}
               </Button>
             </span>
           </DialogFooter>
@@ -294,7 +294,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
   )
 }
 
-// The hosts blocked in every sandbox. They beat every policy.
+// The hosts blocked in every sandbox. They beat every rule.
 export function BlockedHostsDialog({ open, onOpenChange, org, onSaved }) {
   const [text, setText] = React.useState("")
   const [busy, setBusy] = React.useState(false)
@@ -313,7 +313,7 @@ export function BlockedHostsDialog({ open, onOpenChange, org, onSaved }) {
         <form onSubmit={submit} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>Blocked everywhere</DialogTitle>
-            <DialogDescription className="text-xs">Blocked in every sandbox, with their subdomains. No policy can open them.</DialogDescription>
+            <DialogDescription className="text-xs">Blocked in every sandbox, with their subdomains. No rule can open them.</DialogDescription>
           </DialogHeader>
           <Textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} className="font-mono text-[11px]" placeholder={"pastebin.com\n**.ngrok.io"} aria-label="Blocked hosts" />
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}

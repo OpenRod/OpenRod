@@ -2,9 +2,9 @@ import * as React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
 import { ActivityView } from "@/components/activity-view"
-import { EgressView } from "@/components/egress-view"
 import { GroupsView } from "@/components/groups-view"
-import { IngressView } from "@/components/ingress-view"
+import { NetworkView } from "@/components/network-view"
+import { PoliciesView } from "@/components/policies-view"
 import { SecretsView } from "@/components/secrets-view"
 import { TemplatesView } from "@/components/image-templates-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
@@ -18,8 +18,9 @@ const TITLES = {
   sandboxes: "Sandboxes",
   activity: "Activity",
   groups: "Groups",
-  egress: "Egress",
-  ingress: "Ingress",
+  policies: "Policies",
+  egress: "Network",
+  ingress: "Network",
   secrets: "Secrets",
   templates: "Templates",
 }
@@ -100,8 +101,8 @@ export function App() {
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} />}
           {view === "activity" && <ActivityView />}
           {view === "groups" && <GroupsView onNavigate={navigate} />}
-          {view === "egress" && <EgressView onNavigate={navigate} />}
-          {view === "ingress" && <IngressView />}
+          {view === "policies" && <PoliciesView />}
+          {(view === "egress" || view === "ingress") && <NetworkView tab={view} onNavigate={navigate} />}
           {view === "secrets" && <SecretsView />}
           {view === "templates" && <TemplatesView />}
           </PageBoundary>

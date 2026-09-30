@@ -23,8 +23,8 @@ import { groupId, groupPolicies, policiesFor } from "@/lib/groups"
 import { styleOf } from "@/lib/sandboxes"
 import { cn } from "@/lib/utils"
 
-// Groups: sandboxes that share network access. A group is a name; egress
-// policies aimed at it reach every sandbox in it, including ones added later.
+// Groups: sandboxes that share network access. A group is a name; network
+// rules aimed at it reach every sandbox in it, including ones added later.
 
 const NONE = "__none"
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
@@ -64,7 +64,7 @@ function SandboxChips({ names, limit = 4 }) {
 const STEPS = [
   { title: "Create a group", body: "Name it for a kind of work, like Frontend or Data." },
   { title: "Add sandboxes", body: "Here, or by picking the group when you create a sandbox. You can move them any time." },
-  { title: "Aim egress policies at it", body: "Every sandbox in the group gets them, including ones you add later." },
+  { title: "Aim network rules at it", body: "Every sandbox in the group gets them, including ones you add later." },
 ]
 
 function FirstRun({ onCreate, onPolicy }) {
@@ -75,7 +75,7 @@ function FirstRun({ onCreate, onPolicy }) {
           <span className="flex size-9 items-center justify-center rounded-xl border border-stone-300 bg-card shadow-[0_3px_8px_#1c191708]"><Users className="size-4.5 text-stone-600" strokeWidth={1.4} /></span>
           <div>
             <h2 className="text-[15px] font-medium tracking-tight">Give sandboxes the same network access, together</h2>
-            <p className="text-xs text-muted-foreground">Instead of one policy per sandbox, make a group and aim policies at the group.</p>
+            <p className="text-xs text-muted-foreground">Instead of one rule per sandbox, make a group and aim rules at the group.</p>
           </div>
         </div>
       </BlurFade>
@@ -94,7 +94,7 @@ function FirstRun({ onCreate, onPolicy }) {
       <BlurFade delay={0.34}>
         <div className="mt-6 flex flex-wrap items-center gap-2">
           <Button onClick={onCreate} className="bg-[var(--action)] text-white hover:bg-[var(--action)]/90"><Plus />Create your first group</Button>
-          <Button variant="ghost" onClick={onPolicy} className="text-muted-foreground">Egress policies<ArrowRight /></Button>
+          <Button variant="ghost" onClick={onPolicy} className="text-muted-foreground">Network rules<ArrowRight /></Button>
         </div>
       </BlurFade>
     </div>
@@ -131,7 +131,7 @@ function NewGroupDialog({ open, onOpenChange, groups, sandboxes, assignments, on
         <form onSubmit={submit} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>New group</DialogTitle>
-            <DialogDescription className="text-xs">Egress policies aimed at this group reach every sandbox in it.</DialogDescription>
+            <DialogDescription className="text-xs">Network rules aimed at this group reach every sandbox in it.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-1.5">
             <Label htmlFor="group-name" className="text-xs">Name</Label>
@@ -210,7 +210,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
       <SheetContent className="w-full! overflow-y-auto sm:max-w-[460px]!">
         <SheetHeader className="border-b p-6">
           <SheetTitle className="flex items-center gap-2 text-base"><Users className="size-4 text-muted-foreground" strokeWidth={1.5} />{group.name}</SheetTitle>
-          <SheetDescription>{plural(members.length, "sandbox", "sandboxes")} · {plural(aimed.length, "policy", "policies")} aimed at this group</SheetDescription>
+          <SheetDescription>{plural(members.length, "sandbox", "sandboxes")} · {plural(aimed.length, "rule")} aimed at this group</SheetDescription>
         </SheetHeader>
         <div className="space-y-6 px-6 pb-6">
           <section className="grid gap-3">
@@ -254,9 +254,9 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
             <h3 className="text-[10px] font-bold tracking-widest text-faint uppercase">Network access</h3>
             {aimed.length ? (
               <div className="flex flex-wrap gap-1.5">{aimed.map((p) => <PolicyPill key={p.id} policy={p} onClick={() => onPolicy({ edit: p.id })} />)}</div>
-            ) : <p className="text-[11px] text-muted-foreground">No egress policy is aimed at {group.name} yet, so its sandboxes only get the policies for every sandbox.</p>}
+            ) : <p className="text-[11px] text-muted-foreground">No network rule is aimed at {group.name} yet, so its sandboxes only get the rules for every sandbox.</p>}
             {everyone.length > 0 && <p className="text-[11px] text-muted-foreground">Also, like every sandbox: {everyone.map((p) => p.name).join(", ")}.</p>}
-            <Button variant="outline" size="sm" className="w-fit" onClick={() => onPolicy({ new: { appliesTo: { groups: [group.id] } } })}><Plus />Add policy for {group.name}</Button>
+            <Button variant="outline" size="sm" className="w-fit" onClick={() => onPolicy({ new: { appliesTo: { groups: [group.id] } } })}><Plus />Add rule for {group.name}</Button>
           </section>
 
           <section className="border-t border-border pt-4">
@@ -268,8 +268,8 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete {group.name}?</AlertDialogTitle>
               <AlertDialogDescription>
-                {members.length ? `Its ${plural(members.length, "sandbox", "sandboxes")} move to No group and lose the policies aimed at ${group.name}. ` : ""}
-                {aimed.length ? `${plural(aimed.length, "policy", "policies")} stop targeting it. ` : ""}The sandboxes themselves are not deleted.
+                {members.length ? `Its ${plural(members.length, "sandbox", "sandboxes")} move to No group and lose the rules aimed at ${group.name}. ` : ""}
+                {aimed.length ? `${plural(aimed.length, "rule")} stop targeting it. ` : ""}The sandboxes themselves are not deleted.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -301,7 +301,7 @@ function GroupCard({ group, members, policies, onOpen, delay }) {
         <span className="mt-auto flex min-w-0 flex-wrap items-center gap-1 border-t border-border/60 pt-3">
           {policies.length
             ? policies.slice(0, 3).map((p) => <span key={p.id} className={cn("truncate rounded-full border px-2 py-px text-[10.5px]", p.action === "block" ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-600/20 bg-emerald-50 text-emerald-800")}>{p.name}</span>)
-            : <span className="text-[11px] text-faint">No policies yet</span>}
+            : <span className="text-[11px] text-faint">No rules yet</span>}
           {policies.length > 3 && <span className="text-[11px] text-faint">+{policies.length - 3}</span>}
         </span>
       </button>
@@ -349,7 +349,7 @@ export function GroupsView({ onNavigate }) {
   const dialog = <NewGroupDialog open={creating} onOpenChange={setCreating} groups={groups} sandboxes={sandboxes} assignments={assignments}
     onCreated={async (group, result, added) => {
       if (result) reportSync(result, `Created ${group.name} with ${plural(added, "sandbox", "sandboxes")}`)
-      else toast.success(`Created ${group.name}`, { description: "Add sandboxes to it, then aim an egress policy at it." })
+      else toast.success(`Created ${group.name}`, { description: "Add sandboxes to it, then aim a network rule at it." })
       await load()
       setOpen(group.id)
     }} />
@@ -367,7 +367,7 @@ export function GroupsView({ onNavigate }) {
             </div>
           ))}
         </div>
-        <p className="mx-3 hidden max-w-sm text-[11px] leading-relaxed text-muted-foreground lg:block">Egress policies aimed at a group reach every sandbox in it. A sandbox is in one group at a time.</p>
+        <p className="mx-3 hidden max-w-sm text-[11px] leading-relaxed text-muted-foreground lg:block">Network rules aimed at a group reach every sandbox in it. A sandbox is in one group at a time.</p>
         <Button size="sm" className="ml-auto bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={() => setCreating(true)}><Plus className="size-3.5" />New group</Button>
       </div>
 
@@ -406,7 +406,7 @@ export function GroupsView({ onNavigate }) {
             <div className="min-w-[640px]">
               <div className="grid h-9 grid-cols-[28px_minmax(0,1.4fr)_minmax(180px,1fr)_minmax(0,1.2fr)] items-center gap-4 border-y border-border bg-muted px-4 text-xs font-medium text-muted-foreground sm:px-6">
                 <input type="checkbox" aria-label="Select every sandbox shown" checked={allPicked} onChange={() => setSelected(allPicked ? [] : visible.map((s) => s.name))} className="size-3.5" />
-                <span>Sandbox</span><span>Group</span><span className="flex items-center gap-1"><Network className="size-3" aria-hidden="true" />Egress policies</span>
+                <span>Sandbox</span><span>Group</span><span className="flex items-center gap-1"><Network className="size-3" aria-hidden="true" />Network rules</span>
               </div>
               <ul className="divide-y divide-border/60 bg-card">
                 {visible.map((s) => {
@@ -426,7 +426,7 @@ export function GroupsView({ onNavigate }) {
                         {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                       </SelectField>
                       <span className="truncate text-[11px] text-muted-foreground" title={reach.map((p) => p.name).join("\n")}>
-                        {reach.length ? reach.map((p) => p.name).join(", ") : <span className="text-faint" title="Its security preset and agent rules still apply">No egress policies</span>}
+                        {reach.length ? reach.map((p) => p.name).join(", ") : <span className="text-faint" title="Its policy and agent rules still apply">No network rules</span>}
                       </span>
                     </li>
                   )
