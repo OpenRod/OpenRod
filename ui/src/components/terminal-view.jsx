@@ -49,7 +49,7 @@ export function TerminalView({ name, session: requested }) {
     if (!session || !element) return undefined
     const term = new Terminal({
       cursorBlink: true, fontSize: 13, lineHeight: 1.2, scrollback: 10000, theme: THEME,
-      fontFamily: '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: '"Geist Variable", ui-sans-serif, system-ui, sans-serif',
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
