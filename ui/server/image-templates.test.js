@@ -1,7 +1,45 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { MAX_RECIPE_BYTES, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
 import { imageTemplateRoute, templateView } from './image-templates.js'
+
+test('custom installs round-trip and run after runtimes and before repository setup', () => {
+  const customAgents = [
+    { name: 'Team agent', install: 'printf "%s\\n" "quoted value"\nprintf "%s\\n" "second line"' },
+    { name: 'Other agent', install: 'printf done' },
+  ]
+  const recipe = newRecipe({ name: 'custom', agents: ['codex'], customAgents, runtimes: ['node'], repository: 'https://github.com/example/project.git', setup: 'npm ci' })
+  assert.deepEqual(recipeErrors(recipe), {})
+  assert.equal(recipe.command, '')
+  const stored = storedRecipe(recipe)
+  const view = templateView({ metadata: { name: 'custom', annotations: { [RECIPE_ANNOTATION]: JSON.stringify(stored) } }, spec: { workload: { image: 'test:1' } } })
+  assert.equal(view.managed, true)
+  assert.deepEqual(view.recipe.customAgents, customAgents)
+  const dockerfile = dockerfileFor(recipe)
+  const runs = dockerfile.split('\n').filter((line) => line.startsWith('RUN ['))
+  assert.equal(runs.length, 2)
+  const args = JSON.parse(runs[0].slice(4))
+  assert.equal(args.at(-1), customAgents[0].install)
+  const output = spawnSync(args[0], args.slice(1), { encoding: 'utf8' })
+  assert.equal(output.status, 0)
+  assert.equal(output.stdout, 'quoted value\nsecond line\n')
+  const stages = ['apt-get install', 'COPY --from=node:', 'npm install --global', 'USER sandbox', runs[0], runs[1], 'RUN git clone', 'RUN bash -eu /tmp/template-setup.sh']
+  for (let i = 1; i < stages.length; i++) assert.ok(dockerfile.indexOf(stages[i]) > dockerfile.indexOf(stages[i - 1]), stages[i])
+  const failure = spawnSync(args[0], [...args.slice(1, -1), 'false | cat\nprintf should-not-run'], { encoding: 'utf8' })
+  assert.notEqual(failure.status, 0)
+  assert.equal(failure.stdout, '')
+})
+
+test('invalid custom agent input is rejected before starting a build', async () => {
+  for (const customAgents of [null, [null], [{ name: '', install: 'echo ok' }], [{ name: 'Agent', install: '' }], [{ name: 'Agent', install: 'x'.repeat(6001) }], [{ name: 'Agent', install: 'echo\0bad' }]]) {
+    const recipe = newRecipe({ name: 'custom', customAgents })
+    assert.ok(recipeErrors(recipe).customAgents)
+    await assert.rejects(imageTemplateRoute('POST', ['image-templates'], { recipe }))
+  }
+  assert.deepEqual(newRecipe().customAgents, [])
+  assert.equal(newRecipe({ agents: [], customAgents: [{ name: 'One', install: 'true' }, { name: 'Two', install: 'true' }], command: 'custom' }).command, '')
+})
 
 test('image recipe does not compile launch variables or permissions into an image', () => {
   const recipe = newRecipe({ name: 'frontend', runtimes: ['node', 'python'], agents: ['codex'], environment: [{ name: 'APP_MODE', value: 'development' }], command: 'codex', policy: { rules: ['allow-all'] } })
@@ -19,6 +57,23 @@ test('the default recipe installs Claude Code and starts in it', () => {
   assert.deepEqual(recipeErrors(recipe), {})
   assert.equal(recipe.command, 'claude')
   assert.match(dockerfileFor(recipe), /claude\.ai\/install\.sh/)
+})
+
+test('multiple agents always start in Shell, including restored templates', () => {
+  for (const command of ['claude', 'codex', 'npm run dev', '']) {
+    const recipe = newRecipe({ name: 'team', agents: ['claude', 'codex'], command })
+    assert.equal(recipe.command, '')
+    assert.deepEqual(recipeErrors(recipe), {})
+    assert.equal(storedRecipe(recipe).command, '')
+    assert.ok(recipeErrors({ ...recipe, command: 'claude' }).command)
+    const legacy = { ...storedRecipe(recipe), command }
+    const view = templateView({ metadata: { name: 'team', annotations: { [RECIPE_ANNOTATION]: JSON.stringify(legacy) } }, spec: { workload: { image: 'openshell-template/team:1' } } })
+    assert.equal(view.managed, true)
+    assert.equal(view.recipe.command, '')
+  }
+  assert.equal(newRecipe({ agents: ['codex'], command: 'codex' }).command, 'codex')
+  assert.equal(newRecipe({ agents: [], command: 'npm run dev' }).command, 'npm run dev')
+  assert.equal(newRecipe({ source: 'image', agents: ['claude', 'codex'], command: 'npm run dev' }).command, 'npm run dev')
 })
 
 test('rejects names OpenShell would refuse, shell options, Dockerfile injection, credential variables and credentialed repositories', () => {
@@ -78,7 +133,7 @@ test('invalid recipes and secret names fail before Docker or the gateway is touc
 test('every agent choice generates an installer, its runtime, and a session', async () => {
   const { AGENTS } = await import('../src/lib/image-templates.js')
   const { isSession } = await import('../src/lib/sandbox-session.js')
-  assert.equal(AGENTS.length, 11)
+  assert.equal(AGENTS.length, 10)
   assert.equal(AGENTS.filter((a) => a.featured).length, 4)
   for (const agent of AGENTS) {
     const recipe = newRecipe({ name: agent.id, agents: [agent.id], command: agent.command })

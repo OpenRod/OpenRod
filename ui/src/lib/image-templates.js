@@ -12,9 +12,8 @@ const choices = [
   { id: 'claude', command: 'claude', featured: true },
   { id: 'codex', command: 'codex', featured: true, npm: '@openai/codex' },
   { id: 'opencode', command: 'opencode', featured: true, npm: 'opencode-ai' },
-  { id: 'gemini', command: 'gemini', featured: true, npm: '@google/gemini-cli' },
   { id: 'pi', command: 'pi', npm: '@earendil-works/pi-coding-agent', ignoreScripts: true },
-  { id: 'cursor', command: 'cursor-agent', install: installer('https://cursor.com/install') },
+  { id: 'cursor', command: 'cursor-agent', featured: true, install: installer('https://cursor.com/install') },
   { id: 'antigravity', command: 'agy', install: installer('https://antigravity.google/cli/install.sh') },
   { id: 'copilot', command: 'copilot', npm: '@github/copilot' },
   { id: 'kiro', command: 'kiro-cli', packages: ['unzip'], install: installer('https://cli.kiro.dev/install') },
@@ -41,8 +40,12 @@ export const NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,17}[a-z0-9])?$/
 export const MAX_RECIPE_BYTES = 8000
 export const RECIPE_ANNOTATION = 'openshell.console/recipe'
 
+export const requiresShell = (recipe) => recipe.source === 'build' && Array.isArray(recipe.agents) && (new Set(recipe.agents).size + (Array.isArray(recipe.customAgents) ? recipe.customAgents.length : 0)) > 1
+
 export function newRecipe(values = {}) {
-  return { name: '', source: 'build', agents: ['claude'], repository: '', runtimes: [], base: BASES[0].id, packages: [...DEFAULT_PACKAGES], setup: '', image: '', environment: [], command: 'claude', ...values }
+  const recipe = { name: '', source: 'build', agents: ['claude'], customAgents: [], repository: '', runtimes: [], base: BASES[0].id, packages: [...DEFAULT_PACKAGES], setup: '', image: '', environment: [], command: 'claude', ...values }
+  if (requiresShell(recipe)) recipe.command = ''
+  return recipe
 }
 export const splitPackages = (text) => text.split(/[\s,]+/).filter(Boolean)
 export const PENDING_RECIPE_KEY = 'openshell-image-recipe-v2'
@@ -57,7 +60,7 @@ export function pendingRecipe() {
 export function storedRecipe(r) {
   return r.source === 'image'
     ? { source: 'image', image: r.image, command: r.command }
-    : { source: 'build', agents: r.agents, repository: r.repository, runtimes: r.runtimes, base: r.base, packages: r.packages, setup: r.setup, command: r.command }
+    : { source: 'build', agents: r.agents, ...(r.customAgents?.length ? { customAgents: r.customAgents } : {}), repository: r.repository, runtimes: r.runtimes, base: r.base, packages: r.packages, setup: r.setup, command: r.command }
 }
 const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'"
 const imagePattern = /^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,255}$/
@@ -72,7 +75,8 @@ export function recipeErrors(recipe) {
       try { const u = new URL(recipe.repository); if (/[\r\n\0]/.test(recipe.repository) || u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) throw new Error() } catch { errors.repository = 'Use a public HTTPS repository URL without credentials or query parameters.' }
     }
     if (!BASES.some((b) => b.id === recipe.base)) errors.base = 'Choose a supported base image.'
-    if (!Array.isArray(recipe.packages) || recipe.packages.length > 80 || recipe.packages.some((p) => typeof p !== 'string' || !/^[a-z0-9][a-z0-9+.-]*(=[a-zA-Z0-9:.+~_-]+)?$/.test(p))) errors.packages = 'Use valid apt package names, separated by spaces.'
+    if (!Array.isArray(recipe.packages) || recipe.packages.length > 80 || recipe.packages.some((p) => typeof p !== 'string' || !/^[a-z0-9][a-z0-9+.-]*(=[a-zA-Z0-9:.+~_-]+)?$/.test(p))) errors.packages = 'Add up to 80 valid apt package names, such as jq or build-essential.'
+    if (!Array.isArray(recipe.customAgents) || recipe.customAgents.length > 10 || recipe.customAgents.some((a) => !a || typeof a.name !== 'string' || !a.name.trim() || a.name.length > 80 || /[\x00-\x1f\x7f]/.test(a.name) || typeof a.install !== 'string' || !a.install.trim() || a.install.length > 6000 || /[\x00\r]/.test(a.install))) errors.customAgents = 'Enter valid custom agent install commands, up to 6,000 characters.'
     if (typeof recipe.setup !== 'string' || recipe.setup.length > 6000) errors.setup = 'Setup commands must be under 6 KB.'
   } else if (recipe.source === 'image') {
     if (!imagePattern.test(recipe.image || '')) errors.image = 'Enter a valid image reference, such as team/workspace:latest.'
@@ -83,6 +87,7 @@ export function recipeErrors(recipe) {
   else if (recipe.environment.some((e) => /secret|token|password|api_?key|credential|auth/i.test(e.name))) errors.environment = 'Keep credentials out of templates. Attach them through Secrets when you launch.'
   else if (new Set(recipe.environment.map((e) => e.name)).size !== recipe.environment.length) errors.environment = 'Environment variable names must be unique.'
   if (typeof recipe.command !== 'string' || recipe.command.length > 512 || /[\r\n\0]/.test(recipe.command)) errors.command = 'Use a single-line start command, up to 512 characters.'
+  if (requiresShell(recipe) && recipe.command !== '') errors.command = 'Templates with multiple agents must start in Shell.'
   if (!Object.keys(errors).length && new TextEncoder().encode(JSON.stringify(storedRecipe(recipe))).length > MAX_RECIPE_BYTES) errors.setup = 'This recipe is too large to store with the template. Shorten the setup commands or package list.'
   return errors
 }
@@ -100,6 +105,7 @@ export function dockerfileFor(recipe) {
   if (recipe.agents.includes('claude')) lines.push('RUN curl -fsSL https://claude.ai/install.sh -o /tmp/install-claude.sh && bash /tmp/install-claude.sh && cp -L /root/.local/bin/claude /usr/local/bin/claude && chmod 0755 /usr/local/bin/claude && rm -rf /root/.local /root/.claude* /tmp/install-claude.sh')
   lines.push('', 'ENV HOME=/sandbox', 'ENV PATH="/sandbox/.local/bin:/sandbox/.npm-global/bin:/sandbox/.opencode/bin:${PATH}"', 'ENV NPM_CONFIG_PREFIX=/sandbox/.npm-global', 'USER sandbox', 'WORKDIR /sandbox')
   for (const agent of agents.filter((a) => a.install)) lines.push(`RUN ${agent.install} && command -v ${agent.command}`)
+  for (const agent of recipe.customAgents ?? []) lines.push(`RUN ${JSON.stringify(['/bin/bash', '-euo', 'pipefail', '-c', agent.install])}`)
   if (recipe.repository) lines.push(`RUN git clone -- ${quote(recipe.repository)} /sandbox/project`, 'WORKDIR /sandbox/project')
   if (recipe.setup.trim()) lines.push('COPY --chown=1000:1000 setup.sh /tmp/template-setup.sh', 'RUN bash -eu /tmp/template-setup.sh')
   // Environment and the start command live in the OpenShell template, not in image layers.
