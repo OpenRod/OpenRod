@@ -1,7 +1,10 @@
 import * as React from 'react'
-import { Check, ChevronRight, FileText, FolderInput, Package, Plus, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronRight, FileText, FolderInput, Package, Plug, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { BlurFade } from '@/components/ui/blur-fade'
+import { absoluteTime } from '@/lib/format'
 import { Checkbox } from '@/components/ui/checkbox'
 import { SelectField } from '@/components/ui/select-field'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -22,24 +25,68 @@ export function SetupsView({ sandbox = null }) {
   const [deleting, setDeleting] = React.useState(null)
   const [deleteBusy, setDeleteBusy] = React.useState(false)
   const [deleteError, setDeleteError] = React.useState('')
-  const refresh = React.useCallback(() => api.setups().then(setSetups).catch((e) => setError(e.message)), [])
+  const [query, setQuery] = React.useState('')
+  const [status, setStatus] = React.useState('all')
+  const [descending, setDescending] = React.useState(false)
+  const [refreshing, setRefreshing] = React.useState(false)
+  const refresh = React.useCallback(async () => {
+    setRefreshing(true)
+    try { setSetups(await api.setups()); setError('') } catch (e) { setError(e.message) }
+    finally { setRefreshing(false) }
+  }, [])
   React.useEffect(() => { refresh() }, [refresh])
+  const shown = React.useMemo(() => (setups || []).filter((setup) => {
+    const matches = [setup.name, ...setup.items.flatMap(item => [item.name, ...(item.sources || [])])].join(' ').toLowerCase().includes(query.trim().toLowerCase())
+    return matches && (status === 'all' || (status === 'review' ? issueCount(setup) > 0 : issueCount(setup) === 0))
+  }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }) * (descending ? -1 : 1)), [setups, query, status, descending])
+  const filtering = Boolean(query || status !== 'all')
   return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-4">
-      <div><p className="text-sm font-medium">MCPs & Skills</p><p className="mt-1 text-xs text-muted-foreground">Bring your tools into images and sandboxes.</p></div>
-      <Button size="sm" onClick={() => setImporting(true)}><Plus />Bring my setup</Button>
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
+      <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+        <Input aria-label="Search setups" placeholder="Search…" value={query} onChange={e => setQuery(e.target.value)} className="h-8 bg-card pl-8 text-xs" />
+      </div>
+      <SelectField aria-label="Filter setups by status" value={status} onChange={e => setStatus(e.target.value)} className="h-8 w-36 bg-card text-xs">
+        <option value="all">All statuses</option><option value="imported">Imported</option><option value="review">Needs review</option>
+      </SelectField>
+      {filtering && <Button variant="ghost" size="sm" onClick={() => { setQuery(''); setStatus('all') }}>Clear</Button>}
+      <Button variant="ghost" size="icon-sm" aria-label="Refresh setups" disabled={refreshing} onClick={refresh}>{refreshing ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}</Button>
+      <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => setImporting(true)}><Plus />Bring my setup</Button>
     </div>
-    <div className="space-y-4 p-6">
-      <ErrorMessage>{error}</ErrorMessage>
-      {!setups && !error && <p className="text-xs text-muted-foreground">Loading Setups…</p>}
-      {setups?.length === 0 && <div className="mx-auto max-w-sm py-12 text-center"><FolderInput className="mx-auto mb-4 size-8 text-muted-foreground" strokeWidth={1.3} /><h3 className="text-sm font-medium">Your familiar tools, ready to bring along</h3><p className="mt-2 text-xs leading-relaxed text-muted-foreground">Choose MCPs and Skills from Codex, Claude Code or Cursor. Review their requirements before using them in a sandbox.</p><Button className="mt-5" variant="outline" onClick={() => setImporting(true)}>Bring my setup<ChevronRight /></Button></div>}
-      {setups?.map((setup) => <div key={setup.id} className="flex items-center rounded-xl border bg-card pr-3"><button onClick={() => setSelected(setup)} className="flex min-w-0 flex-1 items-center gap-4 rounded-xl p-4 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border bg-muted/40"><Package className="size-4" strokeWidth={1.5} /></span>
-        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{setup.name}</span><span className="mt-1 block text-xs text-muted-foreground">{count(setup, 'mcp')} MCPs · {count(setup, 'skill')} Skills · Revision {setup.revision.slice(0, 8)}</span></span>
-        <span className="text-[11px] text-muted-foreground">{issueCount(setup) ? `${issueCount(setup)} need review` : 'Imported'}</span><ChevronRight className="size-4 text-muted-foreground" />
-      </button><Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-destructive" aria-label={`Delete setup ${setup.name}`} title={`Delete setup ${setup.name}`} onClick={() => { setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-4" /></Button></div>)}
-      {Boolean(setups?.length) && <Note>Setups are private to this local console. Importing grants no network access. Add a Setup to an image template or review it for a running sandbox.</Note>}
+    {error && <div className="space-y-2 border-b px-4 py-3 sm:px-8"><ErrorMessage>{error}</ErrorMessage><Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>Try again</Button></div>}
+    <div className="flex-1">
+      {!setups && !error ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground"><Spinner />Loading setups…</div>
+        : setups && !shown.length ? <div className="px-4 py-16 text-center">
+          <FolderInput className="mx-auto mb-3 size-6 text-muted-foreground" strokeWidth={1.5} />
+          <p className="text-sm font-medium">{setups.length ? 'No matching setups' : 'No setups yet'}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{setups.length ? 'Try another name, tool, source agent, or status.' : 'Import MCPs and Skills from Codex, Claude Code, or Cursor.'}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => setups.length ? (setQuery(''), setStatus('all')) : setImporting(true)}>{setups.length ? 'Clear filters' : 'Bring my setup'}</Button>
+        </div>
+        : setups && <BlurFade duration={0.15} offset={0} blur="0px">
+          <Table aria-label="Setups" className="min-w-[740px] text-xs">
+            <TableHeader><TableRow className="hover:bg-transparent">
+              <TableHead scope="col" aria-sort={descending ? 'descending' : 'ascending'} className="h-9 px-4 text-[11px] font-normal text-muted-foreground sm:pl-8"><button className="flex items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDescending(value => !value)}>Name{descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}</button></TableHead>
+              {['Source agents', 'MCPs', 'Skills', 'Created'].map(label => <TableHead key={label} scope="col" className="h-9 px-4 text-[11px] font-normal text-muted-foreground">{label}</TableHead>)}
+              <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
+            </TableRow></TableHeader>
+            <TableBody>{shown.map(setup => {
+              const sources = SOURCES.filter(source => setup.items.some(item => item.sources?.includes(source.id)))
+              return <TableRow key={setup.id} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelected(setup)}>
+                <TableCell className="max-w-72 px-4 py-2 sm:pl-8"><button aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><Package className="size-3.5" strokeWidth={1.5} /></span>
+                  <span className="truncate font-mono text-xs font-medium group-hover:underline">{setup.name}</span>
+                </button></TableCell>
+                <TableCell className="px-4 py-2"><div className="flex items-center gap-2">{sources.map(source => <img key={source.id} src={`/logos/agents/${source.logo}.svg`} alt={source.name} title={source.name} className="size-4 object-contain" />)}{!sources.length && <span className="text-muted-foreground">Not reported</span>}</div></TableCell>
+                <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><Plug aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'mcp')}</span></TableCell>
+                <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><FileText aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'skill')}</span></TableCell>
+                <TableCell className="px-4 py-2 text-[11px] text-muted-foreground">{setup.createdAt ? absoluteTime(setup.createdAt) : 'Not reported'}</TableCell>
+                <TableCell className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
+              </TableRow>
+            })}</TableBody>
+          </Table>
+        </BlurFade>}
     </div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-8"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Saved locally · Available in templates and sandboxes</span></div>
     {deleting && <Dialog open onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null) }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Delete “{deleting.name}”?</DialogTitle><DialogDescription>This deletes the saved setup and its imported rows. Tools already installed in sandboxes or built images stay in place. Templates using this setup will need a different setup selected before reuse.</DialogDescription></DialogHeader><ErrorMessage>{deleteError}</ErrorMessage><div className="flex justify-end gap-2"><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={deleteBusy} onClick={async () => {
       setDeleteBusy(true); setDeleteError('')
       try {
