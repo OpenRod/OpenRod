@@ -38,7 +38,11 @@ export function TerminalView({ name, session: requested }) {
     api.sandbox(name).then((record) => { if (current) setSandbox(record) }).catch((error) => { if (current) setLoadError(error.message) })
     return () => { current = false }
   }, [name])
-  React.useEffect(() => { document.title = `${name} · ${session ? sessionName(session) : "Terminal"}` }, [name, session])
+  React.useEffect(() => {
+    const previous = document.title
+    document.title = `${name} · ${session ? sessionName(session) : "Terminal"}`
+    return () => { document.title = previous }
+  }, [name, session])
 
   React.useEffect(() => {
     const element = holder.current
@@ -72,16 +76,19 @@ export function TerminalView({ name, session: requested }) {
         const scheme = window.location.protocol === "https:" ? "wss" : "ws"
         socket = new WebSocket(`${scheme}://${window.location.host}/api/os/terminal?ticket=${encodeURIComponent(ticket)}`)
         socket.binaryType = "arraybuffer"
-        socket.onopen = () => { setState({ status: "live" }); socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })) }
+        // A socket from a finished attempt must not touch the next one's state.
+        socket.onopen = () => { if (closed) return; setState({ status: "live" }); socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })) }
         socket.onmessage = (event) => {
+          if (closed) return
           if (typeof event.data !== "string") { term.write(new Uint8Array(event.data)); return }
           let message
           try { message = JSON.parse(event.data) } catch { return }
           if (message.type === "exit") { setState({ status: "ended", exitCode: message.exitCode }); note(`Session ended with exit code ${message.exitCode}.`) }
           else if (message.type === "error") { setState({ status: "failed", message: message.message }); note(message.message) }
         }
-        socket.onclose = () => setState((s) => (s.status === "ended" || s.status === "failed" ? s : { status: "failed", message: "The connection closed." }))
+        socket.onclose = () => { if (!closed) setState((s) => (s.status === "ended" || s.status === "failed" ? s : { status: "failed", message: "The connection closed." })) }
       } catch (error) {
+        if (closed) return
         setState({ status: "failed", message: error.message })
         note(error.message)
       }

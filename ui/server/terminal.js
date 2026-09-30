@@ -116,6 +116,9 @@ async function run(ws, plan) {
     return
   }
   const running = () => session.exitCode === undefined
+  // The tab may have closed while the exec was starting; a program that
+  // prints nothing would otherwise keep the exec alive with nobody attached.
+  if (ws.readyState !== ws.OPEN) { session.cancel(); return }
   ws.on('message', (data, isBinary) => {
     const frame = controlOf(data, isBinary)
     if (!frame || !running()) return
