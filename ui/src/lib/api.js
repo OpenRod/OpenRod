@@ -23,6 +23,7 @@ export const api = {
   activity: (options = {}) => request(`/activity?query=${encodeURIComponent(JSON.stringify(options))}`),
   create: (spec) => request("/sandboxes", { method: "POST", body: spec }),
   openTerminal: (name) => request(`/sandboxes/${encodeURIComponent(name)}/terminal`, { method: "POST", body: {} }),
+  terminalSession: (name, body) => request(`/sandboxes/${encodeURIComponent(name)}/terminal-session`, { method: "POST", body }),
   lifecycle: (name, action) => request(`/sandboxes/${encodeURIComponent(name)}/${action}`, { method: "POST", body: {} }),
   editors: () => request("/editors"),
   openEditor: (name, editor) => request(`/sandboxes/${encodeURIComponent(name)}/editor`, { method: "POST", body: { editor } }),
