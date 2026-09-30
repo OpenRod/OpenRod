@@ -1,4 +1,5 @@
 import { AGENTS } from "./image-templates.js"
+import { agentsOf } from "./agents.js"
 
 export const SESSION_LABEL = "openshell.console/session"
 // The folder under /sandbox that a started-from-files sandbox opens in. The
@@ -36,3 +37,19 @@ export function sessionCommand(sandbox) {
   if (isSession(session)) return `openshell sandbox exec --name ${name}${workdir} --tty -- ${SESSIONS[session]}`
   return `openshell sandbox connect ${name}`
 }
+
+// The browser terminal runs the same programs. What a tab opens by default is
+// the session the sandbox was created for, or a shell for sandboxes started
+// with their own command.
+export const sessionArgv = (session) => (isSession(session) ? SESSIONS[session].split(" ") : null)
+export const defaultSession = (sandbox) => (isSession(sandbox?.labels?.[SESSION_LABEL]) ? sandbox.labels[SESSION_LABEL] : "shell")
+export const sessionName = (session) => (session === "shell" ? "Shell" : AGENTS.find((a) => a.command === session)?.name ?? session)
+// A shell, plus every installed agent the console knows how to launch.
+export function sessionChoices(sandbox) {
+  const current = defaultSession(sandbox)
+  const installed = agentsOf(sandbox).flatMap((agent) => AGENTS.filter((a) => a.name === agent.name).map((a) => a.command))
+  const commands = [...new Set([...(current === "shell" ? [] : [current]), ...installed])]
+  return [{ id: "shell", name: "Shell" }, ...commands.map((command) => ({ id: command, name: sessionName(command) }))]
+}
+// A browser terminal is its own tab; the app routes this hash to it.
+export const terminalHref = (name, session) => `#terminal/${encodeURIComponent(name)}${session ? `?session=${encodeURIComponent(session)}` : ""}`

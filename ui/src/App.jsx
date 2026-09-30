@@ -10,6 +10,9 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { Toaster } from "@/components/ui/sonner"
 import { LiveProvider } from "@/lib/live"
 
+// xterm.js is only needed by terminal tabs.
+const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
+
 const TITLES = {
   sandboxes: "Sandboxes",
   activity: "Activity",
@@ -36,6 +39,13 @@ class PageBoundary extends React.Component {
   }
 }
 
+// A browser terminal is its own tab: `#terminal/<sandbox>?session=<program>`.
+function terminalFromLocation() {
+  const match = /^#terminal\/([a-z0-9-]{1,63})(?:\?(.*))?$/.exec(window.location.hash)
+  if (!match) return null
+  return { name: match[1], session: new URLSearchParams(match[2] ?? "").get("session") || undefined }
+}
+
 function viewFromLocation() {
   const view = window.location.hash.slice(1)
   if (view === "guardrails") {
@@ -47,8 +57,9 @@ function viewFromLocation() {
 
 export function App() {
   const [view, setView] = React.useState(viewFromLocation)
+  const [terminal, setTerminal] = React.useState(terminalFromLocation)
   React.useEffect(() => {
-    const sync = () => setView(viewFromLocation())
+    const sync = () => { setView(viewFromLocation()); setTerminal(terminalFromLocation()) }
     window.addEventListener("popstate", sync)
     window.addEventListener("hashchange", sync)
     return () => {
@@ -61,6 +72,17 @@ export function App() {
     if (!TITLES[next]) return
     setView(next)
     window.history.pushState(null, "", next === "sandboxes" ? window.location.pathname : `#${next}`)
+  }
+
+  if (terminal) {
+    return (
+      <>
+        <React.Suspense fallback={null}>
+          <TerminalView key={`${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} />
+        </React.Suspense>
+        <Toaster position="bottom-right" />
+      </>
+    )
   }
 
   return (

@@ -16,6 +16,7 @@ import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org
 import { expose, ingressRoute, startSweeper } from './ingress.js'
 import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 import { editorRoute } from './editor.js'
+import { terminalRoute, terminalUpgrade } from './terminal.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
 
@@ -324,6 +325,8 @@ export function openshellApi() {
       // only one of them may run it. Ingress deadlines are per console and stay on.
       const stopOrgSweeper = process.env.OPENSHELL_CONSOLE_SWEEP === '0' ? () => {} : startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
       server.httpServer?.once('close', () => { stopSweeper(); stopOrgSweeper() })
+      // Browser terminals arrive as WebSocket upgrades, which skip the middleware.
+      server.httpServer?.on('upgrade', (req, socket, head) => terminalUpgrade(req, socket, head, isLocalApiRequest))
       server.middlewares.use('/api/os', async (req, res) => {
         if (!isLocalApiRequest(req)) { res.writeHead(403).end(); return }
         const url = new URL(req.url, 'http://local')
@@ -400,7 +403,7 @@ export function openshellApi() {
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          const routed = (await editorRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
         } catch (error) {
