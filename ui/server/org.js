@@ -17,15 +17,21 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 // console writes the egress policies that apply to a sandbox (everyone, its
 // group, or the sandbox by name) and the organization's blocked hosts into
 // every sandbox's own policy, under reserved name prefixes, and leaves the
-// sandbox's other rules alone. Group membership is a label, which the gateway
-// fixes at creation, so a sandbox's group is decided before it ever runs.
+// sandbox's other rules alone.
+//
+// Group membership is stored here rather than in the sandbox: the gateway
+// fixes labels at creation, and people move sandboxes between groups. A
+// sandbox with no stored membership falls back to the group label it was
+// created with, so sandboxes from before membership was stored keep theirs.
 //
 // Stored as JSON next to the templates, so policy is reviewed and committed
-// like code: policies/org/organization.json, policies/org/groups/<id>.json
-// and policies/egress/<id>.json.
+// like code: policies/org/organization.json, policies/org/groups/<id>.json,
+// policies/org/members.json and policies/egress/<id>.json.
 
 const ORG_DIR = path.resolve(import.meta.dirname, '../policies/org')
 const GROUP_DIR = path.join(ORG_DIR, 'groups')
+const MEMBERS_FILE = path.join(ORG_DIR, 'members.json')
+const SANDBOX_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 export const GROUP_LABEL = 'openshell.console/group'
 const GROUP_ID = /^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?$/
 const HOST_PATTERN = /^(\*\*?\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i
@@ -102,9 +108,37 @@ function validateGroup(input) {
     id,
     name: String(input.name ?? id).trim().slice(0, 80) || id,
     description: String(input.description ?? '').slice(0, 400),
-    template: input.template ? String(input.template) : 'locked-down',
+    // A group may pin the security preset of sandboxes created in it. Groups
+    // made in the console leave it to the launch dialog.
+    template: input.template ? String(input.template) : null,
     outside,
   }
+}
+
+// Sandbox name → group id, or null for "no group", overriding the label.
+export async function readMembers() {
+  const raw = await readJson(MEMBERS_FILE)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  return Object.fromEntries(Object.entries(raw).filter(([name, id]) => SANDBOX_NAME.test(name) && (id === null || GROUP_ID.test(String(id)))))
+}
+
+// The group a sandbox is in. A stored membership wins over the creation
+// label; a group that no longer exists counts as none.
+export function groupOf(sandbox, members, groups) {
+  const id = Object.hasOwn(members, sandbox.name) ? members[sandbox.name] : sandbox.labels?.[GROUP_LABEL] ?? null
+  return id && groups.some((g) => g.id === id) ? id : null
+}
+
+// `group` null takes the sandboxes out of every group; `forget` drops the
+// entries, for sandboxes that no longer exist.
+export async function assignGroup(names, group, { forget = false } = {}) {
+  const members = await readMembers()
+  for (const name of names) {
+    if (forget) delete members[name]
+    else members[name] = group
+  }
+  await write(MEMBERS_FILE, Object.fromEntries(Object.entries(members).sort(([a], [b]) => a.localeCompare(b))))
+  return members
 }
 
 export async function listGroups() {
@@ -157,7 +191,7 @@ export async function planSandbox({ name, group: groupId, template: templateId, 
     group = await findGroup(groupId)
     if (!group) throw fail('Unknown group.')
   }
-  const template = await findTemplate(group ? group.template : templateId || 'locked-down')
+  const template = await findTemplate(group?.template || templateId || 'locked-down')
   if (!template) throw fail('Unknown policy template.')
   assertNotBlocked(org, template.rules, 'Template')
   const policy = templateToPolicy(template)
@@ -184,8 +218,8 @@ export async function enforcePolicyOnly(client) {
 
 // The operations that bring one sandbox's managed rules in line with the
 // stored policies. `extraPorts` are ports the same update is about to open.
-async function managedOps(client, sandbox, org, groups, policies, extraPorts = []) {
-  const groupId = sandbox.labels?.[GROUP_LABEL] ?? null
+async function managedOps(client, sandbox, org, groups, policies, members, extraPorts = []) {
+  const groupId = groupOf(sandbox, members, groups)
   const group = groupId ? groups.find((g) => g.id === groupId) ?? null : null
   const status = await client.raw.getSandboxPolicyStatus({ sandbox: sandbox.name, workspaceScope: WORKSPACE })
   const rules = status.revision?.policy?.networkPolicies ?? {}
@@ -202,14 +236,14 @@ async function managedOps(client, sandbox, org, groups, policies, extraPorts = [
 // For a one-off rule edit that opens new ports: the managed rules recomputed
 // with those ports, to go in the same update as the edit.
 export async function managedOpsFor(client, name, extraPorts) {
-  const [org, groups, policies, sandbox] = await Promise.all([readOrg(), listGroups(), listPolicies(), client.raw.getSandbox({ name, workspaceScope: WORKSPACE })])
-  return (await managedOps(client, sandboxView(sandbox.sandbox), org, groups, policies, extraPorts)).ops
+  const [org, groups, policies, members, sandbox] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), client.raw.getSandbox({ name, workspaceScope: WORKSPACE })])
+  return (await managedOps(client, sandboxView(sandbox.sandbox), org, groups, policies, members, extraPorts)).ops
 }
 
 // Rewrites the managed rules of one sandbox to match the stored policy. The
 // sandbox's own rules are never touched.
-async function syncOne(client, sandbox, org, groups, policies, { force = true } = {}) {
-  const { ops, same, group } = await managedOps(client, sandbox, org, groups, policies)
+async function syncOne(client, sandbox, org, groups, policies, members, { force = true } = {}) {
+  const { ops, same, group } = await managedOps(client, sandbox, org, groups, policies, members)
   if (!force && same) return { changed: false }
   let version = null
   if (ops.length) {
@@ -231,10 +265,11 @@ async function liveSandboxes(client) {
 // `only` narrows the pass to the sandboxes a change can reach.
 export async function syncAll({ group: onlyGroup = null, only = null, force = true } = {}) {
   const { client } = await gateway()
-  const [org, groups, policies, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), liveSandboxes(client)])
-  const targets = sandboxes.filter((s) => (!onlyGroup || s.labels?.[GROUP_LABEL] === onlyGroup) && (!only || only(s)))
+  const [org, groups, policies, members, live] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), liveSandboxes(client)])
+  const sandboxes = live.map((s) => ({ ...s, group: groupOf(s, members, groups) }))
+  const targets = sandboxes.filter((s) => (!onlyGroup || s.group === onlyGroup) && (!only || only(s)))
   const results = await Promise.all(targets.map(async (s) => {
-    try { return { sandbox: s.name, ...(await syncOne(client, s, org, groups, policies, { force })) } } catch (error) { return { sandbox: s.name, error: error.rawMessage ?? error.message } }
+    try { return { sandbox: s.name, ...(await syncOne(client, s, org, groups, policies, members, { force })) } } catch (error) { return { sandbox: s.name, error: error.rawMessage ?? error.message } }
   }))
   return {
     applied: results.filter((r) => r.changed).map((r) => r.sandbox),
@@ -257,11 +292,11 @@ export function settledBy(org, group, hosts, sandbox = null, policies = []) {
 async function sweep(log) {
   const { client } = await gateway()
   await enforcePolicyOnly(client)
-  const [org, groups, policies, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), liveSandboxes(client)])
+  const [org, groups, policies, members, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), liveSandboxes(client)])
   for (const s of sandboxes) {
-    const group = groups.find((g) => g.id === s.labels?.[GROUP_LABEL]) ?? null
+    const group = groups.find((g) => g.id === groupOf(s, members, groups)) ?? null
     try {
-      const result = await syncOne(client, s, org, groups, policies, { force: false })
+      const result = await syncOne(client, s, org, groups, policies, members, { force: false })
       if (result.changed) log(`applied organization policy to ${s.name}`)
     } catch { /* retried next pass */ }
     let draft
@@ -301,17 +336,29 @@ export function startOrgSweeper(log) {
 
 async function overview() {
   const { client } = await gateway()
-  const [org, groups, policies, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), liveSandboxes(client)])
+  const [org, groups, policies, stored, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), liveSandboxes(client)])
   const members = Object.fromEntries(groups.map((g) => [g.id, []]))
+  const assignments = {}
   const ungrouped = []
-  const orphaned = []
   for (const s of sandboxes) {
-    const id = s.labels?.[GROUP_LABEL]
-    if (!id) ungrouped.push(s.name)
-    else if (members[id]) members[id].push(s.name)
-    else orphaned.push({ sandbox: s.name, group: id })
+    const id = groupOf(s, stored, groups)
+    assignments[s.name] = id
+    if (id) members[id].push(s.name)
+    else ungrouped.push(s.name)
   }
-  return { org, groups, policies, members, ungrouped, orphaned, total: sandboxes.length }
+  return { org, groups, policies, members, assignments, ungrouped, total: sandboxes.length }
+}
+
+// Moves sandboxes into a group, or out of every group, and applies the
+// policies that now reach them.
+async function setMembers(input) {
+  const names = [...new Set((Array.isArray(input.sandboxes) ? input.sandboxes : []).map(String))]
+  if (!names.length) throw fail('Pick at least one sandbox.')
+  for (const n of names) if (!SANDBOX_NAME.test(n)) throw fail(`"${n}" is not a sandbox name.`)
+  const group = input.group ? String(input.group) : null
+  if (group && !(await findGroup(group))) throw fail('Unknown group.')
+  await assignGroup(names, group)
+  return { group, ...(await syncAll({ only: (s) => names.includes(s.name) })) }
 }
 
 async function saveOrg(input) {
@@ -323,7 +370,8 @@ async function saveOrg(input) {
 
 async function saveGroup(input) {
   const group = validateGroup(input)
-  if (!(await findTemplate(group.template))) throw fail('Unknown policy template.')
+  if (input.isNew && (await findGroup(group.id))) throw fail(`A group with the id "${group.id}" already exists. Pick another name.`)
+  if (group.template && !(await findTemplate(group.template))) throw fail('Unknown policy template.')
   await write(path.join(GROUP_DIR, `${group.id}.json`), group)
   return { group, ...(await syncAll({ group: group.id })) }
 }
@@ -347,18 +395,21 @@ async function deletePolicy(id) {
 }
 
 // The sandboxes an old or new version of a policy applies to.
-const covers = (versions) => (s) => versions.some((p) => p && appliesTo(p, { name: s.name, group: s.labels?.[GROUP_LABEL] ?? null }))
+const covers = (versions) => (s) => versions.some((p) => p && appliesTo(p, { name: s.name, group: s.group }))
 
 async function deleteGroup(id) {
   if (!GROUP_ID.test(id)) throw fail('Unknown group.')
   const { members } = await overview()
-  if (members[id]?.length) throw fail(`${members[id].length} sandbox${members[id].length === 1 ? ' is' : 'es are'} still in this group. A sandbox keeps its group for life; delete those sandboxes first.`)
+  const left = members[id] ?? []
+  // Its sandboxes leave the group rather than blocking the delete. Stored as
+  // "no group", so a creation label can't pull them back in.
+  if (left.length) await assignGroup(left, null)
   await fs.rm(path.join(GROUP_DIR, `${id}.json`), { force: true })
   // A later group with the same id must not inherit this one's policies.
   for (const p of await listPolicies()) {
     if (p.appliesTo.groups.includes(id)) await writePolicy({ ...p, appliesTo: { ...p.appliesTo, groups: p.appliesTo.groups.filter((g) => g !== id) } })
   }
-  return { ok: true }
+  return { ok: true, ...(left.length ? await syncAll({ only: (s) => left.includes(s.name) }) : { applied: [], failed: [] }) }
 }
 
 export async function orgRoute(method, parts, input) {
@@ -374,6 +425,7 @@ export async function orgRoute(method, parts, input) {
   if (!a) return saveOrg(input)
   if (a === 'sync') return syncAll()
   if (a === 'groups' && !b) return saveGroup(input)
+  if (a === 'members') return setMembers(input)
   if (a === 'groups' && b && c === 'delete') return deleteGroup(b)
   return undefined
 }

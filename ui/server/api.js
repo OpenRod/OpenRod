@@ -12,7 +12,7 @@ import { PROJECT_LABEL, SESSION_LABEL, isSession, sessionCommand, sessionLaunch 
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
-import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org.js'
+import { GROUP_LABEL, orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
 import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 import { editorRoute } from './editor.js'
@@ -166,6 +166,10 @@ async function createSandbox(input) {
   const ref = saved
     ? await client.sandbox.createFromTemplate({ ...spec, workloadTemplate: saved.name })
     : await client.sandbox.create({ ...spec, ...(image ? { image } : {}) })
+  // A new sandbox starts in the group it was created in, even if an older
+  // sandbox of the same name was moved elsewhere.
+  const group = plan.labels[GROUP_LABEL] ?? null
+  await assignGroup([ref.name], group, { forget: !group })
   // Services a template opens at start go through the same path as opening
   // one by hand, so they get the same auto-close deadline.
   const opened = []
@@ -182,7 +186,12 @@ async function lifecycle(name, action) {
   const { client } = await gateway()
   if (action === 'stop') await client.raw.stopSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
   else if (action === 'start') await client.raw.startSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
-  else if (action === 'delete') return client.sandbox.delete(name)
+  else if (action === 'delete') {
+    const result = await client.sandbox.delete(name)
+    // A later sandbox with this name must not inherit its group.
+    await assignGroup([name], null, { forget: true })
+    return result
+  }
   return { ok: true }
 }
 

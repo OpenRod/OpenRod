@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle, X } from "lucide-react"
+import { AlertTriangle, Users, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { RequestList, Segmented } from "@/components/rule-editor"
+import { GroupPicker } from "@/components/group-picker"
 import { api } from "@/lib/api"
+import { appliesTo as reaches } from "@/lib/egress"
 import { cn } from "@/lib/utils"
 
 export { appliesTo, blockPatterns } from "@/lib/egress"
@@ -85,24 +87,25 @@ export function describePolicy(p, groups = []) {
   return `Allows ${requests}${except} to ${hosts || "…"} on port${a.ports.length === 1 ? "" : "s"} ${joinAnd(a.ports.map(String))}, ${programs}.${audit} ${scope}`
 }
 
-function Chip({ pressed, disabled, onClick, children, title }) {
-  return (
-    <button type="button" aria-pressed={pressed} disabled={disabled} onClick={onClick} title={title}
-      className={cn("rounded-md border px-2 py-0.5 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40",
-        pressed ? "border-foreground/25 bg-accent text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
-      {children}
-    </button>
-  )
-}
+const SCOPES = [
+  { id: "groups", label: "Groups", hint: "Sandboxes in the groups you pick, now and later" },
+  { id: "sandboxes", label: "Specific sandboxes", hint: "Only the sandboxes you name" },
+  { id: "everyone", label: "Every sandbox", hint: "Every sandbox on this gateway" },
+]
+const scopeOf = (to) => (to?.everyone ? "everyone" : to?.groups?.length ? "groups" : to?.sandboxes?.length ? "sandboxes" : "groups")
 
-export function PolicyDialog({ open, onOpenChange, initial, groups = [], sandboxes = [], knownPrograms = [], onSaved }) {
+export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, knownPrograms = [], onSaved, onGroupCreated }) {
   const isNew = !initial?.id
   const [form, setForm] = React.useState(() => toForm(initial))
+  const [scope, setScope] = React.useState(() => scopeOf(initial?.appliesTo))
+  // Groups made from this form, until the page reloads its list.
+  const [created, setCreated] = React.useState([])
+  const groups = [...savedGroups, ...created.filter((g) => !savedGroups.some((s) => s.id === g.id))].sort((a, b) => a.name.localeCompare(b.name))
   const [program, setProgram] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
-  React.useEffect(() => { if (open) { setForm(toForm(initial)); setError(null); setProgram(""); setConfirmDelete(false) } }, [open, initial])
+  React.useEffect(() => { if (open) { setForm(toForm(initial)); setScope(scopeOf(initial?.appliesTo)); setError(null); setProgram(""); setConfirmDelete(false) } }, [open, initial])
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
   const setTo = (patch) => setForm((f) => ({ ...f, appliesTo: { ...f.appliesTo, ...patch } }))
@@ -112,8 +115,13 @@ export function PolicyDialog({ open, onOpenChange, initial, groups = [], sandbox
     if (value && !form.programs.includes(value)) set({ programs: [...form.programs, value] })
     setProgram("")
   }
-  const toggleGroup = (id) => setTo({ groups: form.appliesTo.groups.includes(id) ? form.appliesTo.groups.filter((g) => g !== id) : [...form.appliesTo.groups, id] })
   const otherSandboxes = sandboxes.filter((s) => !form.appliesTo.sandboxes.includes(s))
+  const chooseScope = (next) => {
+    setScope(next)
+    setTo(next === "everyone" ? { everyone: true, groups: [], sandboxes: [] } : next === "groups" ? { everyone: false, sandboxes: [] } : { everyone: false, groups: [] })
+  }
+  const counts = Object.fromEntries(groups.map((g) => [g.id, sandboxes.filter((n) => assignments[n] === g.id).length]))
+  const reached = sandboxes.filter((n) => reaches(policy, { name: n, group: assignments[n] ?? null }))
 
   async function submit(event) {
     event.preventDefault()
@@ -170,29 +178,44 @@ export function PolicyDialog({ open, onOpenChange, initial, groups = [], sandbox
             )}
           </div>
 
-          <div className="grid gap-1.5">
+          <div className="grid gap-2">
             <span className="text-xs font-medium">Applies to</span>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Chip pressed={form.appliesTo.everyone} onClick={() => setTo({ everyone: !form.appliesTo.everyone })}>Every sandbox</Chip>
-              {/* Groups are an Enterprise feature; a policy that already names one can still drop it. */}
-              {(initial?.appliesTo?.groups ?? []).map((id) => (
-                <Chip key={id} pressed={form.appliesTo.everyone || form.appliesTo.groups.includes(id)} disabled={form.appliesTo.everyone} onClick={() => toggleGroup(id)} title="Group">{groups.find((g) => g.id === id)?.name ?? id}</Chip>
-              ))}
-              {form.appliesTo.sandboxes.map((s) => (
-                <span key={s} className="flex items-center gap-1 rounded-md border border-foreground/25 bg-accent py-0.5 pr-0.5 pl-2 font-mono text-[11px]">
-                  {s}
-                  <button type="button" aria-label={`Remove ${s}`} onClick={() => setTo({ sandboxes: form.appliesTo.sandboxes.filter((x) => x !== s) })}
-                    className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
-                </span>
-              ))}
-              {!form.appliesTo.everyone && otherSandboxes.length > 0 && (
-                <select value="" aria-label="Add a sandbox" onChange={(e) => e.target.value && setTo({ sandboxes: [...form.appliesTo.sandboxes, e.target.value] })}
-                  className="h-6 rounded-md border border-dashed border-border bg-transparent px-1.5 text-[11px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <option value="">+ Sandbox</option>
-                  {otherSandboxes.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              )}
-            </div>
+            <Segmented label="Applies to" options={SCOPES} value={scope} onChange={chooseScope} />
+            {scope === "groups" && (
+              <GroupPicker multiple groups={groups} counts={counts} value={form.appliesTo.groups} onChange={(ids) => setTo({ groups: ids })}
+                onCreated={(g) => { setCreated((c) => [...c, g]); onGroupCreated?.(g) }} />
+            )}
+            {scope === "groups" && !groups.length && (
+              <p className="text-[11px] text-muted-foreground">No groups yet. Create one here, then add sandboxes to it on the Groups page or when you create a sandbox.</p>
+            )}
+            {(scope === "sandboxes" || (scope === "groups" && form.appliesTo.sandboxes.length > 0)) && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {scope === "groups" && <span className="text-[11px] text-muted-foreground">Also</span>}
+                {form.appliesTo.sandboxes.map((s) => (
+                  <span key={s} className="flex items-center gap-1 rounded-md border border-foreground/25 bg-accent py-0.5 pr-0.5 pl-2 font-mono text-[11px]">
+                    {s}
+                    <button type="button" aria-label={`Remove ${s}`} onClick={() => setTo({ sandboxes: form.appliesTo.sandboxes.filter((x) => x !== s) })}
+                      className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
+                  </span>
+                ))}
+                {scope === "sandboxes" && otherSandboxes.length > 0 && (
+                  <select value="" aria-label="Add a sandbox" onChange={(e) => e.target.value && setTo({ sandboxes: [...form.appliesTo.sandboxes, e.target.value] })}
+                    className="h-7 rounded-md border border-dashed border-border bg-transparent px-2 text-[11px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <option value="">+ Add sandbox</option>
+                    {otherSandboxes.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+            <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+              <Users className="mt-px size-3 shrink-0" aria-hidden="true" />
+              <span>
+                {scope === "everyone" ? `Every sandbox on this gateway, including new ones${sandboxes.length ? ` (${sandboxes.length} today)` : ""}.`
+                  : reached.length ? <>Reaches {reached.length === 1 ? "1 sandbox" : `${reached.length} sandboxes`} today: <span className="font-mono text-foreground">{reached.slice(0, 6).join(", ")}</span>{reached.length > 6 ? ` and ${reached.length - 6} more` : ""}.{scope === "groups" ? " Sandboxes added to these groups later get it too." : ""}</>
+                  : scope === "groups" && form.appliesTo.groups.length ? "No sandboxes in these groups yet. Add some on the Groups page or when you create a sandbox; they get this policy automatically."
+                  : scope === "groups" ? "Pick one or more groups." : "Pick the sandboxes it applies to."}
+              </span>
+            </p>
           </div>
 
           {form.action === "allow" && (

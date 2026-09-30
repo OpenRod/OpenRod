@@ -23,7 +23,8 @@ import { HostTile } from "@/components/perimeter"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
-import { GROUP_LABEL, styleOf } from "@/lib/sandboxes"
+import { styleOf } from "@/lib/sandboxes"
+import { groupFor } from "@/lib/groups"
 import { hostMatches } from "@/lib/egress"
 import { SOURCE, SOURCE_ORDER, displayName, hostOf, isIp, portOf, program, sourceOf } from "@/lib/policy-sources"
 import { cn } from "@/lib/utils"
@@ -219,7 +220,7 @@ function Hosts({ hosts }) {
 // One row per egress policy, with how many of the sandboxes it covers
 // already enforce it. The shared blocked hosts sit on top, since they beat
 // every policy.
-function PolicyRows({ policies, org, sandboxes, groups, onEdit, onEditBlocked }) {
+function PolicyRows({ policies, org, sandboxes, groups, assignments, onEdit, onEditBlocked }) {
   const blocked = org?.org?.blocked ?? []
   return (
     <>
@@ -238,7 +239,7 @@ function PolicyRows({ policies, org, sandboxes, groups, onEdit, onEditBlocked })
           </li>
         )}
         {policies.map((p) => {
-          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, group: s.labels?.[GROUP_LABEL] ?? null }))
+          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, group: assignments?.[s.name] ?? null }))
           const enforced = targets.filter((s) => s.status === "loaded" && s.rules.some((r) => r.key === `egress_${p.id}`)).length
           return (
             <li key={p.id}>
@@ -341,7 +342,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
   // Opened for one sandbox: only the policies that reach it.
-  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, group: sandboxes.find((s) => s.name === forSandbox)?.labels?.[GROUP_LABEL] ?? null })
+  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, group: groupFor(org, forSandbox) })
   const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, groups)].join(" ").toLowerCase().includes(needle))
   const count = view === "policies" ? filteredPolicies.length : view === "destinations" ? destinationCount : view === "blocked" ? filteredBlocked.length : filteredBoxes.length
   const allCount = view === "policies" ? policies.length : view === "destinations" ? destinations.length : view === "blocked" ? blocked.length : total
@@ -388,7 +389,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {count === 0 && !(view === "policies" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "policies" ? (forSandbox ? `No policy applies to ${forSandbox} yet` : "No egress policies yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "policies" ? "Sandboxes are locked down: nothing leaves them until a policy allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "policies" && <Button className="mt-4 bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add policy</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
-            {view === "policies" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} />}
+            {view === "policies" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} />}
             {view === "destinations" && <>
               <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
               <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
@@ -864,6 +865,8 @@ function ruleFor(b) {
 export const ALLOW_HANDOFF = "egress-allow"
 // Other pages open the policies that reach one sandbox: its name.
 export const SANDBOX_HANDOFF = "egress-sandbox"
+// Other pages open the policy editor here: { new: { appliesTo } } or { edit: id }.
+export const POLICY_HANDOFF = "egress-policy"
 
 export function EgressView({ onNavigate }) {
   const live = useLive()
@@ -886,6 +889,21 @@ export function EgressView({ onNavigate }) {
     try { setOrg(await api.org()) } catch { setOrg(null) }
   }, [])
   React.useEffect(() => { loadFleet() }, [loadFleet])
+
+  // The Groups page hands over a policy to add for a group, or one to edit.
+  const [policyHandoff] = React.useState(() => {
+    try { const d = JSON.parse(sessionStorage.getItem(POLICY_HANDOFF) ?? "null"); sessionStorage.removeItem(POLICY_HANDOFF); return d } catch { return null }
+  })
+  React.useEffect(() => {
+    if (policyHandoff?.new) setPolicyEditor({ initial: newPolicy({ appliesTo: { everyone: false, groups: [], sandboxes: [], ...policyHandoff.new.appliesTo } }) })
+  }, [policyHandoff])
+  const handedOff = React.useRef(false)
+  React.useEffect(() => {
+    if (!policyHandoff?.edit || !org || handedOff.current) return
+    handedOff.current = true
+    const policy = org.policies.find((p) => p.id === policyHandoff.edit)
+    if (policy) setPolicyEditor({ initial: policy })
+  }, [policyHandoff, org])
 
   // The box graph hands over one blocked host to allow: open its rule, pre-filled.
   React.useEffect(() => {
@@ -951,7 +969,8 @@ export function EgressView({ onNavigate }) {
             forSandbox={forSandbox} onClearSandbox={() => setForSandbox(null)} />}
 
       <PolicyDialog open={Boolean(policyEditor)} onOpenChange={(o) => { if (!o) setPolicyEditor(null) }} initial={policyEditor?.initial}
-        groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} knownPrograms={knownPrograms}
+        groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} assignments={org?.assignments ?? {}} knownPrograms={knownPrograms}
+        onGroupCreated={() => api.org().then(setOrg).catch(() => {})}
         onSaved={(result, policy) => reportSync(result, `${result.deleted ? "Deleted" : "Saved"} ${policy.name}`)} />
       <BlockedHostsDialog open={editingBlocked} onOpenChange={setEditingBlocked} org={org?.org} onSaved={(result) => reportSync(result, "Saved blocked hosts")} />
 
