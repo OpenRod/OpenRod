@@ -8,7 +8,7 @@ import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { PROJECT_LABEL, SESSION_LABEL, isSession, sessionCommand, sessionLaunch } from '../src/lib/sandbox-session.js'
+import { PROJECT_LABEL, SESSION_LABEL, templateSession, isSession, sessionCommand, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
@@ -132,7 +132,9 @@ async function createSandbox(input) {
   if (saved?.managed) { try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) } }
   if (saved) {
     const start = saved.recipe.command.trim()
-    input = { ...input, image: '', session: !start ? 'shell' : start !== 'shell' && isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
+    let selectedSession
+    try { selectedSession = templateSession(saved, input.session) } catch (error) { throw fail(error.message) }
+    input = { ...input, image: '', session: selectedSession, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()

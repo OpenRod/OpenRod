@@ -1,6 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
-import { ChevronRight, Info, Terminal } from "lucide-react"
+import { Check, ChevronRight, Info, Terminal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -16,7 +16,7 @@ import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
 import { sessionCommand } from "@/lib/sandbox-session"
 import { AGENTS } from "@/lib/image-templates"
-import { QUICK_AGENTS, quickRecipe, compatibleProviders, prepareQuickTemplate } from "@/lib/quick-setup"
+import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { policiesFor } from "@/lib/groups"
 import { agentAccessFor } from "../../shared/agent-access.js"
@@ -121,8 +121,9 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [imageTemplate, setImageTemplate] = React.useState("")
   const [chosen, setChosen] = React.useState([])
   const [mode, setMode] = React.useState("quick")
-  const [agentId, setAgentId] = React.useState("terminal")
-  const [quickProvider, setQuickProvider] = React.useState("")
+  const [agentIds, setAgentIds] = React.useState([])
+  const [openIn, setOpenIn] = React.useState("shell")
+  const [quickProviders, setQuickProviders] = React.useState({})
   const [progress, setProgress] = React.useState("")
   const [preparing, setPreparing] = React.useState(false)
   const preparation = React.useRef(null)
@@ -144,7 +145,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     const list = sandboxes ?? []
     setName(nextName(new Set(list.map((s) => s.name))))
     setMode(initialImageTemplate ? "template" : "quick")
-    setAgentId("terminal"); setQuickProvider(""); setProgress("")
+    setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setProgress("")
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
@@ -157,15 +158,21 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
-  const selectedAgent = QUICK_AGENTS.find((agent) => agent.id === agentId)
-  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentId) : chosenImage?.managed ? chosenImage.recipe : null)
-  const connections = compatibleProviders(providers, agentId)
-  const attachedProviders = mode === "quick" ? (connections.some((p) => p.name === quickProvider) ? [quickProvider] : []) : chosen
+  const selectedAgents = QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id))
+  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds) : chosenImage?.managed ? chosenImage.recipe : null)
+  const attachedProviders = mode === "quick" ? [...new Set(selectedAgents.flatMap((agent) => {
+    const chosenProvider = quickProviders[agent.id]
+    return compatibleProviders(providers, agent.id).some((provider) => provider.name === chosenProvider) ? [chosenProvider] : []
+  }))] : chosen
   const templateAgents = chosenImage?.managed && chosenImage.recipe.source === "build" ? AGENTS.filter((agent) => chosenImage.recipe.agents.includes(agent.id)) : null
 
-  function chooseAgent(id) {
-    setAgentId(id); setQuickProvider(""); setError(null)
-    if (/^(sandbox|terminal|claude|codex|cursor|opencode|pi|antigravity|copilot|kiro|droid|aider)-\d+$/.test(name)) setName(nextName(new Set((sandboxes ?? []).map((s) => s.name)), id))
+
+  function toggleAgent(id) {
+    const next = agentIds.includes(id) ? agentIds.filter((item) => item !== id) : [...agentIds, id]
+    setAgentIds(next); setError(null)
+    if (next.length !== 1 || !next.includes(openIn)) setOpenIn("shell")
+    setQuickProviders((current) => Object.fromEntries(Object.entries(current).filter(([key]) => next.includes(key))))
+    if (/^(sandbox|terminal|claude|codex|cursor|opencode|pi|antigravity|copilot|kiro|droid|aider)-\d+$/.test(name)) setName(nextName(new Set((sandboxes ?? []).map((s) => s.name)), next.length === 1 ? next[0] : "sandbox"))
   }
 
   React.useEffect(() => () => { preparation.current?.abort() }, [])
@@ -204,7 +211,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       let environment = chosenImage
       if (mode === "quick") {
         setPreparing(true)
-        environment = await prepareQuickTemplate(api, agentId, {
+        environment = await prepareQuickTemplate(api, agentIds, {
           signal: controller.signal, onProgress: setProgress,
           onBuild: (value) => {
             buildName.current = value
@@ -214,7 +221,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       }
       if (controller.signal.aborted) return
       setPreparing(false); setProgress("Creating sandbox…")
-      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, providers: attachedProviders, template, ...(group ? { group } : {}), ...files })
+      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, ...(group ? { group } : {}), ...files })
       toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
@@ -250,33 +257,53 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
             </div>
 
             <TabsContent value="quick" className="grid gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="quick-agent" className="text-xs">Agent</Label>
-                <Select value={agentId} onValueChange={(value) => { if (value) chooseAgent(value) }} disabled={busy}>
-                  <SelectTrigger id="quick-agent" className="w-full text-xs">
-                    <SelectValue>
-                      {selectedAgent ? <img src={selectedAgent.logo} alt="" className="size-4 object-contain" /> : <Terminal className="size-4" aria-hidden="true" />}
-                      {selectedAgent?.name || "Terminal only"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
-                    <SelectItem value="terminal" className="text-xs"><Terminal className="size-4" />Terminal only</SelectItem>
-                    {QUICK_AGENTS.map((agent) => <SelectItem key={agent.id} value={agent.id} className="text-xs"><img src={agent.logo} alt="" className="size-4 object-contain" />{agent.name}</SelectItem>)}
-                  </SelectGroup></SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground">{selectedAgent ? `Installs ${selectedAgent.name} in its own environment.` : "A clean environment with a terminal, Git, and basic tools."}</p>
-              </div>
-              {selectedAgent && connections.length > 0 && <div className="grid gap-1.5">
-                <Label htmlFor="quick-sign-in" className="text-xs">Sign-in</Label>
-                {connections.length > 0 && <Select value={quickProvider} onValueChange={(value) => setQuickProvider(value ?? "")} disabled={busy}>
-                  <SelectTrigger id="quick-sign-in" className="w-full text-xs"><SelectValue>{quickProvider || "Set up after creation"}</SelectValue></SelectTrigger>
-                  <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
-                    <SelectItem value="" className="text-xs">Set up after creation</SelectItem>
-                    {connections.map((provider) => <SelectItem key={provider.name} value={provider.name} className="text-xs">{provider.name}</SelectItem>)}
-                  </SelectGroup></SelectContent>
-                </Select>}
-                <p className="text-[11px] text-muted-foreground">{quickProvider ? "Saved credential will be attached. Connection has not been verified." : agentId === "codex" ? "After connecting, run codex and choose Device Code or provide an API key." : agentAccess.profiles[0]?.authentication || `Configure sign-in or a model provider inside ${selectedAgent.name} after connecting.`}</p>
-              </div>}
+              <fieldset className="min-w-0">
+                <legend className="mb-1.5 text-xs font-medium">Agents</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {QUICK_AGENTS.map((agent) => (
+                    <label key={agent.id} className="relative min-w-0">
+                      <input type="checkbox" checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} disabled={busy} className="peer sr-only" />
+                      <span className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
+                        <img src={agent.logo} alt="" className="size-4 shrink-0 object-contain" />
+                        <span className="min-w-0 flex-1">{agent.name}</span>
+                        {agentIds.includes(agent.id) && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">{selectedAgents.length ? `${selectedAgents.length} selected · installed together in one environment.` : "Select agents, or leave empty for a terminal-only environment."}</p>
+              </fieldset>
+              {selectedAgents.length > 0 && <fieldset className="min-w-0">
+                <legend className="mb-1.5 text-xs font-medium">Open in</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {[{ id: "shell", name: "Shell" }, ...(selectedAgents.length === 1 ? selectedAgents : [])].map((option) => (
+                    <label key={option.id} className="relative min-w-0">
+                      <input type="radio" name="quick-open-in" value={option.id} checked={openIn === option.id} onChange={() => setOpenIn(option.id)} disabled={busy} className="peer sr-only" />
+                      <span className="flex min-h-16 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-3 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
+                        {option.id === "shell" ? <Terminal className="size-5 shrink-0" aria-hidden="true" /> : <img src={option.logo} alt="" className="size-5 shrink-0 object-contain" />}
+                        <span className="min-w-0 flex-1 font-medium">{option.name}</span>
+                        <span aria-hidden="true" className={`flex size-3.5 shrink-0 items-center justify-center rounded-full border ${openIn === option.id ? "border-foreground" : "border-muted-foreground/40"}`}>
+                          {openIn === option.id && <span className="size-1.5 rounded-full bg-foreground" />}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>}
+              {selectedAgents.map((agent) => {
+                const connections = compatibleProviders(providers, agent.id)
+                if (!connections.length) return null
+                return <div key={agent.id} className="grid gap-1.5">
+                  <Label htmlFor={`quick-sign-in-${agent.id}`} className="text-xs">{agent.name} sign-in</Label>
+                  <Select value={quickProviders[agent.id] || ""} onValueChange={(value) => setQuickProviders((current) => ({ ...current, [agent.id]: value ?? "" }))} disabled={busy}>
+                    <SelectTrigger id={`quick-sign-in-${agent.id}`} className="w-full text-xs"><SelectValue>{quickProviders[agent.id] || "Set up after creation"}</SelectValue></SelectTrigger>
+                    <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
+                      <SelectItem value="" className="text-xs">Set up after creation</SelectItem>
+                      {connections.map((provider) => <SelectItem key={provider.name} value={provider.name} className="text-xs">{provider.name}</SelectItem>)}
+                    </SelectGroup></SelectContent>
+                  </Select>
+                </div>
+              })}
             </TabsContent>
             <TabsContent value="template" className="grid gap-4">
               <div className="grid gap-1.5">
@@ -291,6 +318,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 {chosenImage && <p className="text-[11px] text-muted-foreground">{templateAgents ? `Included tools: ${[...templateAgents.map((agent) => agent.name), ...(chosenImage.recipe.customAgents ?? []).map((agent) => agent.name), "Terminal"].join(", ")}` : "Installed tools are not reported by this template."}</p>}
               </div>
             </TabsContent>
+
+
 
             {mode === "template" && <div className="grid gap-1.5">
               <span className="text-xs font-medium">Providers</span>

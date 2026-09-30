@@ -67,3 +67,61 @@ test('cancellation while a build starts cannot continue into readiness', async (
   }, 'codex', { signal: controller.signal, onBuild: (name) => { tracked = name }, wait: () => assert.fail('must not poll') }), { name: 'AbortError' })
   assert.match(tracked, /^q-codex-/)
 })
+test('Shell startup keeps the selected agent installed and does not reuse agent startup', async () => {
+  for (const agent of QUICK_AGENTS) {
+    const shell = quickRecipe(agent.id, 'shell-test', 'shell')
+    assert.deepEqual(shell.agents, [agent.id])
+    assert.equal(shell.command, '')
+    assert.equal(quickRecipe(agent.id).command, agent.command)
+    assert.equal(dockerfileFor(shell), dockerfileFor(quickRecipe(agent.id, 'shell-test')))
+  }
+  assert.equal(matchingQuickTemplate([ready('codex')], 'codex', 'shell'), undefined)
+  let built
+  const api = {
+    imageTemplates: async () => built ? [ready('codex', { name: built.name, recipe: built })] : [ready('codex')],
+    buildImageTemplate: async (recipe) => { built = recipe; return { status: 'building' } },
+  }
+  const result = await prepareQuickTemplate(api, 'codex', { openIn: 'shell', wait: async () => {} })
+  assert.equal(result.recipe.command, '')
+  assert.deepEqual(result.recipe.agents, ['codex'])
+  assert.throws(() => quickRecipe('codex', '', 'custom'), /Choose Shell/)
+})
+test('composed recipes deduplicate and normalize selection order for reuse', () => {
+  const recipe = quickRecipe(['codex', 'claude', 'codex'], 'multi')
+  assert.deepEqual(recipe.agents, ['claude', 'codex'])
+  assert.equal(recipe.command, '')
+  assert.deepEqual(recipeErrors(recipe), {})
+  const saved = { name: 'multi', managed: true, image: 'local:multi', status: 'ready', recipe }
+  assert.equal(matchingQuickTemplate([saved], ['claude', 'codex']), saved)
+  assert.equal(matchingQuickTemplate([saved], ['codex']), undefined)
+  assert.equal(agentAccessRules(recipe).length, 2)
+  assert.match(dockerfileFor(recipe), /@openai\/codex/)
+  assert.match(dockerfileFor(recipe), /install-claude/)
+})
+test('session selection is separate from composed images and validates installed agents', async () => {
+  const { quickSession } = await import('./quick-setup.js')
+  const { templateSession, sessionLaunch } = await import('./sandbox-session.js')
+  const saved = { managed: true, recipe: quickRecipe(['codex', 'cursor']) }
+  for (const id of ['shell', 'codex', 'cursor']) {
+    const session = quickSession(['codex', 'cursor'], id)
+    assert.equal(session, 'shell')
+    assert.equal(templateSession(saved, session), session)
+    assert.deepEqual(sessionLaunch(session, []).command, ['/bin/sleep', 'infinity'])
+  }
+  assert.equal(quickSession(['cursor'], 'cursor'), 'cursor-agent')
+  assert.throws(() => quickSession(['codex'], 'claude'), /selected agent/)
+  assert.throws(() => templateSession(saved, 'claude'), /included/)
+  assert.throws(() => templateSession({ ...saved, managed: false }, 'codex'), /included/)
+  assert.equal(templateSession(saved, undefined), 'shell')
+  assert.deepEqual(quickRecipe([]).agents, [])
+  assert.equal(quickSession([], 'shell'), 'shell')
+})
+
+test('adding a second agent overrides any previous agent session with Shell', async () => {
+  const { quickSession } = await import('./quick-setup.js')
+  assert.equal(quickSession(['codex'], 'codex'), 'codex')
+  assert.equal(quickSession(['codex', 'claude'], 'codex'), 'shell')
+  assert.equal(quickSession(['codex', 'claude'], 'claude'), 'shell')
+  assert.equal(quickSession(['codex', 'claude'], 'shell'), 'shell')
+  assert.equal(quickSession(['codex'], 'shell'), 'shell')
+})
