@@ -269,7 +269,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
               <AlertDialogTitle>Delete {group.name}?</AlertDialogTitle>
               <AlertDialogDescription>
                 {members.length ? `Its ${plural(members.length, "sandbox", "sandboxes")} move to No group and lose the rules aimed at ${group.name}. ` : ""}
-                {aimed.length ? `${plural(aimed.length, "rule")} stop targeting it. ` : ""}The sandboxes themselves are not deleted.
+                {aimed.length ? `${plural(aimed.length, "rule")} ${aimed.length === 1 ? "stops" : "stop"} targeting it. ` : ""}The sandboxes themselves are not deleted.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
