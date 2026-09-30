@@ -210,7 +210,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <TabsList variant="line" aria-label="Sandbox information" className="max-w-full">
                   <TabsTrigger value="overview" className="px-3 text-xs">Overview</TabsTrigger>
                   <TabsTrigger value="rules" className="px-3 text-xs">Rules{detail?.policy && <span className="text-muted-foreground">{rules.length}</span>}</TabsTrigger>
-                  <TabsTrigger value="setups" className="px-3 text-xs">Setups</TabsTrigger>
+                  <TabsTrigger value="setups" className="px-3 text-xs">MCPs &amp; Skills</TabsTrigger>
                   <TabsTrigger value="files" className="px-3 text-xs">Files</TabsTrigger>
                   <TabsTrigger value="activity" className="px-3 text-xs">Activity</TabsTrigger>
                   <TabsTrigger value="details" className="px-3 text-xs">Details</TabsTrigger>

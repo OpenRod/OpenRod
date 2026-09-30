@@ -63,7 +63,7 @@ export function SetupsView({ sandbox = null }) {
           <Button variant="outline" size="sm" className="mt-4" onClick={() => setups.length ? (setQuery(''), setStatus('all')) : setImporting(true)}>{setups.length ? 'Clear filters' : 'Bring my setup'}</Button>
         </div>
         : setups && <BlurFade duration={0.15} offset={0} blur="0px">
-          <Table aria-label="Setups" className="min-w-[740px] text-xs">
+          <Table aria-label="MCPs & Skills" className="min-w-[740px] text-xs">
             <TableHeader><TableRow className="hover:bg-transparent">
               <TableHead scope="col" aria-sort={descending ? 'descending' : 'ascending'} className="h-9 px-4 text-[11px] font-normal text-muted-foreground sm:pl-8"><button className="flex items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDescending(value => !value)}>Name{descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}</button></TableHead>
               {['Source agents', 'MCPs', 'Skills', 'Created'].map(label => <TableHead key={label} scope="col" className="h-9 px-4 text-[11px] font-normal text-muted-foreground">{label}</TableHead>)}
@@ -231,7 +231,7 @@ export function SetupPicker({ value = [], onChange, inherited = [] }) {
       <label className="flex items-start gap-2"><Checkbox aria-label={`Use ${setup.name}`} disabled={inherited.includes(setup.id) || issueCount(setup) > 0} checked={value.includes(setup.id) || inherited.includes(setup.id)} onCheckedChange={(v) => onChange(v ? [...value, setup.id] : value.filter((id) => id !== setup.id))} /><span className="min-w-0 flex-1"><span className="block truncate">{setup.name}{inherited.includes(setup.id) ? ' · From image template' : ''}</span><span className="mt-1 block text-[11px] text-muted-foreground">{count(setup, 'mcp')} MCPs · {count(setup, 'skill')} Skills{issueCount(setup) ? ` · ${issueCount(setup)} need attention` : ''}</span></span></label>
       {issueCount(setup) > 0 && <details className="mt-2 pl-6 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Why can't I select this Setup?</summary><div className="mt-2 space-y-2">{setup.items.filter((item) => item.issues.length).map((item) => <p key={item.id}><span className="font-medium text-foreground">{item.name}:</span> {item.issues.join(' ')}</p>)}<p>Import a new Setup with the compatible items, or package these tools and reconnect their credentials before re-importing.</p></div></details>}
     </div>)}
-    {!items.length && <p className="text-[11px] text-muted-foreground">Import tools from the Setups page to reuse them here.</p>}
+    {!items.length && <p className="text-[11px] text-muted-foreground">Import tools from the MCPs &amp; Skills page to reuse them here.</p>}
     <ErrorMessage>{error}</ErrorMessage>
     {(value.length > 0 || inherited.length > 0) && <p className="text-[11px] leading-relaxed text-muted-foreground">Files are pinned to this revision. No imported commands run during the build. Runtime access and installed executables are checked at launch. The sandbox starts in Shell so you can review Setup status before opening an agent.</p>}
   </div>
