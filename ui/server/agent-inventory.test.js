@@ -103,3 +103,36 @@ test('generic agent command requires a Cursor installation target', async () => 
     assert.ok((await probe()).includes('agent'))
   } finally { await fs.rm(home, { recursive: true, force: true }) }
 })
+
+test('resource probe scopes names to each agent without exposing configuration values', async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-resources-'))
+  try {
+    const put = async (file, contents) => {
+      const target = path.join(home, file)
+      await fs.mkdir(path.dirname(target), { recursive: true })
+      await fs.writeFile(target, contents)
+    }
+    await put('.claude.json', JSON.stringify({ mcpServers: { docs: { url: 'https://private.example', env: { TOKEN: 'secret-value' } }, disabled: { disabled: true } } }))
+    await put('.cursor/mcp.json', JSON.stringify({ mcpServers: { design: { command: 'never-execute-me' } } }))
+    await put('.agents/skills/testing/SKILL.md', 'Secret contents must not leave sandbox')
+    await fs.mkdir(path.join(home, '.codex/skills'), { recursive: true })
+    await fs.symlink(path.join(home, '.agents/skills/testing'), path.join(home, '.codex/skills/testing'))
+    const run = async () => {
+      const { stdout } = await exec('/bin/sh', ['-c', agentProbe], { env: { ...process.env, HOME: home } })
+      assert.doesNotMatch(stdout, /secret-value|private.example|never-execute-me|Secret contents/)
+      const line = stdout.split('\n').find((line) => line.startsWith('openshell-agent-resources:'))
+      assert.ok(line, 'Python resource probe returned a result')
+      return JSON.parse(line.slice('openshell-agent-resources:'.length))
+    }
+    const resources = await run()
+    assert.deepEqual(resources['Claude Code'].mcps.items, [{ name: 'docs', disabled: false }, { name: 'disabled', disabled: true }])
+    assert.deepEqual(resources.Cursor.mcps.items, [{ name: 'design', disabled: false }])
+    assert.deepEqual(resources.Codex.skills.items, [{ name: 'testing' }])
+    assert.deepEqual(resources.Cursor.skills, { status: 'checked', items: [] })
+    await put('.cursor/mcp.json', 'invalid json')
+    assert.equal((await run()).Cursor.mcps.status, 'unavailable')
+    const inventory = createAgentInventory()
+    const client = { sandbox: { exec: async () => output('codex', `openshell-agent-resources:${JSON.stringify(resources)}`) } }
+    assert.deepEqual(agentsOf({ agentInventory: await inventory(client, sandbox) })[0].resources, resources.Codex)
+  } finally { await fs.rm(home, { recursive: true, force: true }) }
+})
