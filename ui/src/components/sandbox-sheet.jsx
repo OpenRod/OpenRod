@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle, Box, Check, Copy, FolderLock, Globe, Play, Square, SquareCode, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, Check, Copy, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -15,7 +15,7 @@ import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { SESSION_LABEL, sessionCommand } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
-import { ownerOf, creatorOf, uptimeOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
+import { ownerOf, uptimeOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
 import { agentsOf, agentInventoryLabel } from "@/lib/agents"
@@ -95,6 +95,19 @@ function OpenInEditor({ name, editors }) {
         </Button>
       ))}
     </div>
+  )
+}
+
+function OpenInTerminal({ name, disabled }) {
+  const [opening, setOpening] = React.useState(false)
+  return (
+    <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={disabled || opening}
+      onClick={async () => {
+        setOpening(true)
+        try { await api.openTerminal(name) } catch (e) { toast.error("Couldn’t open terminal", { description: e.message }) } finally { setOpening(false) }
+      }}>
+      {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" aria-hidden="true" />}Open in terminal
+    </Button>
   )
 }
 
@@ -213,21 +226,20 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
+                    {phase === "ready" && (attachable || (editors.length > 0 && !live.demo)) && (
+                      <Section title="Attach">
+                        <div className="space-y-2">
+                          {!live.demo && <OpenInEditor name={name} editors={editors} />}
+                          {attachable && !live.demo && <OpenInTerminal name={name} />}
+                          {attachable && <CopyCommand command={sessionCommand(sandbox)} />}
+                        </div>
+                      </Section>
+                    )}
                     <Section title="At a glance">
                       <dl className="grid grid-cols-2 gap-4 lg:grid-cols-1">
-                        {[["Owner", ownerOf(sandbox)], ["Created by", creatorOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
+                        {[["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
                     </Section>
-              {phase === "ready" && (attachable || (editors.length > 0 && !live.demo)) && (
-                <Section title="Attach">
-                  <div className="space-y-2">
-                    {!live.demo && <OpenInEditor name={name} editors={editors} />}
-                    {attachable && <CopyCommand command={sessionCommand(sandbox)} />}
-                  </div>
-                  {sandbox.labels?.[SESSION_LABEL] && <p className="mt-2 text-xs text-muted-foreground">Exiting this session keeps the sandbox running. Use Stop when you’re done.</p>}
-                </Section>
-              )}
-
               {sandbox.problem && statusOf(phase) === "error" && (
                 <div className="rounded-md border border-red-200 bg-red-50/60 p-3">
                   <p className="flex items-center gap-1.5 text-xs font-medium text-red-700">
@@ -313,7 +325,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               <TabsContent value="details" className="min-h-0 space-y-5 overflow-y-auto p-5">
               <dl className="grid grid-cols-1 gap-5  sm:grid-cols-2">
                 {[
-                  ["Owner", ownerOf(sandbox)], ["Created by", creatorOf(sandbox)],
+                  ["Owner", ownerOf(sandbox)],
                   ["Uptime", uptimeOf(sandbox, now)],
                   ["Image", imageName(sandbox.image, sandbox.imageTemplateName), true],
                   ...(sandbox.image && imageName(sandbox.image, sandbox.imageTemplateName) !== sandbox.image ? [["Image reference", sandbox.image, true]] : []),
