@@ -1,4 +1,3 @@
-import { agentAccessRules } from '../shared/agent-access.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -8,14 +7,17 @@ import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { imageTemplateLabels, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { SESSION_LABEL, sessionCommand, sessionLaunch } from '../src/lib/sandbox-session.js'
+import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
+import { PROJECT_LABEL, SESSION_LABEL, isSession, sessionCommand, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
-import { imageTemplateRoute, importImageArchive, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
+import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
+import { editorRoute } from './editor.js'
+import { agentAccessRules } from '../shared/agent-access.js'
+import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
 
 // These routes act with the operator's gateway certificate. A loopback Host
 // header alone is not proof of a local caller when Vite is bound to a LAN
@@ -118,51 +120,61 @@ async function sandboxDetail(name) {
 
 async function createSandbox(input) {
   const { client } = await gateway()
-  let imageLabels = {}
+  // An image template is an OpenShell sandbox template: the gateway supplies
+  // its image and environment; the console adds how the sandbox starts.
+  const saved = input.imageTemplate ? await imageTemplateForLaunch(String(input.imageTemplate)) : null
+  const imageLabels = saved ? { [IMAGE_TEMPLATE_NAME]: saved.name } : {}
+  // A built template's agents get their sign-in and model destinations from
+  // the reviewed table in shared/agent-access.js, never from the recipe.
   let agentRules = []
-  if (input.imageTemplate) {
-    const saved = await imageTemplateForLaunch(String(input.imageTemplate))
-    try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) }
-    imageLabels = imageTemplateLabels(saved)
-    // A content-addressed image cannot silently drift when a tag is rebuilt.
-    input = { ...input, image: saved.inspection.imageId, session: saved.recipe.command?.trim() === 'claude' ? 'claude' : !saved.recipe.command?.trim() ? 'shell' : null, command: saved.recipe.command ? ['/bin/bash', '-lc', saved.recipe.command] : [], environment: Object.fromEntries(saved.recipe.environment.map((e) => [e.name, e.value])) }
+  if (saved?.managed) { try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) } }
+  if (saved) {
+    const start = saved.recipe.command.trim()
+    input = { ...input, image: '', session: !start ? 'shell' : start !== 'shell' && isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
   const providers = Array.isArray(input.providers) ? input.providers.map(String) : []
   const command = Array.isArray(input.command) ? input.command.map(String).filter(Boolean) : []
   const session = input.session ?? (command.length === 1 && command[0] === 'claude' ? 'claude' : command.length === 0 ? 'shell' : null)
-  if (session != null && !['claude', 'shell'].includes(session)) throw fail('Unknown session type.')
+  if (session != null && !isSession(session)) throw fail('Unknown session type.')
   const launch = sessionLaunch(session, command)
-  if (!NAME.test(name)) throw fail('Use lowercase letters, digits and dashes for the name.')
+  // OpenShell caps sandbox names at 19 characters.
+  if (!NAME.test(name) || name.length > 19) throw fail('Use lowercase letters, digits and dashes for the name, up to 19 characters.')
   if (image && !IMAGE.test(image)) throw fail('That image reference is not valid.')
   if (!providers.every((p) => NAME.test(p))) throw fail('Unknown provider name.')
   if (command.length > 32 || command.some((part) => part.length > 512)) throw fail('Command is too long.')
   // Files, Landlock and process identity are fixed at creation, and so is the
   // group label. The whole policy (template + organization + group rules) is
   // resolved here from stored policy, never accepted raw from the browser.
-  const plan = await planSandbox({ group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null, agentRules })
+  const plan = await planSandbox({ name: String(input.name ?? ''), group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null, agentRules })
+  // A folder or repository to start from is checked before anything is created.
+  const seed = await planSeed({ folder: input.folder ? String(input.folder) : null, repository: input.repository ? String(input.repository) : null })
   const template = plan.template
-  const labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels() }
+  const labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels(), ...(seed?.project ? { [PROJECT_LABEL]: seed.project } : {}) }
   await enforcePolicyOnly(client)
-  const ref = await client.sandbox.create({
+  const spec = {
     policy: plan.policy,
     labels,
     name,
-    ...(image ? { image } : {}),
     providers,
     command: launch.command,
-    ...(input.imageTemplate ? { environment: input.environment } : {}),
     // Interactive sessions run through exec, independently of the main process.
     tty: launch.tty,
-  })
+  }
+  const ref = saved
+    ? await client.sandbox.createFromTemplate({ ...spec, workloadTemplate: saved.name })
+    : await client.sandbox.create({ ...spec, ...(image ? { image } : {}) })
   // Services a template opens at start go through the same path as opening
   // one by hand, so they get the same auto-close deadline.
   const opened = []
   for (const door of template?.ingress ?? []) {
     try { opened.push({ ...door, ...(await expose({ sandbox: ref.name, name: door.name, port: door.port, closeAfterMinutes: door.closeAfterMinutes ?? null })) }) } catch { /* a door that failed to open is simply missing from `opened` */ }
   }
-  return { name: ref.name, phase: ref.phase, opened, labels }
+  // Files arrive once the sandbox is ready, as with `sandbox create --upload`.
+  // Console sessions start through exec, so an agent opened later finds them.
+  if (seed) startSeed(ref.name, seed)
+  return { name: ref.name, phase: ref.phase, opened, labels, seed: seed ? { kind: seed.kind, source: seed.source, dest: seed.dest } : null }
 }
 
 async function lifecycle(name, action) {
@@ -307,7 +319,10 @@ export function openshellApi() {
       else server.httpServer?.once('listening', () => hub.start())
       server.httpServer?.once('close', () => { hub.stop(); delivery.stop(); store.close() })
       const stopSweeper = startSweeper((message) => server.config.logger.info(`[ingress] ${message}`))
-      const stopOrgSweeper = startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
+      // Several consoles can share one gateway during development. Each one's
+      // organization pass re-applies its own stored policy to every sandbox, so
+      // only one of them may run it. Ingress deadlines are per console and stay on.
+      const stopOrgSweeper = process.env.OPENSHELL_CONSOLE_SWEEP === '0' ? () => {} : startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
       server.httpServer?.once('close', () => { stopSweeper(); stopOrgSweeper() })
       server.middlewares.use('/api/os', async (req, res) => {
         if (!isLocalApiRequest(req)) { res.writeHead(403).end(); return }
@@ -355,13 +370,15 @@ export function openshellApi() {
               }
               return send(res, 200, store.query(options))
             }
-            const routed = (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
+            if (parts[0] === 'downloads' && parts.length === 2) return serveDownload(res, parts[1])
+            const routed = (await editorRoute('GET', parts)) ?? (await filesRoute('GET', parts, undefined, url)) ?? (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
             if (routed !== undefined) return send(res, 200, routed)
             return send(res, 404, { error: 'Not found' })
           }
-          if (req.method === 'POST' && parts[0] === 'image-templates' && parts.length === 3 && parts[2] === 'archive') {
+          // One dropped file per request, streamed to a staging folder.
+          if (req.method === 'POST' && parts[0] === 'files' && parts[2] === 'uploads' && parts.length === 4 && NAME.test(parts[1])) {
             if (req.headers.origin !== `http://${req.headers.host}` || req.headers['content-type'] !== 'application/octet-stream' || req.headers['x-openshell-console'] !== '1') return send(res, 403, { error: 'Request rejected' })
-            return send(res, 200, await importImageArchive(req, parts[1]))
+            return send(res, 200, await receiveUpload(req, parts[1], parts[3], url.searchParams.get('path')))
           }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
           const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : 65536)
@@ -383,7 +400,7 @@ export function openshellApi() {
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          const routed = (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await editorRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
         } catch (error) {

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { WORKSPACE, gateway, iso, policyView, providerView, sandboxView } from './gateway.js'
-import { blockedBy, isManaged, readOrg } from './org.js'
+import { blockedBy, isManaged, managedOpsFor, readOrg } from './org.js'
 
 const exec = promisify(execFile)
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
@@ -148,10 +148,10 @@ async function revisionPolicy(sandbox, version) {
 function mergeOp(op) {
   const ruleName = String(op.ruleName ?? '')
   if (op.kind !== 'addRule' && !RULE_NAME.test(ruleName)) throw fail('Unknown rule.')
-  // Organization and group rules are changed where they are defined, so one
-  // sandbox cannot drift from its group.
+  // Policy and organization rules are changed where they are defined, so one
+  // sandbox cannot drift from the policies that apply to it.
   const target = op.kind === 'addRule' ? String(op.rule?.name ?? '') : ruleName
-  if (isManaged(target)) throw fail('This rule comes from organization or group policy. Change it on the Organization page.', 403)
+  if (isManaged(target)) throw fail('This rule comes from an egress policy or the organization. Change it on the Egress or Organization page.', 403)
   switch (op.kind) {
     case 'addRule': {
       const { name, rule } = ruleToProto(op.rule)
@@ -195,9 +195,13 @@ async function applyOps(sandbox, ops) {
     if (hit) throw fail(`${hit.host} is blocked by organization policy (${hit.pattern}).`, 403)
   }
   const { client } = await gateway()
+  // A block covers every port the sandbox opens, so a rule that opens a new
+  // port takes the recomputed blocks along in the same revision.
+  const opened = ops.flatMap((op) => (op.kind === 'addRule' ? (op.rule?.endpoints ?? []).flatMap((e) => e.ports ?? []) : ['addAllow', 'addDeny'].includes(op.kind) ? op.ports ?? [] : [])).map(Number)
+  const managed = opened.some((p) => ![443, 80].includes(p)) ? await managedOpsFor(client, sandbox, opened) : []
   const response = await client.raw.updateConfig({
     sandbox, workspaceScope: WORKSPACE, global: false,
-    mergeOperations: ops.map(mergeOp),
+    mergeOperations: [...ops.map(mergeOp), ...managed],
     annotations: { 'console.openshell/change': ops.map((o) => `${o.kind}:${o.ruleName ?? o.rule?.name ?? ''}`).join(',').slice(0, 200) },
     requestId: randomUUID(),
   })
@@ -456,7 +460,14 @@ export const BUILTIN_TEMPLATES = [
     rules: [
       { name: 'github-read', binaries: ['/usr/lib/git-core/git-remote-http', '/usr/lib/git-core/git-remote-https', '/usr/local/bin/claude'],
         endpoints: [
-          { host: 'github.com', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
+          // git clone and fetch POST to git-upload-pack, so GET-only would block them.
+          // Pushing POSTs to git-receive-pack, which stays denied.
+          { host: 'github.com', ports: [443], protocol: 'rest', enforcement: 'enforce',
+            allow: [
+              { method: 'GET', path: '/**' }, { method: 'HEAD', path: '/**' }, { method: 'OPTIONS', path: '/**' },
+              { method: 'POST', path: '/*/*/git-upload-pack' },
+            ],
+            deny: [{ method: '*', path: '/*/*/git-receive-pack' }] },
           { host: 'api.github.com', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
           { host: 'codeload.github.com', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
         ] },

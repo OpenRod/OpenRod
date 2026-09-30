@@ -5,7 +5,7 @@ import { planSandbox, addAgentAccess } from './org.js'
 import { ruleToProto } from './policy.js'
 
 test('Cursor agent transport retains scoped TLS passthrough through launch composition', async () => {
-  const rules = agentAccessRules({ source: 'wizard', agents: ['cursor'] })
+  const rules = agentAccessRules({ source: 'build', agents: ['cursor'] })
   const { policy } = await planSandbox({ template: 'locked-down', agentRules: rules })
   const rule = policy.networkPolicies['agent-cursor']
   const agent = rule.endpoints.find(e => e.host === 'agentn.global.api5.cursor.sh')
@@ -18,7 +18,7 @@ test('Cursor agent transport retains scoped TLS passthrough through launch compo
   assert.throws(() => ruleToProto({ name: 'invalid', binaries: ['/usr/bin/node'], endpoints: [{ host: 'example.com', ports: [443], protocol: 'rest', access: 'read-write', tlsSkip: true }] }), /TLS passthrough requires plain TCP/)
 })
 
-const recipe = { source: 'wizard', agents: ['claude', 'codex', 'opencode'] }
+const recipe = { source: 'build', agents: ['claude', 'codex', 'opencode'] }
 test('multi-agent image gets additive access with a locked-down preset', async () => {
   const { policy } = await planSandbox({ template: 'locked-down', agentRules: agentAccessRules(recipe) })
   assert.deepEqual(Object.keys(policy.networkPolicies), ['agent-claude', 'agent-codex', 'agent-opencode'])
@@ -35,7 +35,7 @@ test('runtime requirements cannot be replaced by recipe-supplied policy or unkno
   assert.equal(rules.length, 1)
   assert(rules[0].endpoints.every(e => e.host !== '*'))
   assert.throws(() => agentAccessRules({ ...recipe, agents: ['unreviewed'] }), /not configured/)
-  assert.deepEqual(agentAccessFor({ source: 'local', agents: ['opencode'] }).profiles, [])
+  assert.deepEqual(agentAccessFor({ source: 'image', agents: ['opencode'] }).profiles, [])
 })
 test('ordinary sandboxes retain their selected policy; agent requirements expose blocked destinations', async () => {
   const { policy } = await planSandbox({ template: 'locked-down' })
@@ -48,7 +48,7 @@ test('ordinary sandboxes retain their selected policy; agent requirements expose
  test('every offered agent has automatic, scoped access and composes at launch', async () => {
   const { AGENTS } = await import('../src/lib/image-templates.js')
   for (const agent of AGENTS) {
-    const selected = { source: 'wizard', agents: [agent.id] }
+    const selected = { source: 'build', agents: [agent.id] }
     assert.deepEqual(agentAccessFor(selected).unsupported, [], agent.name)
     const rules = agentAccessRules(selected)
     assert.equal(rules.length, 1)

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle, Box, Check, Copy, FolderLock, Globe, Play, Square, SquareTerminal, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -11,17 +11,19 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
+import { CopyCommand } from "@/components/copy-command"
+import { FilesView } from "@/components/files-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { SESSION_LABEL, sessionCommand } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
-import { ownerOf, uptimeOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
+import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
 import { agentsOf, agentInventoryLabel } from "@/lib/agents"
 import { AgentList } from "@/components/agent-label"
 import { Perimeter } from "@/components/perimeter"
-import { hostOf, sourceOf } from "@/lib/policy-sources"
+import { displayName, hostOf, sourceOf } from "@/lib/policy-sources"
 
 function Section({ title, icon: Icon, children, aside, className }) {
   return (
@@ -35,15 +37,52 @@ function Section({ title, icon: Icon, children, aside, className }) {
   )
 }
 
-function CopyCommand({ command }) {
-  const [copied, setCopied] = React.useState(false)
+// Installed editors don't change while the console is open, so ask once, and
+// keep retrying while the sheet is open if that first request fails.
+let editorsRequest
+function useEditors() {
+  const [editors, setEditors] = React.useState([])
+  React.useEffect(() => {
+    let cancelled = false
+    let timer
+    const load = () => {
+      editorsRequest ??= api.editors().then((list) => list.filter((editor) => editor.installed))
+      editorsRequest.then((list) => { if (!cancelled) setEditors(list) })
+        .catch(() => { editorsRequest = undefined; if (!cancelled) timer = setTimeout(load, 3000) })
+    }
+    load()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [])
+  return editors
+}
+
+// Same as `openshell sandbox connect --editor`: OpenShell adds its SSH config
+// and the editor connects over Remote-SSH, so files open in place.
+function OpenInEditor({ name, editors }) {
+  const [opening, setOpening] = React.useState(null)
+  async function open(editor) {
+    setOpening(editor.id)
+    try {
+      await api.openEditor(name, editor.id)
+      toast.success(`Opening ${name} in ${editor.label}`)
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setOpening(null)
+    }
+  }
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 py-1.5 pr-1.5 pl-3">
-      <code className="min-w-0 flex-1 truncate font-mono text-[11px]">{command}</code>
-      <Button variant="ghost" size="icon-sm" aria-label="Copy command"
-        onClick={async () => { await navigator.clipboard.writeText(command); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
-        {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
-      </Button>
+    <div className="flex flex-col gap-1.5">
+      {editors.map((editor) => (
+        <Button key={editor.id} variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(opening)}
+          title="Connects over SSH through OpenShell. The first time, OpenShell adds one Include line to ~/.ssh/config."
+          onClick={() => open(editor)}>
+          {opening === editor.id ? <Spinner className="size-3.5" />
+            : editor.id === "cursor" ? <img src="/logos/cursor.svg" alt="" aria-hidden="true" className="size-3.5" draggable={false} />
+            : <SquareCode className="size-3.5" aria-hidden="true" />}
+          Open in {editor.label}
+        </Button>
+      ))}
     </div>
   )
 }
@@ -51,17 +90,18 @@ function CopyCommand({ command }) {
 function OpenInTerminal({ name, disabled }) {
   const [opening, setOpening] = React.useState(false)
   return (
-    <Button variant="outline" size="sm" className="mt-2 w-full" disabled={disabled || opening}
+    <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={disabled || opening}
       onClick={async () => {
         setOpening(true)
         try { await api.openTerminal(name) } catch (e) { toast.error("Couldn’t open terminal", { description: e.message }) } finally { setOpening(false) }
       }}>
-      {opening ? <Spinner /> : <SquareTerminal />}Open in terminal
+      {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" aria-hidden="true" />}Open in terminal
     </Button>
   )
 }
 
-const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules" }
+const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules", blocked: "blocked" }
+const RULE_TAG = { secret: "from provider", policy: "policy", org: "blocked everywhere", group: "inherited", agent: "agent defaults", own: "rule" }
 
 export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const context = useLive()
@@ -73,6 +113,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const editors = useEditors()
   const summary = live.sandboxes?.find((s) => s.name === name)
 
   // Re-read the full record whenever the live list reports a change to it:
@@ -115,7 +156,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const allowed = React.useMemo(() => {
     const hosts = new Map()
     for (const rule of detail?.policy?.rules ?? []) for (const endpoint of rule.endpoints) {
-      if (!hosts.has(endpoint.host)) hosts.set(endpoint.host, { host: endpoint.host, source: sourceOf(rule.key) })
+      if (!endpoint.blocked && !hosts.has(endpoint.host)) hosts.set(endpoint.host, { host: endpoint.host, source: sourceOf(rule.key) })
     }
     return [...hosts.values()]
   }, [detail])
@@ -133,6 +174,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   }, [scopedEvents])
   const agents = agentsOf(sandbox)
   const phase = sandbox?.phase
+  const attachable = Boolean(sandbox?.tty || sandbox?.labels?.[SESSION_LABEL])
   const rules = detail?.policy?.rules ?? []
 
   return (
@@ -148,7 +190,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
             </DialogTitle>
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="mr-1 font-sans font-medium text-foreground">{detail?.policy ? allowed.length : "-"}</strong>allowed hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{denied.length}</strong>blocked hosts</span></div>
             </div>
-            <DialogDescription className="sr-only">Sandbox access graph, details, rules, and connection activity.</DialogDescription>
+            <DialogDescription className="sr-only">Sandbox access graph, details, rules, files, and connection activity.</DialogDescription>
           </DialogHeader>
           {error && <p role="alert" className="shrink-0 border-b px-5 py-2 text-xs text-destructive">{error}</p>}
           {sandbox ? (
@@ -157,6 +199,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <TabsList variant="line" aria-label="Sandbox information" className="max-w-full">
                   <TabsTrigger value="overview" className="px-3 text-xs">Overview</TabsTrigger>
                   <TabsTrigger value="rules" className="px-3 text-xs">Rules{detail?.policy && <span className="text-muted-foreground">{rules.length}</span>}</TabsTrigger>
+                  <TabsTrigger value="files" className="px-3 text-xs">Files</TabsTrigger>
                   <TabsTrigger value="activity" className="px-3 text-xs">Activity</TabsTrigger>
                   <TabsTrigger value="details" className="px-3 text-xs">Details</TabsTrigger>
                 </TabsList>
@@ -173,15 +216,18 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && (sandbox.tty || sandbox.labels?.[SESSION_LABEL]) && (
+                    {phase === "ready" && (attachable || (editors.length > 0 && !live.demo)) && (
                       <Section title="Attach">
-                        <CopyCommand command={sessionCommand(sandbox)} />
-                        <OpenInTerminal name={sandbox.name} disabled={live.demo} />
+                        <div className="space-y-2">
+                          {!live.demo && <OpenInEditor name={name} editors={editors} />}
+                          {attachable && !live.demo && <OpenInTerminal name={name} />}
+                          {attachable && <CopyCommand command={sessionCommand(sandbox)} />}
+                        </div>
                       </Section>
                     )}
                     <Section title="At a glance">
                       <dl className="grid grid-cols-2 gap-4 lg:grid-cols-1">
-                        {[["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
+                        {[["Status", <span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} aria-hidden="true" />{PHASE_LABEL[phase] ?? "Unknown"}</span>], ["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
                     </Section>
               {sandbox.problem && statusOf(phase) === "error" && (
@@ -203,7 +249,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               </TabsContent>
               <TabsContent value="rules" className="min-h-0 space-y-6 overflow-y-auto p-5">
               <Section title="Network rules" icon={Globe}
-                aside={<button onClick={() => { try { sessionStorage.setItem("egress-scope", name) } catch { /* optional */ } onClose(); onNavigate("egress") }}
+                aside={<button onClick={() => { try { sessionStorage.setItem("egress-sandbox", name) } catch { /* optional */ } onClose(); onNavigate("egress") }}
                   className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Edit</button>}>
                 {!detail?.policy ? <p className="text-sm text-muted-foreground">{live.demo ? "Policy data is unavailable in this preview." : error ? "Rules could not be loaded. Close and reopen to retry." : detail ? "No policy reported." : "Loading rules…"}</p>
                   : rules.length === 0 ? <p className="text-[11px] text-muted-foreground">No rules. All outbound denied.</p>
@@ -212,13 +258,13 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                       {rules.map((rule) => (
                         <li key={rule.key} className="px-3 py-2">
                           <p className="flex items-center gap-2 text-[11px]">
-                            <span className="truncate font-mono font-medium">{rule.fromProvider ? rule.key.replace(/^_provider_/, "").replace(/_/g, "-") : rule.name}</span>
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{sourceOf(rule.key) === "agent" ? "Agent defaults" : rule.fromProvider ? "from provider" : "rule"}</span>
+                            <span className="truncate font-mono font-medium">{sourceOf(rule.key) === "own" ? rule.name : displayName(rule.key)}</span>
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{RULE_TAG[sourceOf(rule.key)]}</span>
                           </p>
                           <ul className="mt-1.5 space-y-0.5">
                             {rule.endpoints.map((endpoint) => (
                               <li key={`${endpoint.host}:${endpoint.port}`} className="flex items-center gap-2 font-mono text-[11px]">
-                                <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+                                <span className={`size-1.5 shrink-0 rounded-full ${endpoint.blocked ? "bg-red-500" : "bg-emerald-500"}`} aria-hidden="true" />
                                 <span className="min-w-0 flex-1 truncate">{endpoint.host}{endpoint.port ? `:${endpoint.port}` : ""}</span>
                                 <span className="shrink-0 text-[10px] text-muted-foreground">{ACCESS_LABEL[endpoint.access] ?? endpoint.access}{endpoint.tlsSkip ? " · TLS passthrough" : ""}{endpoint.protocol !== "tcp" && endpoint.enforcement === "audit" ? " · audit only" : ""}</span>
                               </li>
@@ -251,6 +297,9 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               )}
 
               </TabsContent>
+              <TabsContent value="files" className="flex min-h-0 flex-col">
+                <FilesView sandbox={sandbox} demo={live.demo} />
+              </TabsContent>
               <TabsContent value="activity" className="min-h-0 space-y-6 overflow-y-auto p-5">
               <Section title="Connection activity" aside={<div className="flex gap-1">{[15, 60].map((value) => <button key={value} onClick={() => setMinutes(value)} aria-pressed={minutes === value} className={`rounded px-2 py-1 text-xs ${minutes === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-muted"}`}>{value === 15 ? "15m" : "1h"}</button>)}</div>}>
                 <div className="rounded-lg border border-border p-4"><EgressChart points={points} height={100} title="Outbound decisions per minute" /></div>
@@ -270,7 +319,6 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               <dl className="grid grid-cols-1 gap-5  sm:grid-cols-2">
                 {[
                   ["Owner", ownerOf(sandbox)],
-                  ["Uptime", uptimeOf(sandbox, now)],
                   ["Image", imageName(sandbox.image, sandbox.imageTemplateName), true],
                   ...(sandbox.image && imageName(sandbox.image, sandbox.imageTemplateName) !== sandbox.image ? [["Image reference", sandbox.image, true]] : []),
                   ["Command", commandText(sandbox.command), true],

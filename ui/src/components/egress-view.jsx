@@ -1,7 +1,7 @@
 import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
-  AlertTriangle, ArrowLeft, ArrowUpRight, Box, Building2, ChevronDown, ChevronRight, FolderLock, Globe2, KeyRound, Network, Plus, RefreshCw, RotateCcw, Search, ShieldOff, Trash2, Users, X,
+  AlertTriangle, ArrowLeft, ArrowUpRight, Box, Building2, ChevronDown, ChevronRight, FolderLock, Globe2, KeyRound, Network, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, ShieldOff, Trash2, Users, X,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -18,11 +18,13 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { RuleEditor } from "@/components/rule-editor"
+import { BlockedHostsDialog, PolicyDialog, appliesTo, appliesToText, blockPatterns, newPolicy } from "@/components/egress-policies"
 import { HostTile } from "@/components/perimeter"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
-import { styleOf } from "@/lib/sandboxes"
+import { GROUP_LABEL, styleOf } from "@/lib/sandboxes"
+import { hostMatches } from "@/lib/egress"
 import { SOURCE, SOURCE_ORDER, displayName, hostOf, isIp, portOf, program, sourceOf } from "@/lib/policy-sources"
 import { cn } from "@/lib/utils"
 
@@ -33,9 +35,9 @@ const REVISION = {
   superseded: { label: "Superseded", dot: "bg-stone-300", cls: "bg-muted text-muted-foreground border-border" },
   unspecified: { label: "Unknown", dot: "bg-stone-200", cls: "bg-muted text-muted-foreground border-border" },
 }
-const ACCESS_LABEL = { "read-only": "Read only", "read-write": "Read & write", full: "Any request", custom: "Specific requests", connect: "Connection", none: "No access" }
+const ACCESS_LABEL = { "read-only": "Read only", "read-write": "Read & write", full: "Any request", custom: "Specific requests", connect: "Connection", none: "No access", blocked: "Blocked" }
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "*"]
-const ICON = { own: Globe2, agent: Box, org: Building2, group: Users, secret: KeyRound }
+const ICON = { own: Globe2, agent: Box, org: Building2, group: Users, policy: ShieldCheck, secret: KeyRound }
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
 const slug = (host) => host.replace(/^\*\*?\./, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 56)
 
@@ -81,6 +83,7 @@ function Coverage({ n, total }) {
 const DEST_COLS = "grid-cols-[minmax(0,2fr)_minmax(0,1fr)_8rem_7rem_5rem_1rem]"
 const BLOCK_COLS = "grid-cols-[minmax(0,1.6fr)_7.5rem_5rem_minmax(0,1fr)_13.5rem]"
 const BOX_COLS = "grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_8rem_5rem_1rem]"
+const POLICY_COLS = "grid-cols-[minmax(0,1.1fr)_4.5rem_minmax(0,1.5fr)_minmax(0,1fr)_7.5rem_1rem]"
 
 function DestinationRow({ d, total, onOpen }) {
   const [open, setOpen] = React.useState(false)
@@ -142,7 +145,6 @@ function DestinationRow({ d, total, onOpen }) {
 }
 
 function BlockedRow({ b, onDecide }) {
-  const canRule = b.programs.size > 0
   return (
     <li className={cn("grid items-center gap-4 px-6 py-2", BLOCK_COLS)}>
       <span className="flex min-w-0 items-center gap-3">
@@ -163,8 +165,8 @@ function BlockedRow({ b, onDecide }) {
           <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Allow {b.host}</DropdownMenuLabel>
-              <DropdownMenuItem disabled={!canRule} onClick={() => onDecide("allow-org", b)}>
-                <Building2 />Everywhere<span className="ml-auto text-[11px] text-muted-foreground">all sandboxes</span>
+              <DropdownMenuItem onClick={() => onDecide("allow-org", b)}>
+                <Building2 />Every sandbox<span className="ml-auto text-[11px] text-muted-foreground">new policy</span>
               </DropdownMenuItem>
               {b.sandboxes.size === 1 && (
                 <DropdownMenuItem onClick={() => onDecide("allow-one", b)}>
@@ -199,11 +201,68 @@ function ColumnHead({ className, children }) {
   return <div className={cn("sticky top-0 z-10 grid h-9 items-center gap-4 border-b border-border bg-muted px-6 text-xs font-medium text-muted-foreground", className)}>{children}</div>
 }
 
-function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefresh }) {
+function ActionPill({ action }) {
+  return action === "block"
+    ? <span className="w-fit rounded-full border border-red-200 bg-red-50 px-2 py-px text-[11.5px] text-red-700">Block</span>
+    : <span className="w-fit rounded-full border border-emerald-600/20 bg-emerald-50 px-2 py-px text-[11.5px] text-emerald-800">Allow</span>
+}
+
+function Hosts({ hosts }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="truncate font-mono text-[11px] text-muted-foreground" title={hosts.join("\n")}>{hosts.slice(0, 3).join(", ")}</span>
+      {hosts.length > 3 && <span className="shrink-0 text-[11px] text-faint">+{hosts.length - 3}</span>}
+    </span>
+  )
+}
+
+// One row per egress policy, with how many of the sandboxes it covers
+// already enforce it. The shared blocked hosts sit on top, since they beat
+// every policy.
+function PolicyRows({ policies, org, sandboxes, groups, onEdit, onEditBlocked }) {
+  const blocked = org?.org?.blocked ?? []
+  return (
+    <>
+      <ColumnHead className={POLICY_COLS}><span>Policy</span><span>Action</span><span>Destinations</span><span>Applies to</span><span>Enforced</span><span /></ColumnHead>
+      <ul className="divide-y divide-border/60">
+        {blocked.length > 0 && (
+          <li>
+            <button onClick={onEditBlocked} className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", POLICY_COLS)}>
+              <span className="flex min-w-0 items-center gap-2.5"><ShieldOff aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">Blocked everywhere</span></span>
+              <ActionPill action="block" />
+              <Hosts hosts={blocked} />
+              <span className="truncate text-xs text-muted-foreground">Every sandbox · beats every policy</span>
+              <span className="text-[12px] text-faint">Always</span>
+              <ChevronRight className="size-3.5 text-faint" aria-hidden="true" />
+            </button>
+          </li>
+        )}
+        {policies.map((p) => {
+          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, group: s.labels?.[GROUP_LABEL] ?? null }))
+          const enforced = targets.filter((s) => s.status === "loaded" && s.rules.some((r) => r.key === `egress_${p.id}`)).length
+          return (
+            <li key={p.id}>
+              <button onClick={() => onEdit(p)} className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", POLICY_COLS)}>
+                <span className="flex min-w-0 items-center gap-2.5"><ShieldCheck aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">{p.name}</span></span>
+                <ActionPill action={p.action} />
+                <Hosts hosts={p.destinations} />
+                <span className="truncate text-xs text-muted-foreground">{appliesToText(p, groups) ?? <span className="text-faint">Not applied</span>}</span>
+                {targets.length ? <Coverage n={enforced} total={targets.length} /> : <span className="text-[12px] text-faint">No sandboxes</span>}
+                <ChevronRight className="size-3.5 text-faint" aria-hidden="true" />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
+}
+
+function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
   const [sourceFilter, setSourceFilter] = React.useState("all")
   const [query, setQuery] = React.useState("")
   const [limit, setLimit] = React.useState(100)
-  const [view, setView] = React.useState("destinations")
+  const [view, setView] = React.useState("policies")
   const [now, setNow] = React.useState(Date.now)
   const search = React.useRef(null)
   const scroll = React.useRef(null)
@@ -219,6 +278,8 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
   const points = React.useMemo(() => bucketEgress(events, 15, now), [events, now])
   const sandboxes = fleet.sandboxes
   const total = sandboxes.length
+  const policies = org?.policies ?? []
+  const groups = org?.groups ?? []
 
   const { destinations, blocked, perSandbox } = React.useMemo(() => {
     const dest = new Map()
@@ -231,6 +292,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
         const src = sourceOf(r.key)
         counts[src] = (counts[src] ?? 0) + 1
         for (const e of r.endpoints) {
+          if (e.blocked) continue
           hosts.add(e.host)
           const d = dest.get(e.host) ?? { host: e.host, sources: new Set(), access: new Set(), ports: new Set(), sandboxes: new Set(), grants: [], hits: 0, hitsBySandbox: new Map() }
           d.sources.add(src); d.access.add(e.access); e.ports.forEach((p) => d.ports.add(p)); d.sandboxes.add(s.name)
@@ -261,10 +323,11 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       block.set(host, b)
       const p = perSandbox.get(e.sandbox); if (p) p.blocked += 1
     }
-    const decided = new Set(org?.org?.blocked ?? [])
+    // Hosts a block already decides are not waiting for anyone.
+    const decided = blockPatterns([...(org?.org?.blocked ?? []), ...(org?.policies ?? []).filter((p) => p.action === "block").flatMap((p) => p.destinations)])
     return {
       destinations: [...dest.values()].sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.hits - a.hits || a.host.localeCompare(b.host)),
-      blocked: [...block.values()].filter((b) => !decided.has(b.host)).sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.attempts - a.attempts),
+      blocked: [...block.values()].filter((b) => !decided.some((pattern) => hostMatches(pattern, b.host))).sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.attempts - a.attempts),
       perSandbox,
     }
   }, [sandboxes, events, org])
@@ -277,8 +340,11 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
 
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
-  const count = view === "destinations" ? destinationCount : view === "blocked" ? filteredBlocked.length : filteredBoxes.length
-  const allCount = view === "destinations" ? destinations.length : view === "blocked" ? blocked.length : total
+  // Opened for one sandbox: only the policies that reach it.
+  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, group: sandboxes.find((s) => s.name === forSandbox)?.labels?.[GROUP_LABEL] ?? null })
+  const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, groups)].join(" ").toLowerCase().includes(needle))
+  const count = view === "policies" ? filteredPolicies.length : view === "destinations" ? destinationCount : view === "blocked" ? filteredBlocked.length : filteredBoxes.length
+  const allCount = view === "policies" ? policies.length : view === "destinations" ? destinations.length : view === "blocked" ? blocked.length : total
   const filtering = Boolean(query || (view === "destinations" && sourceFilter !== "all"))
   const clear = () => { setQuery(""); setSourceFilter("all") }
 
@@ -286,7 +352,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 px-4 pt-4 pb-3 sm:px-6">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Egress inventory">
-          {[{ id: "destinations", label: "Destinations", count: destinations.length }, { id: "blocked", label: "Blocked hosts", count: blocked.length, dot: "bg-red-500" }, { id: "sandboxes", label: "Sandboxes", count: total }].map((item) => (
+          {[{ id: "policies", label: "Policies", count: policies.length }, { id: "destinations", label: "Destinations", count: destinations.length }, { id: "blocked", label: "Blocked hosts", count: blocked.length, dot: "bg-red-500" }, { id: "sandboxes", label: "Sandboxes", count: total }].map((item) => (
             <button key={item.id} aria-pressed={view === item.id} onClick={() => { setView(item.id); clear() }}
               className={cn("rounded-md px-3 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring", view === item.id ? "bg-accent/70" : "hover:bg-muted/60")}>
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{item.dot && <span className={cn("size-1.5 rounded-full", item.dot)} />}{item.label}</span>
@@ -303,17 +369,26 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
         <div className="relative mr-auto w-full sm:w-64">
           <Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-          <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={view === "sandboxes" ? "Search sandbox…" : "Search destination, sandbox, rule…"} aria-label="Search egress" className="h-9 pr-8 pl-9 text-xs" />
+          <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={view === "sandboxes" ? "Search sandbox…" : view === "policies" ? "Search policy, destination…" : "Search destination, sandbox, rule…"} aria-label="Search egress" className="h-9 pr-8 pl-9 text-xs" />
           {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
         </div>
         {view === "destinations" && <select aria-label="Filter by source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{sourceOptions.map((o) => <option key={o.id} value={o.id}>{o.id === "all" ? "All sources" : o.label}</option>)}</select>}
         {filtering && <Button variant="ghost" size="sm" onClick={clear}><X className="size-3" />Clear</Button>}
+        {forSandbox && view === "policies" && <>
+          <span className="flex items-center gap-1 rounded-md border border-foreground/20 bg-accent py-0.5 pr-0.5 pl-2 text-[12px]">
+            For <span className="font-mono">{forSandbox}</span>
+            <button aria-label="Show every policy" onClick={onClearSandbox} className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => onOpen(forSandbox)}>Rules &amp; history<ArrowUpRight className="size-3" /></Button>
+        </>}
         <Button variant="ghost" size="icon-sm" aria-label="Refresh egress" onClick={onRefresh}><RefreshCw className="size-3.5" /></Button>
         <Button variant="outline" size="sm" onClick={() => onOpen("global")}><Network className="size-3.5" />Global policy</Button>
+        <Button size="sm" className="bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus className="size-3.5" />Add policy</Button>
       </div>
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-        {count === 0 ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering && <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button>}</div> : (
+        {count === 0 && !(view === "policies" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "policies" ? (forSandbox ? `No policy applies to ${forSandbox} yet` : "No egress policies yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "policies" ? "Sandboxes are locked down: nothing leaves them until a policy allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "policies" && <Button className="mt-4 bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add policy</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
+            {view === "policies" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} />}
             {view === "destinations" && <>
               <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
               <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
@@ -350,12 +425,12 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
             })}
           </ul>
             </>}
-            {count > limit && <button onClick={() => setLimit((n) => n + 100)} className="w-full border-t border-border py-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">Show {Math.min(100, count - limit)} more</button>}
+            {view !== "policies" && count > limit && <button onClick={() => setLimit((n) => n + 100)} className="w-full border-t border-border py-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">Show {Math.min(100, count - limit)} more</button>}
           </div>
         )}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-6 py-2 text-[11px] text-muted-foreground">
-        <span><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}</span>
+        <span>{view === "policies" && !filtering ? "Sandboxes start locked down. Blocks beat every allow." : <><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}</>}</span>
         <span className="hidden sm:inline">{enforced}/{total} policies enforced · ⌘K to search</span>
       </div>
     </div>
@@ -610,7 +685,7 @@ function FilesStrip({ filesystem, landlock, failureMode }) {
 
 const FILTERS = [{ id: "all", label: "All" }, ...SOURCE_ORDER.map((s) => ({ id: s, label: SOURCE[s].label }))]
 
-function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, reloadSignal }) {
+function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, reloadSignal }) {
   const [policy, setPolicy] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [deleting, setDeleting] = React.useState(null)
@@ -647,7 +722,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, rel
   }
 
   const rules = policy?.effective?.rules ?? []
-  const allowedHosts = new Set(rules.flatMap((r) => r.endpoints.map((e) => e.host)))
+  const allowedHosts = new Set(rules.flatMap((r) => r.endpoints.filter((e) => !e.blocked).map((e) => e.host)))
   const denied = React.useMemo(() => {
     const map = new Map()
     for (const e of events) {
@@ -743,8 +818,8 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, rel
                   return (
                     <RuleRow key={rule.key} rule={rule} busy={busy} locked={!["own", "agent"].includes(source) || globalActive}
                       onOp={(op) => apply([op])} onDelete={["own", "agent"].includes(source) ? () => setDeleting(rule.key) : null}
-                      managedBy={source === "secret" ? "Secrets" : ["org", "group"].includes(source) ? "Organization" : null}
-                      onManage={source === "secret" ? () => onNavigate("secrets") : undefined} />
+                      managedBy={source === "secret" ? "Secrets" : source === "policy" ? "Egress policies" : ["org", "group"].includes(source) ? "Organization" : null}
+                      onManage={source === "secret" ? () => onNavigate("secrets") : source === "policy" ? () => onEditPolicy(rule.key.replace(/^egress_/, "")) : undefined} />
                   )
                 })}
               </Card>
@@ -775,8 +850,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, rel
 
 // ---- page -------------------------------------------------------------------
 
-// A fleet decision writes one shared rule, which every sandbox
-// it covers then enforces.
+// A rule for one sandbox, pre-filled from a blocked connection another page handed over.
 function ruleFor(b) {
   const web = b.port === 443 || b.port === 80
   return {
@@ -788,16 +862,21 @@ function ruleFor(b) {
 
 // Other pages open a pre-filled rule here: { sandbox, host, port, binary } as JSON.
 export const ALLOW_HANDOFF = "egress-allow"
+// Other pages open the policies that reach one sandbox: its name.
+export const SANDBOX_HANDOFF = "egress-sandbox"
 
 export function EgressView({ onNavigate }) {
   const live = useLive()
-  // Other pages deep-link into one sandbox once; otherwise the page opens on the fleet.
-  const [scope, setScope] = React.useState(() => {
-    try { const s = sessionStorage.getItem("egress-scope"); sessionStorage.removeItem("egress-scope"); return s } catch { return null }
+  const [scope, setScope] = React.useState(null)
+  // Other pages hand over one sandbox to show the policies that reach it.
+  const [forSandbox, setForSandbox] = React.useState(() => {
+    try { const s = sessionStorage.getItem(SANDBOX_HANDOFF); sessionStorage.removeItem(SANDBOX_HANDOFF); return s } catch { return null }
   })
   const [fleet, setFleet] = React.useState(null)
   const [org, setOrg] = React.useState(null)
   const [editor, setEditor] = React.useState(null)
+  const [policyEditor, setPolicyEditor] = React.useState(null)
+  const [editingBlocked, setEditingBlocked] = React.useState(false)
   const [pending, setPending] = React.useState(null)
   const [signal, setSignal] = React.useState(0)
   const scroller = React.useRef(null)
@@ -826,38 +905,36 @@ export function EgressView({ onNavigate }) {
   const open = (name) => { setScope(name); scroller.current?.scrollTo({ top: 0 }) }
   const back = () => { setScope(null); loadFleet(); scroller.current?.scrollTo({ top: 0 }) }
 
+  // Allowing a blocked host is a new policy, pre-filled for where it was seen.
   function decide(kind, b) {
-    if (kind === "allow-one") {
-      const name = [...b.sandboxes][0]
-      setScope(name)
-      setEditor({ sandbox: name, initial: ruleFor(b) })
-      return
-    }
+    const to = { everyone: kind === "allow-org", groups: [], sandboxes: kind === "allow-one" ? [[...b.sandboxes][0]] : [] }
+    if (kind.startsWith("allow")) { setPolicyEditor({ initial: newPolicy({ name: b.host, destinations: [b.host], appliesTo: to }) }); return }
     setPending({ kind, b })
   }
 
+  function editPolicy(id) {
+    const policy = (org?.policies ?? []).find((p) => p.id === id)
+    if (policy) setPolicyEditor({ initial: policy })
+  }
+
+  function reportSync(result, what) {
+    const applied = result.applied?.length ?? 0
+    if (result.failed?.length) toast.warning(`${what}. ${plural(result.failed.length, "sandbox", "sandboxes")} could not be updated`, { description: result.failed.map((f) => `${f.sandbox}: ${f.error}`).join("\n") })
+    else toast.success(what, { description: applied ? `Updated ${plural(applied, "sandbox", "sandboxes")}.` : undefined })
+    loadFleet()
+    setSignal((n) => n + 1)
+  }
+
   async function confirmDecision() {
-    const { kind, b } = pending
+    const { b } = pending
     try {
       const current = org ?? (await api.org())
-      let result
-      if (kind === "allow-org") {
-        const rule = ruleFor(b)
-        if (current.org.rules.some((r) => r.name === rule.name)) rule.name = `${rule.name}-${b.port}`
-        result = await api.saveOrg({ ...current.org, rules: [...current.org.rules, rule] })
-      } else if (kind === "block-org") {
-        result = await api.saveOrg({ ...current.org, blocked: [...current.org.blocked, b.host] })
-      }
-      const applied = result?.applied?.length ?? 0
-      toast.success(kind === "block-org" ? `${b.host} blocked everywhere` : `${b.host} allowed`, { description: applied ? `Applied to ${plural(applied, "sandbox", "sandboxes")}` : undefined })
-      if (result?.failed?.length) toast.warning(`${result.failed.length} could not be updated`, { description: result.failed.map((f) => `${f.sandbox}: ${f.error}`).join("\n") })
+      reportSync(await api.saveOrg({ ...current.org, blocked: [...current.org.blocked, b.host] }), `${b.host} blocked everywhere`)
       setPending(null)
-      loadFleet()
     } catch (e) { toast.error(e.message) }
   }
 
   const total = fleet?.sandboxes?.length ?? 0
-  const affected = total
 
   return (
     <div ref={scroller} className="h-[calc(100svh-3.5rem)] overflow-y-auto">
@@ -865,10 +942,18 @@ export function EgressView({ onNavigate }) {
         : scope ? (
           <SandboxDetail key={scope} name={scope} sandbox={fleet?.sandboxes?.find((s) => s.name === scope) ?? live.sandboxes?.find((s) => s.name === scope)}
             events={live.events} onBack={back} onNavigate={onNavigate} reloadSignal={signal}
-            onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} />
+            onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} onEditPolicy={editPolicy} />
         ) : !fleet ? <p role="status" className="py-24 text-center text-sm text-muted-foreground">Loading…</p>
         : fleet.error ? <p role="alert" className="py-24 text-center text-sm text-muted-foreground">{fleet.error}</p>
-        : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet} />}
+        : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
+            onEditPolicy={(p) => setPolicyEditor({ initial: p })} onEditBlocked={() => setEditingBlocked(true)}
+            onAddPolicy={() => setPolicyEditor({ initial: newPolicy(forSandbox ? { appliesTo: { everyone: false, groups: [], sandboxes: [forSandbox] } } : {}) })}
+            forSandbox={forSandbox} onClearSandbox={() => setForSandbox(null)} />}
+
+      <PolicyDialog open={Boolean(policyEditor)} onOpenChange={(o) => { if (!o) setPolicyEditor(null) }} initial={policyEditor?.initial}
+        groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} knownPrograms={knownPrograms}
+        onSaved={(result, policy) => reportSync(result, `${result.deleted ? "Deleted" : "Saved"} ${policy.name}`)} />
+      <BlockedHostsDialog open={editingBlocked} onOpenChange={setEditingBlocked} org={org?.org} onSaved={(result) => reportSync(result, "Saved blocked hosts")} />
 
       <RuleEditor open={Boolean(editor)} onOpenChange={(o) => { if (!o) setEditor(null) }} initial={editor?.initial} knownPrograms={knownPrograms}
         onSubmit={async (spec) => {
@@ -881,18 +966,14 @@ export function EgressView({ onNavigate }) {
       <AlertDialog open={Boolean(pending)} onOpenChange={(o) => { if (!o) setPending(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pending?.kind === "block-org" ? `Block ${pending?.b.host} everywhere?` : `Allow ${pending?.b.host} everywhere?`}
-            </AlertDialogTitle>
+            <AlertDialogTitle>Block {pending?.b.host} everywhere?</AlertDialogTitle>
             <AlertDialogDescription>
-              {pending?.kind === "block-org" ? "No sandbox or rule will be able to reach it." : `Read-only, for ${[...(pending?.b.programs ?? [])].map(program).join(", ")}.`} Applies to {plural(affected, "sandbox", "sandboxes")}.
+              Adds it, with its subdomains, to the hosts blocked in every sandbox. No policy can open it. Applies to {plural(total, "sandbox", "sandboxes")}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant={pending?.kind === "block-org" ? "destructive" : "default"} onClick={confirmDecision}>
-              {pending?.kind === "block-org" ? "Block everywhere" : "Allow"}
-            </AlertDialogAction>
+            <AlertDialogAction variant="destructive" onClick={confirmDecision}>Block everywhere</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
