@@ -1,20 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { editorRoute, reasonFrom, runCli } from './editor.js'
-
-test('a timeout stops the CLI and every process it started', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'editor-test-'))
-  const pidFile = path.join(dir, 'child.pid')
-  const result = await runCli('/bin/sh', ['-c', `sleep 30 & echo $! > '${pidFile}'; wait`], process.env, 300)
-  assert.equal(result.timedOut, true)
-  const pid = Number(fs.readFileSync(pidFile, 'utf8'))
-  await new Promise((resolve) => setTimeout(resolve, 200))
-  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
-  fs.rmSync(dir, { recursive: true, force: true })
-})
+import { editorRoute } from './editor.js'
+import { reasonFrom } from './openshell-cli.js'
 
 test('errors show the gateway message, or the CLI line without its prefix', () => {
   assert.equal(reasonFrom(`Error:   × status: NotFound, code: 'Some requested entity was not found', message: "sandbox not found"\n`), 'sandbox not found')
