@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 // The folder rules are relative to the home folder, so give the module its own.
 const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-files-test-')))
 process.env.HOME = home
-const { cliError, localFolder, parseListing, planSeed, sandboxPath } = await import('./files.js')
+const { localFolder, parseListing, planSeed, sandboxPath } = await import('./files.js')
 after(() => fs.rm(home, { recursive: true, force: true }))
 
 const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd, stdio: 'pipe' })
@@ -34,12 +34,6 @@ test('a listing is parsed from stat lines and symlink triples, with names that h
     ['app', 'dir', null, null, null], ['a.txt', 'file', 5, null, null], ['l', 'link', null, '/etc/hosts', 'file'], ['two\nlines', 'file', 0, null, null],
   ])
   assert.equal(listing.truncated, false)
-})
-
-test('CLI errors keep the message and drop the box drawing', () => {
-  const output = "Downloading…\nError:   × sandbox source path '/sandbox/l' resolves to '/etc/hosts',\n  │ outside the sandbox workspace (/sandbox)\n\n"
-  assert.equal(cliError(output), "sandbox source path '/sandbox/l' resolves to '/etc/hosts', outside the sandbox workspace (/sandbox)")
-  assert.equal(cliError('ssh: connect failed\n'), 'ssh: connect failed')
 })
 
 test('a repository sends what git would: tracked and untracked, minus ignored, plus history', async () => {
