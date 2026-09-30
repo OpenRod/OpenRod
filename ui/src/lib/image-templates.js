@@ -40,28 +40,6 @@ export function pendingRecipe() {
     return saved?.recipe && typeof saved.recipe.name === 'string' ? saved : null
   } catch { return null }
 }
-// Codex's browser sign-in redirects to a callback server inside the sandbox,
-// which the host browser cannot reach. The launcher offers the two sign-in
-// methods that work without that callback before starting the real CLI.
-const CODEX_ENTRY = '/usr/local/lib/node_modules/@openai/codex/bin/codex.js'
-export const CODEX_LAUNCHER = `#!/bin/bash
-# OpenShell Codex launcher: device-code or API-key sign-in, then Codex.
-codex=${CODEX_ENTRY}
-case "\${1-}" in login|logout|help|completion|-h|--help|-V|--version) exec "$codex" "$@" ;; esac
-if [ -t 0 ] && [ -t 1 ] && ! "$codex" login status >/dev/null 2>&1; then
-  printf 'Sign in to Codex:\\n  1. Device code (ChatGPT plan)\\n  2. API key\\n'
-  while :; do
-    read -rp 'Choose 1 or 2: ' choice || exit 1
-    case "$choice" in
-      1) "$codex" login --device-auth && break ;;
-      2) read -rsp 'API key: ' key || exit 1; echo
-         printf '%s' "$key" | "$codex" login --with-api-key && break ;;
-    esac
-  done
-  unset key
-fi
-exec "$codex" "$@"
-`
 const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'"
 const imagePattern = /^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,255}$/
 export function recipeErrors(recipe) {
@@ -101,8 +79,6 @@ export function dockerfileFor(recipe) {
   if (recipe.npm.length) lines.push(`RUN npm install --global -- ${recipe.npm.map(quote).join(' ')}`)
   if (recipe.pip.length) lines.push(`RUN pip install --no-cache-dir -- ${recipe.pip.map(quote).join(' ')}`)
   for (const agent of agents.filter((a) => a.npm)) lines.push(`RUN npm install --global ${agent.ignoreScripts ? '--ignore-scripts ' : ''}${agent.npm}`)
-  // COPY would follow npm's codex symlink and overwrite the real entry point.
-  if (recipe.agents.includes('codex')) lines.push('COPY codex-launcher.sh /usr/local/libexec/openshell-codex', `RUN test -x ${CODEX_ENTRY} && chmod 0755 /usr/local/libexec/openshell-codex && ln -sfn /usr/local/libexec/openshell-codex /usr/local/bin/codex`)
   if (recipe.agents.includes('aider')) lines.push('RUN python3 -m venv /opt/aider && /opt/aider/bin/pip install --no-cache-dir aider-chat && ln -s /opt/aider/bin/aider /usr/local/bin/aider')
   if (recipe.agents.includes('claude')) lines.push('RUN curl -fsSL https://claude.ai/install.sh -o /tmp/install-claude.sh && bash /tmp/install-claude.sh && cp -L /root/.local/bin/claude /usr/local/bin/claude && chmod 0755 /usr/local/bin/claude && rm -rf /root/.local /root/.claude* /tmp/install-claude.sh')
   lines.push('', 'ENV HOME=/sandbox', 'ENV PATH="/sandbox/.local/bin:/sandbox/.npm-global/bin:/sandbox/.opencode/bin:${PATH}"', 'ENV NPM_CONFIG_PREFIX=/sandbox/.npm-global', 'USER sandbox', 'WORKDIR /sandbox')
