@@ -21,3 +21,21 @@ test('does not guess for ambiguous or missing legacy images', () => {
  assert.equal(imageName('node:22'), 'node:22')
  assert.equal(imageName('sha256:' + 'a'.repeat(64)), 'Unknown template')
 })
+
+test('display names round-trip through gateway-safe labels, including after deletion', async () => {
+ const { imageTemplateLabels } = await import('./sandbox-images.js')
+ for (const name of ['Gemini CLI', 'Claude / Codex (dev)', 'תבנית 🚀', '界'.repeat(80)]) {
+  const labels = imageTemplateLabels({ id: 'template-id', recipe: { name } })
+  assert.equal(labels[IMAGE_TEMPLATE_ID], 'template-id')
+  for (const value of Object.values(labels)) {
+   assert.match(value, /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/)
+   assert(value.length <= 63)
+  }
+  assert.equal(nameSandboxImages([{ labels }], [])[0].imageTemplateName, name)
+ }
+})
+
+test('incomplete name snapshots are ignored without breaking fleet rendering', () => {
+ const labels = { [IMAGE_TEMPLATE_ID]: 'missing', [`${IMAGE_TEMPLATE_NAME}-parts`]: '2', [`${IMAGE_TEMPLATE_NAME}-0`]: '47' }
+ assert.equal(nameSandboxImages([{ labels }], [])[0].imageTemplateName, null)
+})

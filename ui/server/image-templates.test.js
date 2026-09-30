@@ -17,6 +17,8 @@ test('image recipe does not compile launch variables or permissions into an imag
   assert.match(result, /COPY --from=node:22-bookworm-slim/)
   assert.match(result, /python3 -m venv/)
   assert.match(result, /npm install --global @openai\/codex/)
+  assert.match(result, /COPY codex-launcher.sh \/usr\/local\/libexec\/openshell-codex/)
+  assert.ok(result.indexOf('openshell-codex') > result.indexOf('@openai/codex'), 'launcher replaces the npm link after install')
   assert.match(result, /USER sandbox/)
   assert.doesNotMatch(result, /APP_MODE|development|allow-all/)
 })
@@ -80,8 +82,8 @@ test('an interrupted operation is never reported as available', async () => {
 
 test('every agent choice generates an installer and its required runtime', async () => {
   const { AGENTS } = await import('../src/lib/image-templates.js')
-  assert.equal(AGENTS.length, 11)
-  assert.equal(AGENTS.filter((a) => a.featured).length, 4)
+  assert.equal(AGENTS.length, 10)
+  assert.equal(AGENTS.filter((a) => a.featured).length, 3)
   for (const agent of AGENTS) {
     const recipe = newRecipe({ name: agent.name, agents: [agent.id] })
     assert.deepEqual(recipeErrors(recipe), {})
@@ -107,6 +109,7 @@ test('custom agent install scripts persist and remain separate from Dockerfile i
   assert.ok(dockerfile.indexOf('RUN bash -euo') > dockerfile.indexOf('USER sandbox'))
   assert.ok(!dockerfile.includes('AGENT_TEST'))
   assert.ok(!dockerfileFor(newRecipe()).includes('custom-agents.sh'))
+  assert.ok(!dockerfileFor(newRecipe()).includes('codex-launcher.sh'))
 })
 
 test('custom install command rejects malformed and oversized values', async () => {

@@ -201,14 +201,14 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                         <li key={rule.key} className="px-3 py-2">
                           <p className="flex items-center gap-2 text-[11px]">
                             <span className="truncate font-mono font-medium">{rule.fromProvider ? rule.key.replace(/^_provider_/, "").replace(/_/g, "-") : rule.name}</span>
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{rule.fromProvider ? "from provider" : "rule"}</span>
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{sourceOf(rule.key) === "agent" ? "Agent defaults" : rule.fromProvider ? "from provider" : "rule"}</span>
                           </p>
                           <ul className="mt-1.5 space-y-0.5">
                             {rule.endpoints.map((endpoint) => (
                               <li key={`${endpoint.host}:${endpoint.port}`} className="flex items-center gap-2 font-mono text-[11px]">
                                 <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
                                 <span className="min-w-0 flex-1 truncate">{endpoint.host}{endpoint.port ? `:${endpoint.port}` : ""}</span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground">{ACCESS_LABEL[endpoint.access] ?? endpoint.access}{endpoint.enforcement === "audit" ? " · audit only" : ""}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground">{ACCESS_LABEL[endpoint.access] ?? endpoint.access}{endpoint.tlsSkip ? " · TLS passthrough" : ""}{endpoint.protocol !== "tcp" && endpoint.enforcement === "audit" ? " · audit only" : ""}</span>
                               </li>
                             ))}
                           </ul>

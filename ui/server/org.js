@@ -141,8 +141,18 @@ function managedRules(org, group) {
   return out
 }
 
+export function addAgentAccess(policy, agentRules, org) {
+  assertNotBlocked(org, agentRules, 'Agent access')
+  for (const spec of agentRules) {
+    const { name, rule } = ruleToProto(spec)
+    if (policy.networkPolicies[name]) throw fail(`Security preset rule "${name}" conflicts with required agent access. Rename that rule.`)
+    policy.networkPolicies[name] = rule
+  }
+  return policy
+}
+
 // Everything a new sandbox needs from its group, resolved before it exists.
-export async function planSandbox({ group: groupId, template: templateId }) {
+export async function planSandbox({ group: groupId, template: templateId, agentRules = [] }) {
   const org = await readOrg()
   let group = null
   if (groupId) {
@@ -153,6 +163,7 @@ export async function planSandbox({ group: groupId, template: templateId }) {
   if (!template) throw fail('Unknown policy template.')
   assertNotBlocked(org, template.rules, 'Template')
   const policy = templateToPolicy(template)
+  addAgentAccess(policy, agentRules, org)
   Object.assign(policy.networkPolicies, managedRules(org, group))
   return {
     policy,

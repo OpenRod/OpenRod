@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { newRecipe, recipeErrors, dockerfileFor } from '../src/lib/image-templates.js'
+import { newRecipe, recipeErrors, dockerfileFor, CODEX_LAUNCHER } from '../src/lib/image-templates.js'
 import { resolveGateway } from './gateway.js'
 
 const ROOT = process.env.OPENSHELL_IMAGE_TEMPLATE_DIR || path.resolve(import.meta.dirname, '../.state/image-templates')
@@ -145,6 +145,7 @@ async function start(id, archivePath) {
         await fs.writeFile(path.join(temp, 'Dockerfile'), dockerfileFor(recipe))
         await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
         await fs.writeFile(path.join(temp, 'custom-agents.sh'), recipe.customAgentInstall ?? '')
+        await fs.writeFile(path.join(temp, 'codex-launcher.sh'), CODEX_LAUNCHER)
         await Promise.all(recipe.files.map((f, i) => fs.writeFile(path.join(temp, 'files', String(i)), f.content)))
         image = `openshell-template:${id}`
         await run(['build', '--progress=plain', '--tag', image, temp], { job, timeout: 30 * 60_000 })

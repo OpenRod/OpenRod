@@ -1,6 +1,6 @@
 # Agent SVG sources
 
-The existing Claude Code, Codex, Cursor, Gemini, OpenCode, OpenClaw, and Pi SVGs are retained.
+The existing Claude Code, Codex, Cursor, OpenCode, OpenClaw, and Pi SVGs are retained.
 
 Added 2026-09-29:
 
