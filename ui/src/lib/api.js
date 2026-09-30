@@ -60,6 +60,24 @@ export const api = {
   saveTemplate: (template) => request("/templates", { method: "POST", body: template }),
   deleteTemplate: (id) => request(`/templates/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
 
+  // Files
+  localFolder: (path) => request("/local-folder", { method: "POST", body: { path } }),
+  files: (sandbox, path) => request(`/files/${encodeURIComponent(sandbox)}?path=${encodeURIComponent(path)}`),
+  seed: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/seed`),
+  retrySeed: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/seed/retry`, { method: "POST", body: {} }),
+  prepareDownload: (sandbox, path) => request(`/files/${encodeURIComponent(sandbox)}/download`, { method: "POST", body: { path } }),
+  startUpload: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/uploads`, { method: "POST", body: {} }),
+  uploadFile: async (sandbox, id, path, file, signal) => {
+    const response = await fetch(`/api/os/files/${encodeURIComponent(sandbox)}/uploads/${id}?path=${encodeURIComponent(path)}`, {
+      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1" }, body: file, signal,
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload.error ?? `Upload failed (${response.status})`)
+    return payload
+  },
+  commitUpload: (sandbox, id, dir) => request(`/files/${encodeURIComponent(sandbox)}/uploads/${id}/commit`, { method: "POST", body: { dir } }),
+  cancelUpload: (sandbox, id) => request(`/files/${encodeURIComponent(sandbox)}/uploads/${id}/cancel`, { method: "POST", body: {} }),
+
   // Ingress
   ingress: () => request("/ingress"),
   exposeService: (body) => request("/ingress/expose", { method: "POST", body }),

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle, Box, Check, Copy, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
+import { CopyCommand } from "@/components/copy-command"
+import { FilesView } from "@/components/files-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { SESSION_LABEL, sessionCommand } from "@/lib/sandbox-session"
@@ -32,19 +34,6 @@ function Section({ title, icon: Icon, children, aside, className }) {
       </h3>
       {children}
     </section>
-  )
-}
-
-function CopyCommand({ command }) {
-  const [copied, setCopied] = React.useState(false)
-  return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 py-1.5 pr-1.5 pl-3">
-      <code className="min-w-0 flex-1 truncate font-mono text-[11px]">{command}</code>
-      <Button variant="ghost" size="icon-sm" aria-label="Copy command"
-        onClick={async () => { await navigator.clipboard.writeText(command); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
-        {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
-      </Button>
-    </div>
   )
 }
 
@@ -201,7 +190,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
             </DialogTitle>
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="mr-1 font-sans font-medium text-foreground">{detail?.policy ? allowed.length : "-"}</strong>allowed hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{denied.length}</strong>blocked hosts</span></div>
             </div>
-            <DialogDescription className="sr-only">Sandbox access graph, details, rules, and connection activity.</DialogDescription>
+            <DialogDescription className="sr-only">Sandbox access graph, details, rules, files, and connection activity.</DialogDescription>
           </DialogHeader>
           {error && <p role="alert" className="shrink-0 border-b px-5 py-2 text-xs text-destructive">{error}</p>}
           {sandbox ? (
@@ -210,6 +199,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <TabsList variant="line" aria-label="Sandbox information" className="max-w-full">
                   <TabsTrigger value="overview" className="px-3 text-xs">Overview</TabsTrigger>
                   <TabsTrigger value="rules" className="px-3 text-xs">Rules{detail?.policy && <span className="text-muted-foreground">{rules.length}</span>}</TabsTrigger>
+                  <TabsTrigger value="files" className="px-3 text-xs">Files</TabsTrigger>
                   <TabsTrigger value="activity" className="px-3 text-xs">Activity</TabsTrigger>
                   <TabsTrigger value="details" className="px-3 text-xs">Details</TabsTrigger>
                 </TabsList>
@@ -306,6 +296,9 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 </Section>
               )}
 
+              </TabsContent>
+              <TabsContent value="files" className="flex min-h-0 flex-col">
+                <FilesView sandbox={sandbox} demo={live.demo} />
               </TabsContent>
               <TabsContent value="activity" className="min-h-0 space-y-6 overflow-y-auto p-5">
               <Section title="Connection activity" aside={<div className="flex gap-1">{[15, 60].map((value) => <button key={value} onClick={() => setMinutes(value)} aria-pressed={minutes === value} className={`rounded px-2 py-1 text-xs ${minutes === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-muted"}`}>{value === 15 ? "15m" : "1h"}</button>)}</div>}>

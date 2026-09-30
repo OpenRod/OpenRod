@@ -7,7 +7,7 @@ import { OpenShellClient } from '@nvidia/openshell-sdk'
 // The same gateway the `openshell` CLI talks to: its active selection, its
 // endpoint, and its mTLS client bundle. The bundle is the operator's full
 // authority over the gateway, so it is read here and never leaves this process.
-const CONFIG_DIR = process.env.OPENSHELL_CONFIG_DIR ?? path.join(os.homedir(), '.config/openshell')
+export const CONFIG_DIR = process.env.OPENSHELL_CONFIG_DIR ?? path.join(os.homedir(), '.config/openshell')
 
 export function resolveGateway() {
   let name = process.env.OPENSHELL_GATEWAY
