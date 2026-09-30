@@ -16,6 +16,18 @@ export const projectOf = (sandbox) => {
 const SESSIONS = { shell: "/bin/bash -l", ...Object.fromEntries(AGENTS.map((a) => [a.command, a.command])) }
 export const isSession = (session) => Object.hasOwn(SESSIONS, session ?? "")
 
+// A launch may select only Shell or a session explicitly included by the template.
+export function templateSession(saved, requested) {
+  const start = saved.recipe.command.trim()
+  const fallback = !start ? 'shell' : start !== 'shell' && isSession(start) ? start : null
+  if (requested == null) return fallback
+  const installed = saved.managed && saved.recipe.source === 'build'
+    ? AGENTS.filter((agent) => saved.recipe.agents.includes(agent.id)).map((agent) => agent.command) : []
+  if (requested !== 'shell' && requested !== fallback && !installed.includes(requested)) throw new Error('Choose Shell or an agent included in this template.')
+  if (!isSession(requested)) throw new Error('Unknown session type.')
+  return requested
+}
+
 export function sessionLaunch(session, command) {
   if (isSession(session)) {
     return {
