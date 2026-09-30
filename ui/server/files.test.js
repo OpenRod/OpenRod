@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 // The folder rules are relative to the home folder, so give the module its own.
 const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-files-test-')))
 process.env.HOME = home
-const { cliError, localFolder, planSeed, sandboxPath } = await import('./files.js')
+const { cliError, localFolder, parseListing, planSeed, sandboxPath } = await import('./files.js')
 after(() => fs.rm(home, { recursive: true, force: true }))
 
 const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd, stdio: 'pipe' })
@@ -24,6 +24,16 @@ test('sandbox paths stay under /sandbox', () => {
   assert.throws(() => sandboxPath('/sandbox/../etc'), /Only \/sandbox/)
   assert.throws(() => sandboxPath('/sandboxes'), /Only \/sandbox/)
   assert.throws(() => sandboxPath('app'), /absolute/)
+})
+
+test('a listing is parsed from stat lines and symlink triples, with names that hold newlines', () => {
+  const stat = ['directory|4096|1700000000|/sandbox/app', 'regular file|5|1700000001|/sandbox/a.txt', 'regular empty file|0|1700000002|/sandbox/two', 'lines', 'symbolic link|9|1700000003|/sandbox/l'].join('\n')
+  const listing = parseListing(['/sandbox', '2048', `${stat}\n`, '/sandbox/l', '/etc/hosts', 'regular file', ''])
+  assert.equal(listing.free, 2048 * 1024)
+  assert.deepEqual(listing.entries.map((e) => [e.name, e.type, e.size, e.target, e.targetType]), [
+    ['app', 'dir', null, null, null], ['a.txt', 'file', 5, null, null], ['l', 'link', null, '/etc/hosts', 'file'], ['two\nlines', 'file', 0, null, null],
+  ])
+  assert.equal(listing.truncated, false)
 })
 
 test('CLI errors keep the message and drop the box drawing', () => {

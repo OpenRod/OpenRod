@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises'
-import { createReadStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { finished } from 'node:stream/promises'
+import zlib from 'node:zlib'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -47,10 +49,11 @@ export function cliError(output) {
   return message.map((part) => part.trim()).filter(Boolean).join(' ')
 }
 
-// Transfers go through the `openshell` CLI: tar over the gateway's SSH relay,
-// with its .gitignore filter and its guards (only /sandbox; symlinks travel as
-// links; a link that leaves /sandbox is refused). The SDK's exec takes at most
-// 4 MiB of stdin, so exec is used only to look at folders.
+// Uploads go through the `openshell` CLI: tar over the gateway's SSH relay,
+// with its .gitignore filter. The SDK's exec takes at most 4 MiB of stdin, so
+// it never carries an upload. Downloads stream out of exec instead (below):
+// the CLI's download needs GNU `realpath -e` inside the sandbox, which the
+// busybox images, OpenShell's default among them, do not have.
 async function openshell(args, { cwd, timeout = 15 * 60_000 } = {}) {
   const { target } = await gateway()
   return new Promise((resolve, reject) => {
@@ -82,8 +85,11 @@ export function sandboxPath(input) {
 }
 
 // Follow symlinks inside the sandbox and refuse anything that lands outside
-// /sandbox, the same check `openshell sandbox download` makes.
-const RESOLVE = `r=$(realpath -e -- "$1" 2>/dev/null) || exit 3
+// /sandbox, the same check `openshell sandbox download` makes. Only what
+// busybox has too: Alpine images (OpenShell's default) lack GNU's realpath -e,
+// find -printf and head -z. The path is absolute, so no option can hide in it.
+const RESOLVE = `[ -e "$1" ] || exit 3
+r=$(realpath "$1" 2>/dev/null) || exit 3
 case "$r" in /sandbox|/sandbox/*) ;; *) exit 4 ;; esac`
 const EXITS = { 3: ['That path does not exist.', 404], 4: ['That path leads outside /sandbox.', 403], 5: ['That is not a folder.', 400] }
 
@@ -97,52 +103,90 @@ async function inSandbox(name, script, arg) {
 
 // Free space in KiB; awk would print large byte counts in exponent form.
 const FREE = `printf '%s\\0' "$(df -Pk "$r" | awk 'NR == 2 { print $4 }')"`
-const TYPES = { f: 'file', d: 'dir', l: 'link' }
+const LIST_CAP = 1024 * 1024
 
-async function list(name, input) {
-  const [resolved, free, ...fields] = await inSandbox(name, `[ -d "$r" ] || exit 5
+// One stat call for the folder (batched by find), then one small loop for its
+// symlinks. Names may hold anything but NUL and "/", so they come last on
+// their line and a line that is not an entry continues the previous name.
+const LIST = `[ -d "$r" ] || exit 5
 printf '%s\\0' "$r"
 ${FREE}
-find "$r" -mindepth 1 -maxdepth 1 -printf '%y\\0%Y\\0%s\\0%T@\\0%l\\0%f\\0' | head -z -n ${(MAX_ENTRIES + 1) * 6}`, sandboxPath(input))
+find "$r" -mindepth 1 -maxdepth 1 -exec stat -c '%F|%s|%Y|%n' {} + 2>/dev/null | head -c ${LIST_CAP}
+printf '\\0'
+find "$r" -mindepth 1 -maxdepth 1 -type l -exec sh -c 'for f; do printf "%s\\0%s\\0%s\\0" "$f" "$(readlink "$f")" "$(stat -L -c %F "$f" 2>/dev/null || echo missing)"; done' sh {} + 2>/dev/null`
+const kindOf = (text) => (text.startsWith('regular') ? 'file' : text === 'directory' ? 'dir' : text === 'symbolic link' ? 'link' : text === 'missing' ? 'missing' : 'other')
+const ENTRY = /^(regular file|regular empty file|directory|symbolic link|character special file|block special file|fifo|socket)\|(\d+)\|(\d+)\|(.*)$/
+
+// The fields inSandbox returns for LIST: the folder, its free KiB, the stat
+// lines, then a (path, target, target kind) triple per symlink.
+export function parseListing(fields) {
+  const [resolved, free, stat = '', ...links] = fields
   const entries = []
-  for (let i = 0; i + 5 < fields.length; i += 6) {
-    const [type, targetType, size, modified, target, entry] = fields.slice(i, i + 6)
-    entries.push({
-      name: entry,
-      type: TYPES[type] ?? 'other',
-      // What a symlink points at, and whether that is a folder (N: missing, L: loop).
-      target: type === 'l' ? target : null,
-      targetType: type === 'l' ? (TYPES[targetType] ?? (targetType === 'N' ? 'missing' : 'other')) : null,
-      size: type === 'f' ? Number(size) : null,
-      modifiedAt: new Date(Number(modified) * 1000).toISOString(),
-    })
+  // stat ends its output with one newline, which is not part of the last name.
+  for (const line of stat.replace(/\n$/, '').split('\n')) {
+    const m = ENTRY.exec(line)
+    if (m && m[4].startsWith(`${resolved}/`)) {
+      const type = kindOf(m[1])
+      entries.push({ name: m[4].slice(resolved.length + 1), type, target: null, targetType: null, size: type === 'file' ? Number(m[2]) : null, modifiedAt: new Date(Number(m[3]) * 1000).toISOString() })
+    } else if (entries.length) entries.at(-1).name += `\n${line}`
+  }
+  for (let i = 0; i + 2 < links.length; i += 3) {
+    const entry = entries.find((e) => e.type === 'link' && `${resolved}/${e.name}` === links[i])
+    if (entry) { entry.target = links[i + 1]; entry.targetType = kindOf(links[i + 2]) }
   }
   const folder = (e) => e.type === 'dir' || e.targetType === 'dir'
   entries.sort((a, b) => Number(folder(b)) - Number(folder(a)) || a.name.localeCompare(b.name))
-  return { path: resolved, free: Number(free) * 1024, truncated: entries.length > MAX_ENTRIES, entries: entries.slice(0, MAX_ENTRIES) }
+  return { path: resolved, free: Number(free) * 1024, truncated: entries.length > MAX_ENTRIES || stat.length >= LIST_CAP, entries: entries.slice(0, MAX_ENTRIES) }
+}
+
+async function list(name, input) {
+  return parseListing(await inSandbox(name, LIST, sandboxPath(input)))
 }
 
 // ---- download -----------------------------------------------------------------
 
-// The CLI copies into a temporary folder here; the browser then fetches the
-// result once by token, and the folder is removed.
+// Streams a command's stdout out of the sandbox into a local file, gzipped
+// for a tar stream. Only what busybox has: `cat` for a file, `tar cf -` for
+// a folder, whose symlinks travel as links.
+async function pull(name, argv, file, { gzip = false } = {}) {
+  const { client } = await gateway()
+  const out = createWriteStream(file, { mode: 0o600 })
+  const sink = gzip ? zlib.createGzip() : out
+  if (gzip) sink.pipe(out)
+  const write = (chunk) => new Promise((resolve, reject) => sink.write(chunk, (error) => (error ? reject(error) : resolve())))
+  let stderr = ''
+  let exit = null
+  try {
+    for await (const event of client.sandbox.execStream(name, argv, { noLoginShell: true, timeoutSecs: 900 })) {
+      if (event.stream === 'stdout') await write(event.data)
+      else if (event.stream === 'stderr') stderr = (stderr + event.data.toString()).slice(-400)
+      else if (event.type === 'exit') exit = event.exitCode
+    }
+  } finally {
+    sink.end()
+    await finished(out).catch(() => {})
+  }
+  if (exit !== 0) throw fail(stderr.trim() || `The sandbox command exited with ${exit}.`, 502)
+}
+
+// The file or folder is staged in a temporary folder here; the browser then
+// fetches it once by token, and the folder is removed.
 async function prepareDownload(name, input) {
   const target = sandboxPath(input)
-  const [kind, size] = await inSandbox(name, `if [ -d "$r" ]; then printf 'dir\\0'; else printf 'file\\0'; fi
-printf '%s\\0' "$(du -sb -- "$r" | cut -f1)"`, target)
+  const [resolved, kind, size] = await inSandbox(name, `printf '%s\\0' "$r"
+if [ -d "$r" ]; then printf 'dir\\0'; else printf 'file\\0'; fi
+printf '%s\\0' "$(du -sb "$r" | cut -f1)"`, target)
   if (Number(size) > TRANSFER_LIMIT) throw fail(`That is ${formatBytes(Number(size))}; the console moves up to ${formatBytes(TRANSFER_LIMIT)}. From a terminal: ${downloadCommand(name, target)}`, 413)
+  // Named after what was clicked; a link is read through its real path.
   const base = target === SANDBOX_ROOT ? 'sandbox' : path.posix.basename(target)
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-download-'))
   try {
-    const local = path.join(temp, base)
-    await openshell(['sandbox', 'download', name, target, local])
-    let file = local
-    let filename = base
+    const filename = kind === 'dir' ? `${base}.tar.gz` : base
+    const file = path.join(temp, filename)
     if (kind === 'dir') {
-      filename = `${base}.tar.gz`
-      file = path.join(temp, filename)
-      await run('tar', ['-czf', file, '-C', temp, base])
-    }
+      const entry = path.posix.basename(resolved)
+      await pull(name, ['tar', 'cf', '-', '-C', path.posix.dirname(resolved), entry.startsWith('-') ? `./${entry}` : entry], file, { gzip: true })
+    } else await pull(name, ['cat', resolved], file)
     const { size: bytes } = await fs.stat(file)
     const token = randomUUID()
     const timer = setTimeout(() => discardDownload(token), 10 * 60_000)
@@ -181,7 +225,7 @@ export function serveDownload(res, token) {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
   })
-  createReadStream(item.file).pipe(res)
+  createReadStream(item.file).once('error', () => res.destroy()).pipe(res)
   res.once('close', () => fs.rm(item.temp, { recursive: true, force: true }).catch(() => {}))
 }
 
@@ -314,7 +358,7 @@ export async function localFolder(input) {
   const parts = relative.split(path.sep)
   if (parts.some((part) => part.startsWith('.')) || (process.platform === 'darwin' && parts[0] === 'Library')) throw fail('Hidden folders (such as ~/.ssh or ~/.config) and ~/Library are never uploaded.')
   const config = await fs.realpath(CONFIG_DIR).catch(() => null)
-  if (config && (config === real || config.startsWith(real + path.sep))) throw fail('This folder holds the gateway certificate.')
+  if (config && (config === real || config.startsWith(real + path.sep) || real.startsWith(config + path.sep))) throw fail('This folder holds the gateway certificate.')
 
   // Mirror the CLI: inside a git work tree it sends `git ls-files -co
   // --exclude-standard` (tracked plus untracked, minus ignored); elsewhere, everything.
@@ -392,8 +436,9 @@ export async function planSeed(input) {
   return null
 }
 
-function cloneError(stderr) {
+function cloneError(stderr, exitCode) {
   const text = stderr.trim()
+  if (exitCode === 127) return 'This image has no git. Pick an image with git installed, or upload a local folder instead.'
   if (/could not read Username|Authentication failed|terminal prompts disabled/i.test(text)) return 'The repository asks for credentials. Only public repositories can be cloned for now.'
   if (/\b403\b|CONNECT tunnel failed|Failed to connect|Could not resolve (host|proxy)|Connection refused|Proxy/i.test(text)) {
     return 'The network policy blocked the clone. Allow git to reach the host in Egress (cloning also needs POST to /git-upload-pack), then retry.'
@@ -419,7 +464,7 @@ async function runSeed(name, seed) {
     } else {
       job.state = 'cloning'
       const result = await client.sandbox.exec(name, ['git', 'clone', '--', seed.repo.url, seed.repo.dest], { timeoutSecs: 900, environment: { GIT_TERMINAL_PROMPT: '0' } })
-      if (result.exitCode !== 0) throw fail(cloneError(result.stderr.toString()))
+      if (result.exitCode !== 0) throw fail(cloneError(result.stderr.toString(), result.exitCode))
     }
     job.state = 'done'
   } catch (error) {

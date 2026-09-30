@@ -11,7 +11,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
 import { api } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
-import { PROJECT_LABEL } from "@/lib/sandbox-session"
+import { projectOf } from "@/lib/sandbox-session"
 import { SANDBOX_ROOT, TRANSFER_LIMIT, downloadCommand, formatBytes, uploadCommand } from "@/lib/files"
 
 const RUNNING = new Set(["waiting", "uploading", "cloning"])
@@ -81,7 +81,7 @@ function SeedStatus({ seed, onRetry }) {
 export function FilesView({ sandbox, demo }) {
   const name = sandbox.name
   const ready = sandbox.phase === "ready"
-  const project = sandbox.labels?.[PROJECT_LABEL]
+  const project = projectOf(sandbox)
   const [dir, setDir] = React.useState(project ? `${SANDBOX_ROOT}/${project}` : SANDBOX_ROOT)
   const [listing, setListing] = React.useState(null)
   const [error, setError] = React.useState(null)
