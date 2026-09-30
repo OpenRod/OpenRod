@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
+import { GroupPicker } from "@/components/group-picker"
 import { api } from "@/lib/api"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
 import { sessionCommand } from "@/lib/sandbox-session"
 import { STARTS } from "@/lib/image-templates"
+import { policiesFor } from "@/lib/groups"
 import { agentAccessFor } from "../../shared/agent-access.js"
 
 const PRESETS = [
@@ -67,6 +69,27 @@ function FolderSummary({ plan, sandbox }) {
   )
 }
 
+// Which group the sandbox joins, and what network access that brings.
+function GroupField({ org, value, onChange, onCreated, name }) {
+  const reach = policiesFor(org.policies, { name, group: value })
+  const counts = Object.fromEntries(org.groups.map((g) => [g.id, org.members?.[g.id]?.length ?? 0]))
+  const chosen = org.groups.find((g) => g.id === value)
+  return (
+    <div className="grid gap-1.5">
+      <span className="text-xs font-medium">Group</span>
+      <GroupPicker groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
+      <p className="text-[11px] text-muted-foreground">
+        {reach.length
+          ? <>Gets {reach.length === 1 ? "this egress policy" : `these ${reach.length} egress policies`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
+          : chosen ? <>No egress policy targets {chosen.name} yet. Add one on the Egress page, and it applies to every sandbox in the group.</>
+          : org.groups.length ? "Groups let egress policies follow sandboxes. You can change the group later on the Groups page."
+          : "Create a group to share network access between sandboxes. Egress policies can then target the whole group."}
+      </p>
+      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the security preset (<span className="font-mono">{chosen.template}</span>), which replaces the choice below.</p>}
+    </div>
+  )
+}
+
 function nextName(taken) {
   for (let i = 1; i < 1000; i++) {
     const name = `claude-${i}`
@@ -94,6 +117,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [folder, setFolder] = React.useState("")
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
+  const [org, setOrg] = React.useState(null)
+  const [group, setGroup] = React.useState(null)
 
   // Start from what this gateway already runs: the most-used image and every
   // provider, so the common case is one click.
@@ -111,6 +136,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     setPreset("claude"); setCustom(""); setError(null); setTemplate("locked-down")
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
     api.templates().then(setTemplates).catch(() => setTemplates([]))
+    setGroup(null)
+    api.org().then(setOrg).catch(() => setOrg(null))
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const command = preset === "custom" ? custom : PRESETS.find((p) => p.id === preset).command
@@ -131,6 +158,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     return () => { cancelled = true; clearTimeout(timer) }
   }, [start, folder])
 
+  // Groups from before the console managed them can pin the preset.
+  const pinnedPreset = org?.groups.find((g) => g.id === group)?.template ?? null
   const cloneDest = start === "repo" ? repoDest(repository) : null
   const startReady = start === "empty" || (start === "folder" ? Boolean(preview?.data && !preview.data.over) : Boolean(cloneDest))
 
@@ -139,7 +168,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     setBusy(true); setError(null)
     try {
       const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
-      const created = await api.create({ name: name.trim(), ...(imageTemplate ? { imageTemplate } : { image: image.trim(), command: command.trim().split(/\s+/).filter(Boolean) }), providers: chosen, template, ...files })
+      const created = await api.create({ name: name.trim(), ...(imageTemplate ? { imageTemplate } : { image: image.trim(), command: command.trim().split(/\s+/).filter(Boolean) }), providers: chosen, template, ...(group ? { group } : {}), ...files })
       toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
@@ -246,13 +275,17 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
             )}
           </div>
 
+          {org && <GroupField org={org} value={group} onChange={setGroup} name={name}
+            onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />}
+
           <div className="grid gap-1.5">
             <Label htmlFor="sandbox-template" className="text-xs">Security preset</Label>
-            <select id="sandbox-template" value={template} onChange={(e) => setTemplate(e.target.value)} title={templates.find((t) => t.id === template)?.description}
+            <select id="sandbox-template" value={pinnedPreset || template} onChange={(e) => setTemplate(e.target.value)} disabled={Boolean(pinnedPreset)} title={templates.find((t) => t.id === (pinnedPreset || template))?.description}
               className="h-8 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {(templates.length ? templates : [{ id: "locked-down", name: "Locked down" }]).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {pinnedPreset && !templates.some((t) => t.id === pinnedPreset) && <option value={pinnedPreset}>{pinnedPreset}</option>}
             </select>
-            <p className="text-[11px] text-muted-foreground">{templates.find((t) => t.id === template)?.description || "Filesystem and network access."} Shared rules still apply.</p>
+            <p className="text-[11px] text-muted-foreground">{templates.find((t) => t.id === (pinnedPreset || template))?.description || "Filesystem and network access."} Shared rules still apply.</p>
             {agentAccess.profiles.length > 0 && <div className="mt-2 rounded-md border border-border">
               <div className="border-b px-3 py-2">
                 <p className="text-xs font-medium">Agent default rules</p>

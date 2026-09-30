@@ -1,4 +1,4 @@
-import { Activity, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network } from "lucide-react"
+import { Activity, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -24,6 +24,7 @@ const NAV = [
 
 const POLICIES = [
   { label: "Organization", icon: Building2, view: "organization", disabled: true },
+  { label: "Groups", icon: Users, view: "groups" },
   { label: "Egress", icon: Network, view: "egress" },
   { label: "Ingress", icon: DoorOpen, view: "ingress" },
   { label: "Secrets", icon: KeyRound, view: "secrets" },
