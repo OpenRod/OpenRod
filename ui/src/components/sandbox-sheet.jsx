@@ -15,7 +15,7 @@ import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
 import { SESSION_LABEL, sessionCommand } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
-import { ownerOf, uptimeOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
+import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
 import { agentsOf, agentInventoryLabel } from "@/lib/agents"
@@ -237,7 +237,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                     )}
                     <Section title="At a glance">
                       <dl className="grid grid-cols-2 gap-4 lg:grid-cols-1">
-                        {[["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Uptime", uptimeOf(sandbox, now)], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
+                        {[["Status", <span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} aria-hidden="true" />{PHASE_LABEL[phase] ?? "Unknown"}</span>], ["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
                     </Section>
               {sandbox.problem && statusOf(phase) === "error" && (
@@ -326,7 +326,6 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               <dl className="grid grid-cols-1 gap-5  sm:grid-cols-2">
                 {[
                   ["Owner", ownerOf(sandbox)],
-                  ["Uptime", uptimeOf(sandbox, now)],
                   ["Image", imageName(sandbox.image, sandbox.imageTemplateName), true],
                   ...(sandbox.image && imageName(sandbox.image, sandbox.imageTemplateName) !== sandbox.image ? [["Image reference", sandbox.image, true]] : []),
                   ["Command", commandText(sandbox.command), true],
