@@ -18,6 +18,8 @@ import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from '
 import { editorRoute } from './editor.js'
 import { terminalRoute, terminalUpgrade } from './terminal.js'
 import { macTerminalScript, terminalLaunchError } from './local-terminal.js'
+import { setupRoute, resolveSetups } from './setups.js'
+import { deploymentRoute, startSetupInstall } from './setup-deployment.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
 
@@ -136,6 +138,11 @@ async function createSandbox(input) {
     try { selectedSession = templateSession(saved, input.session) } catch (error) { throw fail(error.message) }
     input = { ...input, image: '', session: selectedSession, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
+  const setupIds = [...new Set([...(saved?.recipe?.setups ?? []), ...(Array.isArray(input.setups) ? input.setups : [])])]
+  const setupTargets = input.setupTargets ?? (saved?.recipe?.agents ?? []).filter((id) => ['codex', 'claude', 'cursor'].includes(id))
+  await resolveSetups(setupIds)
+  if (setupIds.length && (!Array.isArray(setupTargets) || !setupTargets.length || setupTargets.length > 3 || new Set(setupTargets).size !== setupTargets.length || setupTargets.some((id) => !['codex', 'claude', 'cursor'].includes(id)))) throw fail('Choose a supported agent for the selected Setups.')
+  if (setupIds.length) input = { ...input, session: 'shell', command: [] }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
   const providers = Array.isArray(input.providers) ? input.providers.map(String) : []
@@ -182,7 +189,8 @@ async function createSandbox(input) {
   // Files arrive once the sandbox is ready, as with `sandbox create --upload`.
   // Console sessions start through exec, so an agent opened later finds them.
   if (seed) startSeed(ref.name, seed)
-  return { name: ref.name, phase: ref.phase, opened, labels, seed: seed ? { kind: seed.kind, source: seed.source, dest: seed.dest } : null }
+  if (setupIds.length) await startSetupInstall(ref.name, setupIds, setupTargets, ref.id)
+  return { name: ref.name, phase: ref.phase, opened, labels, setups: setupIds, seed: seed ? { kind: seed.kind, source: seed.source, dest: seed.dest } : null }
 }
 
 async function lifecycle(name, action) {
@@ -385,7 +393,7 @@ export function openshellApi() {
               return send(res, 200, store.query(options))
             }
             if (parts[0] === 'downloads' && parts.length === 2) return serveDownload(res, parts[1])
-            const routed = (await editorRoute('GET', parts)) ?? (await filesRoute('GET', parts, undefined, url)) ?? (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
+            const routed = (await setupRoute('GET', parts)) ?? (await deploymentRoute('GET', parts)) ?? (await editorRoute('GET', parts)) ?? (await filesRoute('GET', parts, undefined, url)) ?? (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
             if (routed !== undefined) return send(res, 200, routed)
             return send(res, 404, { error: 'Not found' })
           }
@@ -395,7 +403,7 @@ export function openshellApi() {
             return send(res, 200, await receiveUpload(req, parts[1], parts[3], url.searchParams.get('path')))
           }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
-          const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : 65536)
+          const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : parts[0] === 'setups' ? 128 * 1024 : 65536)
           if (parts[0] === 'activity' && parts.length === 2) {
             if (parts[1] === 'delete-preview') return send(res, 200, store.previewDeletion(input))
             if (parts[1] === 'delete') {
@@ -414,7 +422,7 @@ export function openshellApi() {
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          const routed = (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
         } catch (error) {

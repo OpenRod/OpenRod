@@ -1,5 +1,5 @@
 import { ThemeSwitcher } from "@/components/theme-switcher"
-import { Activity, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
+import { Activity, Package, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -20,6 +20,7 @@ import { useLive } from "@/lib/live"
 const NAV = [
   { label: "Sandboxes", icon: Box, view: "sandboxes" },
   { label: "Templates", icon: Layers3, view: "templates" },
+  { label: "Setups", icon: Package, view: "setups" },
   { label: "Activity", icon: Activity, view: "activity" },
 ]
 

@@ -16,16 +16,16 @@ export function quickSession(ids, openIn) {
   return agent.command
 }
 
-export function quickRecipe(agentId, name = '', openIn = 'agent') {
+export function quickRecipe(agentId, name = '', openIn = 'agent', withSetups = false) {
   if (!['agent', 'shell'].includes(openIn)) throw new Error('Choose Shell or the selected agent.')
   const agents = normalizeQuickAgents(agentId)
   const agent = QUICK_AGENTS.find((item) => item.id === agents[0])
   // Composed images are independent of which session opens on connection.
-  return newRecipe({ name, agents, command: Array.isArray(agentId) || openIn === 'shell' ? '' : agent?.command || '' })
+  return newRecipe({ name, agents, ...(withSetups ? { runtimes: ['python'] } : {}), command: Array.isArray(agentId) || openIn === 'shell' ? '' : agent?.command || '' })
 }
 
-export function matchingQuickTemplate(items, agentId, openIn = 'agent') {
-  const expected = quickRecipe(agentId, '', openIn)
+export function matchingQuickTemplate(items, agentId, openIn = 'agent', withSetups = false) {
+  const expected = quickRecipe(agentId, '', openIn, withSetups)
   return items.find((item) => item.managed && item.status === 'ready' && item.image &&
     JSON.stringify(newRecipe({ ...item.recipe, name: '' })) === JSON.stringify(expected))
 }
@@ -43,18 +43,18 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) cancel()
 })
 
-export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', signal, onProgress = () => {}, onBuild = () => {}, wait = pause } = {}) {
+export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', withSetups = false, signal, onProgress = () => {}, onBuild = () => {}, wait = pause } = {}) {
   const check = () => { if (signal?.aborted) throw new DOMException('Preparation cancelled.', 'AbortError') }
   check()
   const items = await api.imageTemplates()
   check()
-  const existing = matchingQuickTemplate(items, agentId, openIn)
+  const existing = matchingQuickTemplate(items, agentId, openIn, withSetups)
   if (existing) return existing
   const ids = normalizeQuickAgents(agentId)
   const label = ids.length > 1 ? 'agents' : ids[0] || 'terminal'
   const name = `q-${label.slice(0, 9)}-${crypto.randomUUID().slice(0, 6)}`
   onProgress('Preparing environment… First-time setup can take a few minutes.')
-  const job = await api.buildImageTemplate(quickRecipe(agentId, name, openIn))
+  const job = await api.buildImageTemplate(quickRecipe(agentId, name, openIn, withSetups))
   onBuild(name)
   check()
   if (job.status === 'failed') throw new Error(job.error || 'Environment build failed.')

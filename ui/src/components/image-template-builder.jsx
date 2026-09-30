@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Spinner } from '@/components/ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { SetupPicker } from '@/components/setups-view'
 import { api } from '@/lib/api'
 import { AGENTS, BASES, PENDING_RECIPE_KEY, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
 
@@ -129,6 +130,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
             {local.images.map((i) => <option key={i.reference} value={i.reference}>{i.reference}</option>)}
           </SelectField>}
         </Field>}
+        <SetupPicker value={recipe.setups} onChange={(setups) => patch({ setups })} />
         <StartsIn starts={starts} recipe={recipe} custom={custom} setCustom={setCustom} patch={patch} />
 
         <div className="border-t pt-4">

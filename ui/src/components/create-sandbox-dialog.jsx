@@ -1,3 +1,4 @@
+import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
 import { Check, ChevronRight, Info, Terminal } from "lucide-react"
@@ -118,6 +119,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const providers = overview?.providers ?? []
   const [name, setName] = React.useState("")
   const [images, setImages] = React.useState([])
+  const [setupIds, setSetupIds] = React.useState([])
+  const [setupTarget, setSetupTarget] = React.useState("claude")
   const [imageTemplate, setImageTemplate] = React.useState("")
   const [chosen, setChosen] = React.useState([])
   const [mode, setMode] = React.useState("quick")
@@ -146,6 +149,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     setName(nextName(new Set(list.map((s) => s.name))))
     setMode(initialImageTemplate ? "template" : "quick")
     setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setProgress("")
+    setSetupIds([]); setSetupTarget("codex")
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
@@ -166,6 +170,9 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   }))] : chosen
   const templateAgents = chosenImage?.managed && chosenImage.recipe.source === "build" ? AGENTS.filter((agent) => chosenImage.recipe.agents.includes(agent.id)) : null
 
+  const quickSetupTargets = agentIds.filter((id) => ['codex', 'claude', 'cursor'].includes(id))
+  const hasSetups = setupIds.length > 0 || Boolean(chosenImage?.recipe?.setups?.length)
+  const missingSetupAgent = mode === "quick" && hasSetups && !quickSetupTargets.length
 
   function toggleAgent(id) {
     const next = agentIds.includes(id) ? agentIds.filter((item) => item !== id) : [...agentIds, id]
@@ -201,7 +208,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
 
   async function submit(event) {
     event.preventDefault()
-    if (busy || (mode === "template" && !chosenImage)) return
+    if (busy || missingSetupAgent || (mode === "template" && !chosenImage)) return
     setBusy(true); setError(null); setProgress("")
     const controller = new AbortController()
     preparation.current = controller
@@ -212,7 +219,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       if (mode === "quick") {
         setPreparing(true)
         environment = await prepareQuickTemplate(api, agentIds, {
-          signal: controller.signal, onProgress: setProgress,
+          withSetups: setupIds.length > 0, signal: controller.signal, onProgress: setProgress,
           onBuild: (value) => {
             buildName.current = value
             if (controller.signal.aborted) void api.cancelImageBuild(value).catch(() => {})
@@ -221,7 +228,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       }
       if (controller.signal.aborted) return
       setPreparing(false); setProgress("Creating sandbox…")
-      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, ...(group ? { group } : {}), ...files })
+      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, setups: setupIds, setupTargets: mode === "quick" ? quickSetupTargets : [setupTarget], ...(group ? { group } : {}), ...files })
       toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
@@ -319,7 +326,12 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               </div>
             </TabsContent>
 
-
+            <div className="space-y-3 border-t pt-4">
+              <SetupPicker value={setupIds} onChange={setSetupIds} inherited={chosenImage?.recipe?.setups ?? []} />
+              {hasSetups && (mode === "quick" ? <p role={missingSetupAgent ? "alert" : undefined} className={`text-xs ${missingSetupAgent ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {missingSetupAgent ? 'Select Codex, Claude Code or Cursor above to use this Setup.' : `Configure for: ${selectedAgents.filter((agent) => quickSetupTargets.includes(agent.id)).map((agent) => agent.name).join(', ')}.`}
+              </p> : <fieldset className="space-y-2"><legend className="text-xs font-medium">Configure Setups for</legend><div className="flex gap-4">{[['claude', 'Claude Code'], ['codex', 'Codex'], ['cursor', 'Cursor']].map(([id, label]) => <label key={id} className="flex items-center gap-1.5 text-xs"><input type="radio" name="setup-agent" value={id} checked={setupTarget === id} onChange={() => setSetupTarget(id)} />{label}</label>)}</div><p className="text-[11px] text-muted-foreground">The selected agent and Python 3.11+ must be installed in the template.</p></fieldset>)}
+            </div>
 
             {mode === "template" && <div className="grid gap-1.5">
               <span className="text-xs font-medium">Providers</span>
@@ -432,7 +444,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 if (buildName.current) void api.cancelImageBuild(buildName.current).catch((e) => toast.error(e.message))
               } else onOpenChange(false)
             }}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
-            <Button type="submit" disabled={busy || !name || !startReady || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+            <Button type="submit" disabled={busy || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
               {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
             </Button>
           </DialogFooter>

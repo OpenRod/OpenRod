@@ -125,3 +125,19 @@ test('adding a second agent overrides any previous agent session with Shell', as
   assert.equal(quickSession(['codex', 'claude'], 'shell'), 'shell')
   assert.equal(quickSession(['codex'], 'shell'), 'shell')
 })
+
+test('quick setup attachments require an image with Python without baking private snapshots into shared templates', async () => {
+  const withoutPython = ready(['codex'])
+  assert.equal(matchingQuickTemplate([withoutPython], ['codex'], 'agent', true), undefined)
+  const prepared = { ...ready(['codex']), recipe: quickRecipe(['codex'], 'saved', 'agent', true) }
+  assert.equal(matchingQuickTemplate([prepared], ['codex'], 'agent', true), prepared)
+  let built
+  const api = {
+    imageTemplates: async () => built ? [{ name: built.name, status: 'ready', recipe: built, image: 'test:image' }] : [withoutPython],
+    buildImageTemplate: async (recipe) => { built = recipe; return { status: 'building' } },
+  }
+  await prepareQuickTemplate(api, ['codex'], { withSetups: true, wait: async () => {} })
+  assert.deepEqual(built.runtimes, ['python'])
+  assert.deepEqual(built.setups, [])
+  assert.match(dockerfileFor(built), /python3/)
+})
