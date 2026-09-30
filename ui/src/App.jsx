@@ -23,7 +23,7 @@ const TITLES = {
   ingress: "Ingress",
   secrets: "Secrets",
   templates: "Templates",
-  setups: "Setups",
+  setups: "MCPs & Skills",
 }
 
 // One page failing to render must not take the console down with it.
