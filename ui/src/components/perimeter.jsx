@@ -132,8 +132,7 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
   const allOpen = expandableGroups.every((key) => expanded[key])
   return <TooltipProvider delay={150}>
     <div className={cn("@container flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card font-sans", fill && "flex-1")} aria-label={`Access graph for ${name}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-1.5">
-        <span className="text-[10px] text-muted-foreground">Drag nodes to arrange · Select a group to explore</span>
+      <div className="flex items-center justify-end gap-3 border-b border-border/50 px-4 py-1.5">
         <div className="flex shrink-0 items-center gap-3"><button type="button" onClick={resetLayout} className="rounded px-1 text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">Reset layout</button>
         <button type="button" onClick={() => setExpanded(Object.fromEntries(expandableGroups.map((key) => [key, !allOpen])))} className="rounded px-1 text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">{allOpen ? "Collapse all" : "Expand all"}</button></div>
       </div>
@@ -159,7 +158,7 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
                     className={cn("border-0 shadow-none", kind === "skills" && "border-t border-border/60")}>
                     <div data-resource-list className="max-h-48 touch-pan-y select-text space-y-0.5 overflow-y-auto overscroll-contain">
                       {items.map((item) => <div key={item.name} className="flex min-h-[23px] items-center gap-2 rounded-md border border-border/80 bg-card px-2.5 py-1 text-[11px]">
-                        <span className="min-w-0 flex-1 break-words">{item.name}</span>
+                        <span className="min-w-0 flex-1 break-words">{kind === "skills" ? item.name.replace(/^os-[a-f0-9]{8}-(?=.)/i, "") : item.name}</span>
                         {item.disabled && <span className="shrink-0 text-[10px] text-muted-foreground">Disabled</span>}
                       </div>)}
                       {!items.length && <p className="px-2 py-2 text-center text-[11px] text-muted-foreground">{checked ? `No ${title} found in user configuration` : `${title} inventory unavailable`}</p>}
