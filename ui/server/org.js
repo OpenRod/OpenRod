@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WORKSPACE, gateway, sandboxView } from './gateway.js'
-import { findTemplate, templateToPolicy } from './policy.js'
+import { findTemplate, ruleToProto, templateToPolicy } from './policy.js'
 import { appliesTo, blockHosts, blockedByPolicy, compileFor, listPolicies, removePolicy, validatePolicy, writePolicy } from './egress.js'
 import { hostMatches } from '../src/lib/egress.js'
 
@@ -137,8 +137,20 @@ const managedRules = (org, policies, sandbox, openPorts) => compileFor(sandbox, 
 const openPorts = (networkPolicies) => Object.entries(networkPolicies ?? {}).filter(([key]) => !isManaged(key))
   .flatMap(([, rule]) => (rule.endpoints ?? []).flatMap((e) => (e.ports?.length ? e.ports : e.port ? [e.port] : [])))
 
+// An agent's reviewed destinations, as sandbox rules named agent-<id>. They
+// are not managed rules: the pass leaves them alone, and a block still wins.
+export function addAgentAccess(policy, agentRules, org) {
+  assertNotBlocked(org, agentRules, 'Agent access')
+  for (const spec of agentRules) {
+    const { name, rule } = ruleToProto(spec)
+    if (policy.networkPolicies[name]) throw fail(`Security preset rule "${name}" conflicts with required agent access. Rename that rule.`)
+    policy.networkPolicies[name] = rule
+  }
+  return policy
+}
+
 // Everything a new sandbox needs from its group, resolved before it exists.
-export async function planSandbox({ name, group: groupId, template: templateId }) {
+export async function planSandbox({ name, group: groupId, template: templateId, agentRules = [] }) {
   const [org, policies] = await Promise.all([readOrg(), listPolicies()])
   let group = null
   if (groupId) {
@@ -149,6 +161,7 @@ export async function planSandbox({ name, group: groupId, template: templateId }
   if (!template) throw fail('Unknown policy template.')
   assertNotBlocked(org, template.rules, 'Template')
   const policy = templateToPolicy(template)
+  addAgentAccess(policy, agentRules, org)
   Object.assign(policy.networkPolicies, managedRules(org, policies, { name, group: group?.id ?? null }, openPorts(policy.networkPolicies)))
   return {
     policy,

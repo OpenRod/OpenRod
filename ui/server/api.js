@@ -16,6 +16,7 @@ import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper } from './org
 import { expose, ingressRoute, startSweeper } from './ingress.js'
 import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 import { editorRoute } from './editor.js'
+import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
 
 // These routes act with the operator's gateway certificate. A loopback Host
@@ -123,6 +124,10 @@ async function createSandbox(input) {
   // its image and environment; the console adds how the sandbox starts.
   const saved = input.imageTemplate ? await imageTemplateForLaunch(String(input.imageTemplate)) : null
   const imageLabels = saved ? { [IMAGE_TEMPLATE_NAME]: saved.name } : {}
+  // A built template's agents get their sign-in and model destinations from
+  // the reviewed table in shared/agent-access.js, never from the recipe.
+  let agentRules = []
+  if (saved?.managed) { try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) } }
   if (saved) {
     const start = saved.recipe.command.trim()
     input = { ...input, image: '', session: !start ? 'shell' : start !== 'shell' && isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
@@ -142,7 +147,7 @@ async function createSandbox(input) {
   // Files, Landlock and process identity are fixed at creation, and so is the
   // group label. The whole policy (template + organization + group rules) is
   // resolved here from stored policy, never accepted raw from the browser.
-  const plan = await planSandbox({ name: String(input.name ?? ''), group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null })
+  const plan = await planSandbox({ name: String(input.name ?? ''), group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null, agentRules })
   // A folder or repository to start from is checked before anything is created.
   const seed = await planSeed({ folder: input.folder ? String(input.folder) : null, repository: input.repository ? String(input.repository) : null })
   const template = plan.template

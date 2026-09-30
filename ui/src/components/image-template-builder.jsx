@@ -87,7 +87,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
           <Input id="template-name" value={recipe.name} disabled={replace} maxLength={19} onChange={(e) => patch({ name: e.target.value.toLowerCase() })} placeholder="frontend-app" className="font-mono text-xs" autoFocus={!replace} />
         </Field>
         {build ? <>
-          <Field label="Agents" hint="Installed at build time. Attach their credentials when you launch a sandbox.">
+          <Field label="Agents" hint="Installed at build time. Each agent's sign-in and model destinations are allowed when you launch; attach its credentials then.">
             <div className="grid gap-2 sm:grid-cols-2">{AGENTS.filter((a) => a.featured).map((a) => <Toggle key={a.id} selected={recipe.agents.includes(a.id)} onClick={() => toggleAgent(a.id)}><img src={a.logo} alt="" className="size-5 object-contain" /><span className="font-medium text-foreground">{a.name}</span></Toggle>)}</div>
             <button type="button" aria-expanded={moreAgents} onClick={() => setMoreAgents((v) => !v)} className="flex items-center gap-1.5 justify-self-start rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
               <ChevronRight className={`size-3 transition-transform ${moreAgents ? 'rotate-90' : ''}`} />More agents{!moreAgents && AGENTS.some((a) => !a.featured && recipe.agents.includes(a.id)) && ` · ${AGENTS.filter((a) => !a.featured && recipe.agents.includes(a.id)).length} selected`}
@@ -137,7 +137,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
             {build && <Button type="button" variant="outline" size="sm" onClick={() => setCodeOpen(true)}><FileCode2 />View Dockerfile</Button>}
           </div>}
         </div>
-        <div className="flex gap-3 rounded-lg border bg-muted/30 p-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="text-[11px] leading-relaxed text-muted-foreground">Software only. Network, file and credential access come from the security preset you pick at launch.</p></div>
+        <div className="flex gap-3 rounded-lg border bg-muted/30 p-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="text-[11px] leading-relaxed text-muted-foreground">Software only. Network, file and credential access come from the security preset you pick at launch, plus the selected agents' own sign-in and model destinations.</p></div>
         {error && <p role="alert" className="whitespace-pre-wrap rounded-md border border-red-200 bg-red-50/60 p-3 text-xs text-red-700">{error}</p>}
       </fieldset>
     </div>
