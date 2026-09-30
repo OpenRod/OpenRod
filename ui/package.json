@@ -13,7 +13,6 @@
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@fontsource-variable/instrument-sans": "^5.3.0",
-    "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource/instrument-serif": "^5.3.0",
     "@nvidia/openshell-sdk": "file:vendor/nvidia-openshell-sdk-0.0.0.tgz",
     "@xterm/addon-fit": "^0.11.0",
