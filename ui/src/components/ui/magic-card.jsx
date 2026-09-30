@@ -3,18 +3,15 @@ import { motion, useMotionTemplate, useMotionValue } from "motion/react"
 
 import { cn } from "@/lib/utils"
 
-// Magic UI's Magic Card, converted to JSX. Two changes for this app: the orb
-// mode and the next-themes lookup are dropped (the Desk is light-only), and the
-// purple/pink default gradient is replaced by stone - a spotlight in a hue the
-// design system does not own would be the loudest thing on the page.
+// Magic UI spotlight using the console appearance tokens.
 export function MagicCard({
   children,
   className,
   gradientSize = 180,
   gradientColor = "rgba(120, 113, 108, 0.10)",
   gradientOpacity = 1,
-  gradientFrom = "#a8a29e",
-  gradientTo = "#e7e5e4",
+  gradientFrom = "var(--ink-faint)",
+  gradientTo = "var(--border)",
 }) {
   const mouseX = useMotionValue(-gradientSize)
   const mouseY = useMotionValue(-gradientSize)

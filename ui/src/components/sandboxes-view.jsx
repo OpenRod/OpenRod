@@ -190,7 +190,7 @@ export function SandboxesView({ onNavigate }) {
           <select aria-label="Filter by image" value={imageFilter} onChange={(e) => setImageFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="">All images</option>{images.map((image) => <option key={image}>{image}</option>)}</select>
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={live.refresh}><RefreshCw className="size-3.5" /></Button>
-          <Button size="sm" onClick={() => setCreating(true)} className="bg-[var(--action)] text-white hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
+          <Button size="sm" onClick={() => setCreating(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
         </div>
         {selectedBoxes.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent/30 px-6 py-2">
           <span role="status" className="mr-auto text-xs"><strong>{number(selectedBoxes.length)}</strong> selected{selectedBoxes.length > matchingSelected && <span className="text-muted-foreground"> · {number(selectedBoxes.length - matchingSelected)} outside current filters</span>}</span>
