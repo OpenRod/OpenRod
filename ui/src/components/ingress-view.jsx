@@ -216,7 +216,7 @@ export function IngressView() {
   const ttl = data?.sessions?.ttlSeconds
 
   return (
-    <div className="flex h-[calc(100svh-3.5rem)] min-h-0">
+    <div className="flex h-full min-h-0">
       <nav aria-label="Sandbox" className="hidden w-56 shrink-0 overflow-y-auto border-r border-border bg-background p-3 md:block">
         <p className="px-2 pb-2 text-[10px] font-bold tracking-widest text-faint uppercase">Sandboxes</p>
         {sandboxes.map((s) => (

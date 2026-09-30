@@ -1,4 +1,4 @@
-import { Activity, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
+import { Activity, Box, Building2, Layers3, KeyRound, Network, ShieldCheck, Users } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -22,11 +22,13 @@ const NAV = [
   { label: "Activity", icon: Activity, view: "activity" },
 ]
 
-const POLICIES = [
+// Network is one page with Egress and Ingress tabs; each tab is its own view,
+// and clicking Network while on a tab keeps that tab.
+const SECURITY = [
   { label: "Organization", icon: Building2, view: "organization", disabled: true },
   { label: "Groups", icon: Users, view: "groups" },
-  { label: "Egress", icon: Network, view: "egress" },
-  { label: "Ingress", icon: DoorOpen, view: "ingress" },
+  { label: "Policies", icon: ShieldCheck, view: "policies" },
+  { label: "Network", icon: Network, view: "egress", also: ["ingress"] },
   { label: "Secrets", icon: KeyRound, view: "secrets" },
 ]
 
@@ -69,14 +71,14 @@ export function AppSidebar({ view, onNavigate }) {
 
         <SidebarGroup className="p-0 pt-4">
           <SidebarGroupLabel className="px-3 text-[10px] font-bold tracking-widest text-faint uppercase">
-            Policies
+            Security
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {POLICIES.map(({ label, icon: Icon, view: target, disabled }) => (
+              {SECURITY.map(({ label, icon: Icon, view: target, also = [], disabled }) => (
                 <SidebarMenuItem key={target}>
-                  <SidebarMenuButton disabled={disabled} isActive={!disabled && view === target}
-                    onClick={disabled ? undefined : () => onNavigate(target)}
+                  <SidebarMenuButton disabled={disabled} isActive={!disabled && (view === target || also.includes(view))}
+                    onClick={disabled ? undefined : () => onNavigate(also.includes(view) ? view : target)}
                     className={disabled ? "h-auto items-start text-muted-foreground" : undefined}>
                     <Icon className={disabled ? "mt-0.5" : undefined} />
                     <span>

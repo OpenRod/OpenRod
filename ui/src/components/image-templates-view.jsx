@@ -3,11 +3,9 @@ import { ArrowRight, Copy, HardDrive, Pencil, Plus, RotateCw, Search, Trash2, X 
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
-import { SecurityPresetsView } from '@/components/templates-view'
 import { ImageTemplateBuilder } from '@/components/image-template-builder'
 import { CreateSandboxDialog } from '@/components/create-sandbox-dialog'
 import { api } from '@/lib/api'
@@ -24,7 +22,6 @@ function Status({ record }) {
 const startsIn = (command) => STARTS.find((s) => s.id === command)?.name ?? command
 
 export function TemplatesView() {
-  const [tab, setTab] = React.useState('images')
   const [records, setRecords] = React.useState(null)
   const [error, setError] = React.useState('')
   const [query, setQuery] = React.useState('')
@@ -46,48 +43,37 @@ export function TemplatesView() {
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
     {editor && <ImageTemplateBuilder key={editor.recipe?.name || 'new'} initial={editor} onClose={closeEditor} onStarted={(record) => { closeEditor(); setSelectedName(record.name); load() }} />}
-    <Tabs value={tab} onValueChange={setTab} className="gap-0">
-      <div className="border-b bg-card px-4 sm:px-8">
-        <TabsList variant="line" className="h-11! gap-5 p-0">
-          <TabsTrigger value="images" className="h-full px-0 text-xs after:bottom-0!">Image templates</TabsTrigger>
-          <TabsTrigger value="security" className="h-full px-0 text-xs after:bottom-0!">Security presets</TabsTrigger>
-        </TabsList>
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
+      <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
+        <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
+        <Input aria-label="Search image templates" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
       </div>
-      <TabsContent value="images" className="m-0">
-        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
-          <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
-            <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
-            <Input aria-label="Search image templates" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
-          </div>
-          <Button size="sm" className={action} onClick={() => setEditor({})}><Plus />New template</Button>
+      <Button size="sm" className={action} onClick={() => setEditor({})}><Plus />New template</Button>
+    </div>
+    {error ? <div role="alert" className="px-4 py-6 text-xs sm:px-8"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>
+      : records === null ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
+      : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground">
+        <p>{records.length ? 'No matching templates.' : 'No image templates yet.'}</p>
+        {query && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setQuery('')}>Clear search</Button>}
+      </div>
+      : <BlurFade duration={0.15} offset={0} blur="0px">
+        <div className="overflow-x-auto">
+          <table aria-label="Image templates" className="w-full min-w-[580px] text-left">
+            <thead className="border-b text-[11px] text-muted-foreground">
+              <tr><th className="px-4 py-2 font-normal sm:pl-8">Name</th><th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
+            </thead>
+            <tbody className="divide-y">{shown.map((t) => <tr key={t.name} className="hover:bg-muted/40">
+              <td className="max-w-72 px-4 py-2 sm:pl-8">
+                <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedName(t.name)}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
+              </td>
+              <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '—' : startsIn(t.recipe.command)}</td>
+              <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
+              <td className="px-4 py-2"><Status record={t} /></td>
+              <td className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="xs" onClick={() => launchable(t) ? setLaunch(t) : setSelectedName(t.name)}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button></td>
+            </tr>)}</tbody>
+          </table>
         </div>
-        {error ? <div role="alert" className="px-4 py-6 text-xs sm:px-8"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>
-          : records === null ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
-          : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground">
-            <p>{records.length ? 'No matching templates.' : 'No image templates yet.'}</p>
-            {query && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setQuery('')}>Clear search</Button>}
-          </div>
-          : <BlurFade duration={0.15} offset={0} blur="0px">
-            <div className="overflow-x-auto">
-              <table aria-label="Image templates" className="w-full min-w-[580px] text-left">
-                <thead className="border-b text-[11px] text-muted-foreground">
-                  <tr><th className="px-4 py-2 font-normal sm:pl-8">Name</th><th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
-                </thead>
-                <tbody className="divide-y">{shown.map((t) => <tr key={t.name} className="hover:bg-muted/40">
-                  <td className="max-w-72 px-4 py-2 sm:pl-8">
-                    <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedName(t.name)}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
-                  </td>
-                  <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '—' : startsIn(t.recipe.command)}</td>
-                  <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
-                  <td className="px-4 py-2"><Status record={t} /></td>
-                  <td className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="xs" onClick={() => launchable(t) ? setLaunch(t) : setSelectedName(t.name)}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button></td>
-                </tr>)}</tbody>
-              </table>
-            </div>
-          </BlurFade>}
-      </TabsContent>
-      <TabsContent value="security" className="m-0"><SecurityPresetsView /></TabsContent>
-    </Tabs>
+      </BlurFade>}
     <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelectedName(null) }}><DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl">
       {selected && <><DialogHeader><DialogTitle className="font-mono">{selected.name}</DialogTitle><DialogDescription>{selected.managed === false ? 'Created outside the console. Edit it with the openshell CLI.' : 'OpenShell sandbox template'}</DialogDescription></DialogHeader><Status record={selected} />
         <dl className="divide-y rounded-lg border px-4 text-xs">{[
