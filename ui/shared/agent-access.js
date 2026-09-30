@@ -30,7 +30,9 @@ export const AGENT_ACCESS = {
     name: 'Codex',
     binaries: ['/usr/bin/codex', '/usr/local/bin/codex', '/usr/local/lib/node_modules/@openai/**/codex', '/usr/lib/node_modules/@openai/**/codex'],
     endpoints: ['api.openai.com', 'auth.openai.com', 'chatgpt.com', 'ab.chatgpt.com'].map(host => endpoint(host)),
-    authentication: 'Attach a Codex credential, or sign in with a device code or API key when Codex first starts.',
+    // Codex's "Sign in with ChatGPT" redirects the host browser to a callback
+    // server inside the sandbox, which the browser cannot reach.
+    authentication: 'Attach a Codex credential, or run codex after connecting and choose “Sign in with Device Code” (ChatGPT plan) or “Provide your own API key”. “Sign in with ChatGPT” can’t complete from a sandbox.',
   },
   // Legacy saved images retain their launch policy; this agent is no longer offered.
   gemini: profile('Gemini CLI', [...node, '/usr/local/bin/gemini'], google),
