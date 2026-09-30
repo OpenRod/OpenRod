@@ -108,7 +108,7 @@ function validateGroup(input) {
     id,
     name: String(input.name ?? id).trim().slice(0, 80) || id,
     description: String(input.description ?? '').slice(0, 400),
-    // A group may pin the security preset of sandboxes created in it. Groups
+    // A group may pin the policy (template) of sandboxes created in it. Groups
     // made in the console leave it to the launch dialog.
     template: input.template ? String(input.template) : null,
     outside,
@@ -177,7 +177,7 @@ export function addAgentAccess(policy, agentRules, org) {
   assertNotBlocked(org, agentRules, 'Agent access')
   for (const spec of agentRules) {
     const { name, rule } = ruleToProto(spec)
-    if (policy.networkPolicies[name]) throw fail(`Policy rule "${name}" conflicts with required agent access. Rename that rule.`)
+    if (policy.networkPolicies[name]) throw fail(`The policy's rule "${name}" conflicts with required agent access. Rename that rule.`)
     policy.networkPolicies[name] = rule
   }
   return policy

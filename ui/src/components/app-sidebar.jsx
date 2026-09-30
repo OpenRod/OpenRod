@@ -22,7 +22,8 @@ const NAV = [
   { label: "Activity", icon: Activity, view: "activity" },
 ]
 
-// Network is one page with Egress and Ingress tabs; each tab is its own view.
+// Network is one page with Egress and Ingress tabs; each tab is its own view,
+// and clicking Network while on a tab keeps that tab.
 const SECURITY = [
   { label: "Organization", icon: Building2, view: "organization", disabled: true },
   { label: "Groups", icon: Users, view: "groups" },
@@ -77,7 +78,7 @@ export function AppSidebar({ view, onNavigate }) {
               {SECURITY.map(({ label, icon: Icon, view: target, also = [], disabled }) => (
                 <SidebarMenuItem key={target}>
                   <SidebarMenuButton disabled={disabled} isActive={!disabled && (view === target || also.includes(view))}
-                    onClick={disabled ? undefined : () => onNavigate(target)}
+                    onClick={disabled ? undefined : () => onNavigate(also.includes(view) ? view : target)}
                     className={disabled ? "h-auto items-start text-muted-foreground" : undefined}>
                     <Icon className={disabled ? "mt-0.5" : undefined} />
                     <span>
