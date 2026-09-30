@@ -16,13 +16,13 @@ const Node = React.forwardRef(function Node({ item, denied, active, onFocus, onB
   return <div ref={ref} className={cn("relative z-10 flex h-[23px] w-full min-w-0 items-center rounded-md border bg-card transition-colors", active ? "border-stone-400" : "border-border/80")}>
     <Tooltip>
       <TooltipTrigger render={<button type="button" />} onMouseEnter={onFocus} onMouseLeave={onBlur} onFocus={onFocus} onBlur={onBlur}
-        aria-label={`${item.host}, ${denied ? `${item.count} blocked attempts` : `${source.label} policy`}`}
+        aria-label={`${item.host}, ${denied ? `${item.count} blocked attempts` : `allowed · ${source.label}`}`}
         className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{item.host}</span>
         {denied ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{item.count}×</span> : <span className={cn("size-1 shrink-0 rounded-full", source.swatch)} />}
 
       </TooltipTrigger>
-      <TooltipContent className="max-w-sm break-all font-sans">{item.host} · {denied ? "Blocked in recent activity" : `Allowed by ${source.label.toLowerCase()} policy`}</TooltipContent>
+      <TooltipContent className="max-w-sm break-all font-sans">{item.host} · {denied ? "Blocked in recent activity" : `Allowed · ${source.label}`}</TooltipContent>
     </Tooltip>
     {denied && onAllow && <Button size="sm" variant="ghost" className="mr-1 px-2 text-[11px]" onClick={onAllow}>Review</Button>}
   </div>

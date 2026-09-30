@@ -111,7 +111,7 @@ function OpenInTerminal({ name, disabled }) {
 }
 
 const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules", blocked: "blocked" }
-const RULE_TAG = { secret: "from provider", policy: "policy", org: "blocked everywhere", group: "inherited", agent: "agent defaults", own: "rule" }
+const RULE_TAG = { secret: "from provider", policy: "network rule", org: "blocked everywhere", group: "inherited", agent: "agent defaults", own: "rule" }
 
 export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const context = useLive()

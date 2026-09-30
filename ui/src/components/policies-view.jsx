@@ -73,12 +73,12 @@ function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
     <Sheet open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <SheetContent className="w-full! overflow-y-auto sm:max-w-[560px]!" aria-describedby={undefined}>
         <SheetHeader className="border-b p-6">
-          <SheetTitle>{initial?.idLocked ? "Edit security preset" : "New security preset"}</SheetTitle>
+          <SheetTitle>{initial?.idLocked ? "Edit policy" : "New policy"}</SheetTitle>
         </SheetHeader>
         <div className="space-y-5 px-6 pb-6">
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
-              <Label htmlFor="tpl-name" className="text-xs">Preset name</Label>
+              <Label htmlFor="tpl-name" className="text-xs">Policy name</Label>
               <Input id="tpl-name" value={t.name} onChange={(e) => setT({ ...t, name: e.target.value, id: t.idLocked ? t.id : e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) })} className="text-xs" />
             </div>
             <div className="grid gap-1.5">
@@ -163,10 +163,10 @@ function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
           </div>
         </div>
         <RuleEditor open={Boolean(rule)} onOpenChange={(o) => { if (!o) setRule(null) }} initial={rule?.spec} knownPrograms={knownPrograms}
-          title={rule?.index >= 0 ? `Edit ${rule.spec.name}` : "Add rule to template"} submitLabel={rule?.index >= 0 ? "Update rule" : "Add rule"}
+          title={rule?.index >= 0 ? `Edit ${rule.spec.name}` : "Add rule to policy"} submitLabel={rule?.index >= 0 ? "Update rule" : "Add rule"}
           onSubmit={async (spec) => {
             const rules = rule.index >= 0 ? t.rules.map((r, j) => (j === rule.index ? spec : r)) : [...t.rules, spec]
-            if (new Set(rules.map((r) => r.name)).size !== rules.length) throw new Error("Another rule in this template has that name.")
+            if (new Set(rules.map((r) => r.name)).size !== rules.length) throw new Error("Another rule in this policy has that name.")
             setT({ ...t, rules })
           }} />
       </SheetContent>
@@ -174,7 +174,9 @@ function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
   )
 }
 
-export function SecurityPresetsView() {
+// Saved policies: the files and starting network rules a sandbox is created
+// with. New sandbox picks one; later changes happen on the Network page.
+export function PoliciesView() {
   const live = useLive()
   const [templates, setTemplates] = React.useState(null)
   const [editing, setEditing] = React.useState(null)
@@ -200,11 +202,11 @@ export function SecurityPresetsView() {
   ) : []
 
   return (
-    <div>
+    <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
         <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
           <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
-          <Input aria-label="Search security presets" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
+          <Input aria-label="Search policies" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
         </div>
         {sandboxes.length > 0 && (
           <SelectField value="" onChange={(e) => e.target.value && fromSandbox(e.target.value)} aria-label="Capture a sandbox's policy"
@@ -214,16 +216,16 @@ export function SecurityPresetsView() {
           </SelectField>
         )}
         <Button size="sm" disabled={!Array.isArray(templates)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"
-          onClick={() => setEditing({ ...structuredClone(templates[0]), id: "my-preset", name: "My preset", description: "", builtin: false })}>
-          <Plus />New security preset
+          onClick={() => setEditing({ ...structuredClone(templates[0]), id: "my-policy", name: "My policy", description: "", builtin: false })}>
+          <Plus />New policy
         </Button>
       </div>
       {templates?.error ? <div role="alert" className="px-4 py-6 text-xs sm:px-8"><p>{templates.error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>
         : !templates ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
-        : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground"><p>No matching presets.</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => setQuery('')}>Clear search</Button></div>
+        : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground"><p>No matching policies.</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => setQuery('')}>Clear search</Button></div>
         : <BlurFade duration={0.15} offset={0} blur="0px">
           <div className="overflow-x-auto">
-            <table aria-label="Security presets" className="w-full min-w-[580px] text-left">
+            <table aria-label="Policies" className="w-full min-w-[580px] text-left">
               <thead className="border-b text-[11px] text-muted-foreground">
                 <tr><th className="px-4 py-2 font-normal sm:pl-8">Name</th><th className="px-4 py-2 font-normal">Network access</th><th className="px-4 py-2 font-normal">Type</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
               </thead>
@@ -231,9 +233,9 @@ export function SecurityPresetsView() {
                 const hosts = [...new Set(t.rules.flatMap((r) => r.endpoints.map((e) => e.host)))]
                 return <tr key={t.id} className="hover:bg-muted/40">
                   <td className="max-w-72 px-4 py-2 sm:pl-8"><button className="block max-w-full truncate rounded text-left text-xs font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelected(t)}>{t.name}</button></td>
-                  <td className="px-4 py-2"><span className="block max-w-72 truncate font-mono text-[11px] text-muted-foreground" title={hosts.join(', ') || 'No preset network rules'}>{hosts.join(', ') || 'Attached secrets only'}</span></td>
+                  <td className="px-4 py-2"><span className="block max-w-72 truncate font-mono text-[11px] text-muted-foreground" title={hosts.join(', ') || 'No starting network rules'}>{hosts.join(', ') || 'Attached secrets only'}</span></td>
                   <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px]"><span className={`size-1.5 rounded-full ${t.builtin ? 'bg-stone-300' : 'bg-emerald-500'}`} />{t.builtin ? 'Built-in' : 'Custom'}</span></td>
-                  <td className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="xs" onClick={() => setSelected(t)}>View preset<ArrowRight /></Button></td>
+                  <td className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="xs" onClick={() => setSelected(t)}>View policy<ArrowRight /></Button></td>
                 </tr>
               })}</tbody>
             </table>
@@ -247,19 +249,19 @@ export function SecurityPresetsView() {
             <div className="flex flex-wrap items-center gap-2 border-t pt-4">
               <Button variant="ghost" size="sm" onClick={() => { duplicate(selected); setSelected(null) }}><Copy />Duplicate</Button>
               {!selected.builtin && <>
-                <Button variant="ghost" size="sm" onClick={() => { setEditing({ ...selected, idLocked: true }); setSelected(null) }}><Pencil />Edit preset</Button>
-                <Button variant="ghost" size="icon-sm" aria-label="Remove security preset" onClick={() => setRemove(selected)}><Trash2 /></Button>
+                <Button variant="ghost" size="sm" onClick={() => { setEditing({ ...selected, idLocked: true }); setSelected(null) }}><Pencil />Edit policy</Button>
+                <Button variant="ghost" size="icon-sm" aria-label="Remove policy" onClick={() => setRemove(selected)}><Trash2 /></Button>
               </>}
             </div>
           </>}
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(remove)} onOpenChange={(open) => { if (!open) setRemove(null) }}>
-        <DialogContent><DialogHeader><DialogTitle>Remove this preset?</DialogTitle><DialogDescription>The saved preset will be removed. Existing sandboxes keep their current policy.</DialogDescription></DialogHeader>
-          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setRemove(null)}>Keep preset</Button><Button variant="destructive" disabled={busy} onClick={async () => {
+        <DialogContent><DialogHeader><DialogTitle>Remove this policy?</DialogTitle><DialogDescription>The saved policy will be removed. Existing sandboxes keep what they were created with.</DialogDescription></DialogHeader>
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setRemove(null)}>Keep policy</Button><Button variant="destructive" disabled={busy} onClick={async () => {
             setBusy(true)
             try { await api.deleteTemplate(remove.id); toast.success(`Deleted ${remove.name}`); setRemove(null); setSelected(null); await load() } catch (e) { toast.error(e.message) } finally { setBusy(false) }
-          }}>{busy && <Spinner />}Remove preset</Button></div>
+          }}>{busy && <Spinner />}Remove policy</Button></div>
         </DialogContent>
       </Dialog>
       <TemplateEditor open={Boolean(editing)} initial={editing} onClose={() => setEditing(null)} onSaved={load} knownPrograms={knownPrograms} />

@@ -80,12 +80,12 @@ function GroupField({ org, value, onChange, onCreated, name }) {
       <GroupPicker groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
       <p className="text-[11px] text-muted-foreground">
         {reach.length
-          ? <>Gets {reach.length === 1 ? "this egress policy" : `these ${reach.length} egress policies`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
-          : chosen ? <>No egress policy targets {chosen.name} yet. Add one on the Egress page, and it applies to every sandbox in the group.</>
-          : org.groups.length ? "Groups let egress policies follow sandboxes. You can change the group later on the Groups page."
-          : "Create a group to share network access between sandboxes. Egress policies can then target the whole group."}
+          ? <>Gets {reach.length === 1 ? "this network rule" : `these ${reach.length} network rules`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
+          : chosen ? <>No network rule targets {chosen.name} yet. Add one on the Network page, and it applies to every sandbox in the group.</>
+          : org.groups.length ? "Groups let network rules follow sandboxes. You can change the group later on the Groups page."
+          : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
       </p>
-      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the security preset (<span className="font-mono">{chosen.template}</span>), which replaces the choice below.</p>}
+      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the policy (<span className="font-mono">{chosen.template}</span>), which replaces the choice below.</p>}
     </div>
   )
 }
@@ -246,7 +246,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 <Input value={repository} onChange={(e) => setRepository(e.target.value)} className="font-mono text-xs" placeholder="https://github.com/org/repo" aria-label="Git repository URL" />
                 <p className="text-[11px] text-muted-foreground">
                   {cloneDest ? <>Cloned into <span className="font-mono">{cloneDest}</span> once the sandbox starts. </> : "An https:// URL. "}
-                  Public repositories only. The security preset must let git reach the host, including POST to /git-upload-pack.
+                  Public repositories only. The policy must let git reach the host, including POST to /git-upload-pack.
                 </p>
               </>
             )}
@@ -271,7 +271,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               </div>
             ) : <p className="text-[11px] text-muted-foreground">No providers</p>}
             {(imageTemplate ? templateStart === "claude" : preset === "claude") && !agentAccess.profiles.some((p) => p.id === "claude") && template !== "claude-subscription" && !chosen.some((n) => providers.find((p) => p.name === n)?.type === "claude-code") && (
-              <p className="text-[11px] text-amber-700">Choose the Claude Code subscription security preset or attach a claude-code provider.</p>
+              <p className="text-[11px] text-amber-700">Choose the Claude Code subscription policy or attach a claude-code provider.</p>
             )}
           </div>
 
@@ -279,7 +279,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
             onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />}
 
           <div className="grid gap-1.5">
-            <Label htmlFor="sandbox-template" className="text-xs">Security preset</Label>
+            <Label htmlFor="sandbox-template" className="text-xs">Policy</Label>
             <select id="sandbox-template" value={pinnedPreset || template} onChange={(e) => setTemplate(e.target.value)} disabled={Boolean(pinnedPreset)} title={templates.find((t) => t.id === (pinnedPreset || template))?.description}
               className="h-8 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {(templates.length ? templates : [{ id: "locked-down", name: "Locked down" }]).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -289,7 +289,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
             {agentAccess.profiles.length > 0 && <div className="mt-2 rounded-md border border-border">
               <div className="border-b px-3 py-2">
                 <p className="text-xs font-medium">Agent default rules</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">Added to the selected preset, including Locked down. These destinations allow agent sign-in and model connections; credentials may still be required.</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">Added to the selected policy, including Locked down. These destinations allow agent sign-in and model connections; credentials may still be required.</p>
               </div>
               <div className="max-h-52 divide-y overflow-y-auto">
                 {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
