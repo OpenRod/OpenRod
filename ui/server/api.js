@@ -12,7 +12,7 @@ import { PROJECT_LABEL, templateSession, isSession, sessionLaunch } from '../src
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
-import { GROUP_LABEL, orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
+import { orgRoute, planSandbox, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
 import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 import { editorRoute } from './editor.js'
@@ -168,7 +168,7 @@ async function createSandbox(input) {
   // Files, Landlock and process identity are fixed at creation, and so is the
   // group label. The whole policy (template + organization + group rules) is
   // resolved here from stored policy, never accepted raw from the browser.
-  const plan = await planSandbox({ name: String(input.name ?? ''), group: input.group ? String(input.group) : null, template: input.template ? String(input.template) : null, agentRules })
+  const plan = await planSandbox({ name: String(input.name ?? ''), groups: input.groups ?? input.group, template: input.template ? String(input.template) : null, agentRules, requireGroup: true })
   // A folder or repository to start from is checked before anything is created.
   const seed = await planSeed({ folder: input.folder ? String(input.folder) : null, repository: input.repository ? String(input.repository) : null })
   const template = plan.template
@@ -188,8 +188,7 @@ async function createSandbox(input) {
     : await client.sandbox.create({ ...spec, ...(image ? { image } : {}) })
   // A new sandbox starts in the group it was created in, even if an older
   // sandbox of the same name was moved elsewhere.
-  const group = plan.labels[GROUP_LABEL] ?? null
-  await assignGroup([ref.name], group, { forget: !group })
+  await assignGroup([ref.name], plan.groups)
   // Services a template opens at start go through the same path as opening
   // one by hand, so they get the same auto-close deadline.
   const opened = []

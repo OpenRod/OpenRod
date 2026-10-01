@@ -1,5 +1,5 @@
 import { ThemeSwitcher } from "@/components/theme-switcher"
-import { Activity, Package, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, ShieldCheck, Users } from "lucide-react"
+import { Activity, Package, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -29,7 +29,6 @@ const NAV = [
 const SECURITY = [
   { label: "Organization", icon: Building2, view: "organization", disabled: true },
   { label: "Groups", icon: Users, view: "groups" },
-  { label: "Policies", icon: ShieldCheck, view: "policies" },
   { label: "Network", icon: Network, view: "egress", also: ["ingress"] },
   { label: "Secrets", icon: KeyRound, view: "secrets" },
 ]

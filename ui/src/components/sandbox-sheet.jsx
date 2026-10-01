@@ -337,20 +337,6 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                   )}
               </Section>
 
-              {detail?.policy && (
-                <Section title="Files" icon={FolderLock}>
-                  <div className="space-y-2 text-[11px]">
-                    <p>
-                      <span className="text-muted-foreground">Read-write · </span>
-                      <span className="font-mono">{[detail.policy.filesystem.workdir ? "/sandbox" : null, ...detail.policy.filesystem.readWrite].filter(Boolean).join("  ")}</span>
-                    </p>
-                    <p>
-                      <span className="text-muted-foreground">Read-only · </span>
-                      <span className="font-mono">{detail.policy.filesystem.readOnly.join("  ")}</span>
-                    </p>
-                  </div>
-                </Section>
-              )}
 
               </TabsContent>
               <TabsContent value="setups" className="min-h-0 overflow-y-auto"><SetupsView sandbox={name} setupIds={detail?.setupIds ?? []} /></TabsContent>

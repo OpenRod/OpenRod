@@ -1,8 +1,11 @@
+import { PolicyDialog, newPolicy } from "@/components/egress-policies"
+import { groupNetworkPolicies } from "../../shared/group-network.js"
+import { motion, useReducedMotion } from "motion/react"
 import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
-import { Check, ChevronDown, ChevronRight, Info, Terminal } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Terminal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -10,7 +13,6 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
@@ -20,7 +22,6 @@ import { useLive } from "@/lib/live"
 import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { policiesFor } from "@/lib/groups"
 import { agentAccessFor } from "../../shared/agent-access.js"
 
 const PRIMARY_QUICK_AGENTS = ["claude", "codex", "cursor", "pi", "antigravity", "opencode"]
@@ -91,23 +92,24 @@ function FolderSummary({ plan, sandbox }) {
 }
 
 // Which group the sandbox joins, and what network access that brings.
-function GroupField({ org, value, onChange, onCreated, name }) {
-  const reach = policiesFor(org.policies, { name, group: value })
+function GroupField({ org, value, onChange, onCreated, onAddPolicy }) {
+  const reducedMotion = useReducedMotion()
+  const reach = groupNetworkPolicies(org.policies, value)
   const counts = Object.fromEntries(org.groups.map((g) => [g.id, org.members?.[g.id]?.length ?? 0]))
-  const chosen = org.groups.find((g) => g.id === value)
+  const chosen = org.groups.filter((g) => value.includes(g.id))
   return (
-    <div className="grid gap-1.5">
-      <span className="text-xs font-medium">Group</span>
-      <GroupPicker groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
-      <p className="text-[11px] text-muted-foreground">
+    <fieldset className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3">
+      <legend className="px-1 text-xs font-medium">Groups <span className="text-muted-foreground">· Required</span></legend>
+      <GroupPicker multiple required groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
+      <motion.p key={value.join(",") || "empty"} initial={reducedMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} aria-live="polite" className="text-[11px] leading-relaxed text-muted-foreground">
         {reach.length
           ? <>Gets {reach.length === 1 ? "this network rule" : `these ${reach.length} network rules`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
-          : chosen ? <>No network rule targets {chosen.name} yet. Add one on the Network page, and it applies to every sandbox in the group.</>
-          : org.groups.length ? "Groups let network rules follow sandboxes. You can change the group later on the Groups page."
+          : chosen.length ? <>Add a network rule to at least one selected group before creating a sandbox.</>
+          : org.groups.length ? "Groups let network rules follow sandboxes. Choose one or more. You can change memberships later on the Groups page."
           : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
-      </p>
-      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the policy (<span className="font-mono">{chosen.template}</span>), which replaces the choice below.</p>}
-    </div>
+      </motion.p>
+      {chosen.length > 0 && !reach.length && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={onAddPolicy}>Add network rule</Button>}
+    </fieldset>
   )
 }
 
@@ -138,14 +140,13 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const buildName = React.useRef(null)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
-  const [templates, setTemplates] = React.useState([])
-  const [template, setTemplate] = React.useState("locked-down")
+  const [policyDraft, setPolicyDraft] = React.useState(null)
   const [start, setStart] = React.useState("empty")
   const [folder, setFolder] = React.useState("")
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
   const [org, setOrg] = React.useState(null)
-  const [group, setGroup] = React.useState(null)
+  const [group, setGroup] = React.useState([])
 
   // A fresh sandbox starts in Quick setup; launching a saved template opens its tab.
   React.useEffect(() => {
@@ -159,11 +160,10 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
     setChosen(providers.map((p) => p.name))
-    setError(null); setTemplate("locked-down")
+    setError(null); setPolicyDraft(null); setOrg(null)
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
-    api.templates().then(setTemplates).catch(() => setTemplates([]))
-    setGroup(null)
-    api.org().then(setOrg).catch(() => setOrg(null))
+    setGroup([])
+    api.org().then(setOrg).catch((e) => { setOrg(null); setError(`Could not load groups: ${e.message}`) })
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
@@ -203,18 +203,15 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     return () => { cancelled = true; clearTimeout(timer) }
   }, [start, folder])
 
-  // Groups from before the console managed them can pin the preset.
-  const pinnedPreset = org?.groups.find((g) => g.id === group)?.template ?? null
+  const groupReady = group.length > 0 && group.every((id) => org?.groups.some((g) => g.id === id)) && groupNetworkPolicies(org?.policies, group).length > 0
   const cloneDest = start === "repo" ? repoDest(repository) : null
   const startReady = start === "empty" || (start === "folder" ? Boolean(preview?.data && !preview.data.over) : Boolean(cloneDest))
 
-  const effectivePreset = pinnedPreset || template
-  const securityName = templates.find((t) => t.id === effectivePreset)?.name || (effectivePreset === "locked-down" ? "Locked down" : effectivePreset)
   const filesSummary = start === "folder" ? folder.trim() : start === "repo" ? repository.trim() : ""
 
   async function submit(event) {
     event.preventDefault()
-    if (busy || missingSetupAgent || (mode === "template" && !chosenImage)) return
+    if (busy || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
     setBusy(true); setError(null); setProgress("")
     const controller = new AbortController()
     preparation.current = controller
@@ -238,7 +235,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       }
       if (controller.signal.aborted) return
       setPreparing(false); setProgress("Creating sandbox…")
-      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, ...(group ? { group } : {}), ...files })
+      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, groups: group, ...files })
       toast.success(`Creating ${created.name}`)
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
@@ -252,6 +249,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value) }}>
       <DialogContent showCloseButton={!busy} className="max-h-[90svh] overflow-hidden sm:max-w-md">
         <form onSubmit={submit} className="flex max-h-[calc(90svh-2rem)] min-h-0 flex-col gap-4">
@@ -272,6 +270,11 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="font-mono text-xs" required
                 pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
+
+            {org ? <GroupField org={org} value={group} onChange={setGroup}
+              onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
+              onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
+              : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}
 
             <TabsContent value="quick" className="grid gap-4">
               <fieldset className="min-w-0">
@@ -378,28 +381,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
 
             </div>}
 
-            <div className="grid gap-1.5">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="sandbox-template" className="text-xs">Policy</Label>
-                <Tooltip>
-                  <TooltipTrigger type="button" aria-label="About this policy" className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><Info className="size-3.5" aria-hidden="true" /></TooltipTrigger>
-                  <TooltipContent>{templates.find((t) => t.id === effectivePreset)?.description || "Filesystem and network access."} Shared rules still apply.</TooltipContent>
-                </Tooltip>
-              </div>
-              <Select value={effectivePreset} onValueChange={(value) => { if (value) setTemplate(value) }} disabled={busy || Boolean(pinnedPreset)}>
-                <SelectTrigger id="sandbox-template" className="w-full text-xs">
-                  <SelectValue className="min-w-0 truncate">{securityName}</SelectValue>
-                </SelectTrigger>
-                <SelectContent align="start" alignItemWithTrigger={false}>
-                  <SelectGroup>
-                    {(templates.length ? templates : [{ id: "locked-down", name: "Locked down" }]).map((t) => <SelectItem key={t.id} value={t.id} className="text-xs">{t.name}</SelectItem>)}
-                    {pinnedPreset && !templates.some((t) => t.id === pinnedPreset) && <SelectItem value={pinnedPreset} className="text-xs">{pinnedPreset}</SelectItem>}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-
-            </div>
-
+            <p className="text-[11px] text-muted-foreground">Agent sign-in and service connections are included automatically. Network rules from all selected groups combine. Block rules take precedence.</p>
 
             <div className="grid min-w-0">
               <SetupSection title="Add project files" summary={filesSummary}>
@@ -433,7 +415,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 </div>
 
               </SetupSection>
-                  {agentAccess.profiles.length > 0 && <SetupSection title="Network rules" summary={`${new Set(agentAccess.profiles.flatMap((profile) => profile.endpoints.map((endpoint) => `${endpoint.host}:${endpoint.ports.join(",")}`))).size} destinations`}>
+                  {agentAccess.profiles.length > 0 && <SetupSection title="Agent connections" summary={`${new Set(agentAccess.profiles.flatMap((profile) => profile.endpoints.map((endpoint) => `${endpoint.host}:${endpoint.ports.join(",")}`))).size} destinations`}>
                     <div className="max-h-52 divide-y overflow-y-auto">
                       {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
                         <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · agent-{profile.id}</span></summary>
@@ -449,8 +431,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                       </details>)}
                     </div>
                   </SetupSection>}
-                {org && <SetupSection title="Advanced options" summary={org.groups.find((item) => item.id === group)?.name}><GroupField org={org} value={group} onChange={setGroup} name={name}
-                  onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} /></SetupSection>}
+
             </div>
 
             {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
@@ -467,12 +448,21 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 if (buildName.current) void api.cancelImageBuild(buildName.current).catch((e) => toast.error(e.message))
               } else onOpenChange(false)
             }}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
-            <Button type="submit" disabled={busy || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+            <Button type="submit" disabled={busy || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
               {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+    <PolicyDialog open={Boolean(policyDraft)} initial={policyDraft} onOpenChange={(value) => { if (!value) setPolicyDraft(null) }}
+      groups={org?.groups ?? []} sandboxes={(sandboxes ?? []).map((s) => s.name)} assignments={org?.assignments ?? {}} onGroupCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g] }))}
+      onSaved={(result, policy) => {
+        setGroup((current) => [...new Set([...current, ...policy.appliesTo.groups])])
+        setOrg((o) => ({ ...o, policies: [...o.policies.filter((p) => p.id !== policy.id), policy] }))
+        if (result.failed?.length) toast.error("Rule saved, but some sandboxes could not be updated.")
+        else toast.success(`Saved ${policy.name}`)
+      }} />
+    </>
   )
 }

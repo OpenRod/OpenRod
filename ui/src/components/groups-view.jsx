@@ -13,20 +13,19 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { SelectField } from "@/components/ui/select-field"
+import { GroupPicker } from "@/components/group-picker"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { POLICY_HANDOFF } from "@/components/egress-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
-import { groupId, groupPolicies, policiesFor } from "@/lib/groups"
+import { groupId, groupPolicies, policiesFor, groupFor } from "@/lib/groups"
 import { styleOf } from "@/lib/sandboxes"
 import { cn } from "@/lib/utils"
 
 // Groups: sandboxes that share network access. A group is a name; network
 // rules aimed at it reach every sandbox in it, including ones added later.
 
-const NONE = "__none"
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
 
 function handOff(value) {
@@ -63,8 +62,8 @@ function SandboxChips({ names, limit = 4 }) {
 
 const STEPS = [
   { title: "Create a group", body: "Name it for a kind of work, like Frontend or Data." },
-  { title: "Add sandboxes", body: "Here, or by picking the group when you create a sandbox. You can move them any time." },
-  { title: "Aim network rules at it", body: "Every sandbox in the group gets them, including ones you add later." },
+  { title: "Add network rules", body: "Choose the destinations this group can reach or must block." },
+  { title: "Add sandboxes", body: "Choose one or more groups for each sandbox. Their network rules combine." },
 ]
 
 function FirstRun({ onCreate, onPolicy }) {
@@ -112,14 +111,18 @@ function NewGroupDialog({ open, onOpenChange, groups, sandboxes, assignments, on
   React.useEffect(() => { if (open) { setName(""); setDescription(""); setPicked([]); setError(null) } }, [open])
   const id = groupId(name)
   const taken = groups.some((g) => g.id === id)
-  const nameOf = (gid) => groups.find((g) => g.id === gid)?.name
+  const namesOf = (name) => groupFor({ assignments }, name).map((id) => groups.find((g) => g.id === id)?.name).filter(Boolean).join(", ")
 
   async function submit(event) {
     event.preventDefault()
     setBusy(true); setError(null)
     try {
       const { group } = await api.saveGroup({ id, name: name.trim(), description: description.trim(), isNew: true })
-      const result = picked.length ? await api.setGroupMembers(picked, group.id) : null
+      let result = null
+      if (picked.length) {
+        try { result = await api.setGroupMembers(picked, [group.id], 'add') }
+        catch (e) { toast.warning(`Created ${group.name}, but could not add sandboxes`, { description: e.message }) }
+      }
       onOpenChange(false)
       onCreated(group, result, picked.length)
     } catch (e) { setError(e.message) } finally { setBusy(false) }
@@ -148,14 +151,14 @@ function NewGroupDialog({ open, onOpenChange, groups, sandboxes, assignments, on
               <ul className="max-h-48 divide-y divide-border/60 overflow-y-auto rounded-md border border-border">
                 {sandboxes.map((s) => {
                   const on = picked.includes(s.name)
-                  const current = nameOf(assignments[s.name])
+                  const current = namesOf(s.name)
                   return (
                     <li key={s.name}>
                       <label className="flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-xs hover:bg-muted/50">
                         <input type="checkbox" checked={on} onChange={() => setPicked((p) => (on ? p.filter((n) => n !== s.name) : [...p, s.name]))} className="size-3.5" />
                         <span className={cn("size-1.5 shrink-0 rounded-full", styleOf(s.phase).cell)} aria-hidden="true" />
                         <span className="truncate font-mono">{s.name}</span>
-                        {current && <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{on ? `moves from ${current}` : `in ${current}`}</span>}
+                        {current && <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{`also in ${current}`}</span>}
                       </label>
                     </li>
                   )
@@ -189,7 +192,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
   const aimed = groupPolicies(org.policies, group.id)
   const everyone = org.policies.filter((p) => p.appliesTo.everyone)
   const others = sandboxes.filter((s) => !members.includes(s.name))
-  const nameOf = (gid) => org.groups.find((g) => g.id === gid)?.name
+  const namesOf = (name) => groupFor(org, name).map((id) => org.groups.find((g) => g.id === id)?.name).filter(Boolean).join(", ")
   const dirty = name.trim() !== group.name || description.trim() !== group.description
 
   async function save() {
@@ -198,7 +201,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
   }
   async function move(names, target) {
     setBusy(true)
-    try { reportSync(await api.setGroupMembers(names, target), target ? `Added ${names.join(", ")} to ${group.name}` : `Removed ${names.join(", ")} from ${group.name}`); onChanged() } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    try { reportSync(await api.setGroupMembers(names, [group.id], target ? "add" : "remove"), target ? `Added ${names.join(", ")} to ${group.name}` : `Removed ${names.join(", ")} from ${group.name}`); onChanged() } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
   async function remove() {
     setBusy(true)
@@ -245,7 +248,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
               <select value="" aria-label={`Add a sandbox to ${group.name}`} disabled={busy} onChange={(e) => e.target.value && move([e.target.value], group.id)}
                 className="h-8 w-fit rounded-md border border-dashed border-border bg-transparent px-2 text-[11px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <option value="">+ Add sandbox</option>
-                {others.map((s) => <option key={s.name} value={s.name}>{s.name}{nameOf(org.assignments[s.name]) ? ` (moves from ${nameOf(org.assignments[s.name])})` : ""}</option>)}
+                {others.map((s) => <option key={s.name} value={s.name}>{s.name}{namesOf(s.name) ? ` (also in ${namesOf(s.name)})` : ""}</option>)}
               </select>
             )}
           </section>
@@ -254,13 +257,14 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
             <h3 className="text-[10px] font-bold tracking-widest text-faint uppercase">Network access</h3>
             {aimed.length ? (
               <div className="flex flex-wrap gap-1.5">{aimed.map((p) => <PolicyPill key={p.id} policy={p} onClick={() => onPolicy({ edit: p.id })} />)}</div>
-            ) : <p className="text-[11px] text-muted-foreground">No network rule is aimed at {group.name} yet, so its sandboxes only get the rules for every sandbox.</p>}
+            ) : <p className="text-[11px] text-muted-foreground">No network rules yet. A sandbox can join if another selected group provides its network policy.</p>}
             {everyone.length > 0 && <p className="text-[11px] text-muted-foreground">Also, like every sandbox: {everyone.map((p) => p.name).join(", ")}.</p>}
             <Button variant="outline" size="sm" className="w-fit" onClick={() => onPolicy({ new: { appliesTo: { groups: [group.id] } } })}><Plus />Add rule for {group.name}</Button>
           </section>
 
           <section className="border-t border-border pt-4">
-            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={busy} onClick={() => setConfirmDelete(true)}><Trash2 />Delete group</Button>
+            {(members.length > 0 || aimed.length > 0) && <p className="mb-2 text-[11px] text-muted-foreground">Move the sandboxes and move or delete the network rules before deleting this group.</p>}
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={busy || members.length > 0 || aimed.length > 0} onClick={() => setConfirmDelete(true)}><Trash2 />Delete group</Button>
           </section>
         </div>
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
@@ -268,8 +272,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete {group.name}?</AlertDialogTitle>
               <AlertDialogDescription>
-                {members.length ? `Its ${plural(members.length, "sandbox", "sandboxes")} move to No group and lose the rules aimed at ${group.name}. ` : ""}
-                {aimed.length ? `${plural(aimed.length, "rule")} ${aimed.length === 1 ? "stops" : "stop"} targeting it. ` : ""}The sandboxes themselves are not deleted.
+                This empty group will be deleted.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -316,6 +319,7 @@ export function GroupsView({ onNavigate }) {
   const [open, setOpen] = React.useState(null)
   const [query, setQuery] = React.useState("")
   const [selected, setSelected] = React.useState([])
+  const [bulkGroups, setBulkGroups] = React.useState([])
   const [busy, setBusy] = React.useState(false)
 
   const load = React.useCallback(async () => {
@@ -331,16 +335,15 @@ export function GroupsView({ onNavigate }) {
 
   const groups = org.groups
   const assignments = org.assignments ?? {}
-  const grouped = sandboxes.filter((s) => assignments[s.name]).length
+  const grouped = sandboxes.filter((s) => groupFor(org, s.name).length).length
   const needle = query.trim().toLowerCase()
-  const visible = sandboxes.filter((s) => !needle || s.name.includes(needle) || (groups.find((g) => g.id === assignments[s.name])?.name ?? "").toLowerCase().includes(needle))
+  const visible = sandboxes.filter((s) => !needle || s.name.includes(needle) || groups.some((g) => groupFor(org, s.name).includes(g.id) && g.name.toLowerCase().includes(needle)))
   const allPicked = visible.length > 0 && visible.every((s) => selected.includes(s.name))
 
-  async function move(names, target) {
+  async function move(names, target, mode = "replace") {
     setBusy(true)
-    const where = groups.find((g) => g.id === target)?.name
     try {
-      reportSync(await api.setGroupMembers(names, target), where ? `Moved ${plural(names.length, "sandbox", "sandboxes")} to ${where}` : `Removed ${plural(names.length, "sandbox", "sandboxes")} from their group`)
+      reportSync(await api.setGroupMembers(names, target, mode), `Updated groups for ${plural(names.length, "sandbox", "sandboxes")}`)
       setSelected([])
       await load()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
@@ -349,7 +352,7 @@ export function GroupsView({ onNavigate }) {
   const dialog = <NewGroupDialog open={creating} onOpenChange={setCreating} groups={groups} sandboxes={sandboxes} assignments={assignments}
     onCreated={async (group, result, added) => {
       if (result) reportSync(result, `Created ${group.name} with ${plural(added, "sandbox", "sandboxes")}`)
-      else toast.success(`Created ${group.name}`, { description: "Add sandboxes to it, then aim a network rule at it." })
+      else toast.success(`Created ${group.name}`, { description: "Add a network rule, then assign sandboxes to the group." })
       await load()
       setOpen(group.id)
     }} />
@@ -367,7 +370,7 @@ export function GroupsView({ onNavigate }) {
             </div>
           ))}
         </div>
-        <p className="mx-3 hidden max-w-sm text-[11px] leading-relaxed text-muted-foreground lg:block">Network rules aimed at a group reach every sandbox in it. A sandbox is in one group at a time.</p>
+        <p className="mx-3 hidden max-w-sm text-[11px] leading-relaxed text-muted-foreground lg:block">Network rules aimed at a group reach every sandbox in it. A sandbox can join multiple groups. Their rules combine, and blocks take precedence.</p>
         <Button size="sm" className="ml-auto bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => setCreating(true)}><Plus className="size-3.5" />New group</Button>
       </div>
 
@@ -383,7 +386,7 @@ export function GroupsView({ onNavigate }) {
       <section aria-label="Sandboxes and their groups" className="border-t border-border">
         <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 sm:px-6">
           <h2 className="text-xs font-medium">Sandboxes</h2>
-          <span className="text-[11px] text-muted-foreground">Pick a group for each one. Its network access updates right away.</span>
+          <span className="text-[11px] text-muted-foreground">Select all groups each sandbox belongs to. Network access updates right away.</span>
           <div className="relative ml-auto w-full sm:w-56">
             <Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search sandbox or group…" aria-label="Search sandboxes" className="h-9 pl-9 text-xs" />
@@ -392,11 +395,9 @@ export function GroupsView({ onNavigate }) {
         {selected.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-y border-border bg-accent/50 px-4 py-2 text-xs sm:px-6">
             <Check className="size-3.5" aria-hidden="true" />{plural(selected.length, "sandbox", "sandboxes")} selected
-            <SelectField value="" onChange={(e) => e.target.value && move(selected, e.target.value === NONE ? null : e.target.value)} disabled={busy} aria-label="Move selected sandboxes to" className="h-7 w-48 text-xs">
-              <option value="" disabled>Move to…</option>
-              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-              <option value={NONE}>No group</option>
-            </SelectField>
+            <fieldset disabled={busy} className="min-w-0"><GroupPicker multiple allowCreate={false} groups={groups} value={bulkGroups} onChange={setBulkGroups} /></fieldset>
+            <Button variant="outline" size="sm" disabled={busy || !bulkGroups.length} onClick={() => move(selected, bulkGroups, "add")}>Add to groups</Button>
+            <Button variant="outline" size="sm" disabled={busy || !bulkGroups.length} onClick={() => move(selected, bulkGroups, "remove")}>Remove from groups</Button>
             <Button variant="ghost" size="sm" onClick={() => setSelected([])}>Clear</Button>
             {busy && <Spinner aria-hidden="true" />}
           </div>
@@ -406,12 +407,12 @@ export function GroupsView({ onNavigate }) {
             <div className="min-w-[640px]">
               <div className="grid h-9 grid-cols-[28px_minmax(0,1.4fr)_minmax(180px,1fr)_minmax(0,1.2fr)] items-center gap-4 border-y border-border bg-muted px-4 text-xs font-medium text-muted-foreground sm:px-6">
                 <input type="checkbox" aria-label="Select every sandbox shown" checked={allPicked} onChange={() => setSelected(allPicked ? [] : visible.map((s) => s.name))} className="size-3.5" />
-                <span>Sandbox</span><span>Group</span><span className="flex items-center gap-1"><Network className="size-3" aria-hidden="true" />Network rules</span>
+                <span>Sandbox</span><span>Groups</span><span className="flex items-center gap-1"><Network className="size-3" aria-hidden="true" />Network rules</span>
               </div>
               <ul className="divide-y divide-border/60 bg-card">
                 {visible.map((s) => {
-                  const current = assignments[s.name] ?? null
-                  const reach = policiesFor(org.policies, { name: s.name, group: current })
+                  const current = groupFor(org, s.name)
+                  const reach = policiesFor(org.policies, { name: s.name, groups: current })
                   const on = selected.includes(s.name)
                   return (
                     <li key={s.name} className={cn("grid min-h-11 grid-cols-[28px_minmax(0,1.4fr)_minmax(180px,1fr)_minmax(0,1.2fr)] items-center gap-4 px-4 py-1.5 sm:px-6", on && "bg-accent/40")}>
@@ -420,11 +421,13 @@ export function GroupsView({ onNavigate }) {
                         <span className={cn("size-2 shrink-0 rounded-[3px]", styleOf(s.phase).cell)} aria-hidden="true" />
                         <span className="truncate font-mono text-xs">{s.name}</span>
                       </span>
-                      <SelectField value={current ?? NONE} disabled={busy} aria-label={`Group for ${s.name}`} className="h-8 w-full text-xs"
-                        onChange={(e) => { const next = e.target.value === NONE ? null : e.target.value; if (next !== current) move([s.name], next) }}>
-                        <option value={NONE}>No group</option>
-                        {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                      </SelectField>
+                      <fieldset disabled={busy} aria-label={`Groups for ${s.name}`} className="min-w-0">
+                        <GroupPicker multiple required allowCreate={false} groups={groups} value={current} onChange={(next) => {
+                          const added = next.filter((id) => !current.includes(id))
+                          const removed = current.filter((id) => !next.includes(id))
+                          move([s.name], added.length ? added : removed, added.length ? "add" : "remove")
+                        }} />
+                      </fieldset>
                       <span className="truncate text-[11px] text-muted-foreground" title={reach.map((p) => p.name).join("\n")}>
                         {reach.length ? reach.map((p) => p.name).join(", ") : <span className="text-faint" title="Its policy and agent rules still apply">No network rules</span>}
                       </span>
