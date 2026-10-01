@@ -172,7 +172,7 @@ def run(request):
         if item['kind'] == 'mcp' and (item.get('config') or {}).get('command'):
             required[item['config']['command']] = shutil.which(item['config']['command'])
     if operation == 'probe': return {'executables': required, 'networkExecutables': {k: network_executable(v) for k, v in required.items()}, 'installed': previous is not None, 'revision': previous and previous['revision'], 'items': (previous or {}).get('items', []), 'targets': previous and previous['targets'], 'mcpNames': {c['target']: c.get('names', {}) for c in (previous or {}).get('configs', [])}}
-    if previous and (previous['revision'] != setup['revision'] or sorted(previous['targets']) != sorted(targets)): raise ValueError('Select the originally assigned agents before reapplying or removing this Setup')
+    if previous and sorted(previous['targets']) != sorted(targets): raise ValueError('Select the originally assigned agents before reapplying or removing this Setup')
     if operation not in ('apply', 'remove'): raise ValueError('Unknown operation')
     if operation == 'apply' and any(not p for p in required.values()): raise ValueError('Required agent or MCP executable is missing from the image')
     if operation == 'apply':
@@ -184,7 +184,7 @@ def run(request):
         config_path, skill_path = adapter['config'], adapter['skills']
         if adapter.get('alternateConfig') and safe_path(adapter['alternateConfig']).exists(): config_path = adapter['alternateConfig']
         mcps = [i for i in setup['items'] if i['kind'] == 'mcp']
-        if mcps:
+        if mcps or any(c['target'] == target for c in (previous or {}).get('configs', [])):
             raw = read(config_path); text = (raw or b'').decode('utf-8')
             if target == 'codex':
                 # Parse first; never append to a broken config. Managed TOML is

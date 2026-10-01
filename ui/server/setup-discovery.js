@@ -16,7 +16,10 @@ const ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}$/
 const secret = /(?:-----BEGIN [\w ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16})|(?:api[_-]?key|token|password|secret|authorization)\s*[:=]\s*["']?(?!\$|<|\{|YOUR_|your_|example|placeholder|process\.env|os\.environ)[A-Za-z0-9_+/.=-]{16,})/i
 const textExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.toml', '.py', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.sh', '.bash', '.css', '.html', '.csv', '.svg', '.xml'])
 const inside = (root, file) => file === root || file.startsWith(root + path.sep)
-const safeLabel = (value) => typeof value === 'string' && ID.test(value) ? value : 'Unrecognized item'
+// Source MCP keys are display names, not paths or destination identifiers.
+// The installer generates its own collision-safe IDs for each harness.
+const validMcpName = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 200 && !/[\p{C}]/u.test(value) && !secret.test(value)
+const safeLabel = value => validMcpName(value) ? value : 'Unrecognized item'
 
 async function readBounded(file) {
   const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
@@ -32,7 +35,7 @@ async function readBounded(file) {
 // Never return values of env, headers, tokens or arbitrary configuration fields.
 export function normalizeMcp(name, raw, source) {
   const item = { kind: 'mcp', name: safeLabel(name), sources: [source], transport: raw?.url ? 'http' : 'stdio', requirements: [], issues: [], credentialFields: [], credentialBindings: {}, config: null }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !ID.test(name)) { item.issues.push('Unsupported configuration or server name.'); return item }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !validMcpName(name)) { item.issues.push('Unsupported configuration or server name.'); return item }
   if (raw.enabled === false || raw.disabled === true) { item.disabled = true; item.issues.push('Disabled in the source harness. Enable it there before importing.') }
   const values = {}, environment = {}, ordinaryHeaders = {}
   for (const [key, value] of Object.entries(raw.env || {})) {
@@ -159,14 +162,49 @@ export async function readSkill(root, home = os.homedir()) {
   }
   await visit(resolved)
   if (!files.some((f) => f.path === 'SKILL.md')) throw fail('SKILL.md is missing.')
+  files.sort((a, b) => a.path.localeCompare(b.path))
   return { files, bytes, digest: hash(JSON.stringify(files)) }
 }
+
+// Resolve npm-installed executables from metadata only. Never run the local
+// command or copy its platform-specific files into a Linux sandbox.
+export async function portableMcpConfig(raw, home) {
+  if (!raw || raw.url || typeof raw.command !== 'string' || !path.isAbsolute(raw.command) || packageLaunch(raw.command, raw.args)) return raw
+  try {
+    const root = await fs.realpath(home)
+    const executable = await fs.realpath(raw.command)
+    if (!inside(root, executable) || !(await fs.stat(executable)).isFile()) return raw
+    let directory = path.dirname(executable)
+    for (let depth = 0; depth < 12 && inside(root, directory) && directory !== root; depth++, directory = path.dirname(directory)) {
+      const parent = path.dirname(directory)
+      const isPackage = path.basename(parent) === 'node_modules' || (path.basename(parent).startsWith('@') && path.basename(path.dirname(parent)) === 'node_modules')
+      if (!isPackage) continue
+      const metadata = JSON.parse((await readBounded(path.join(directory, 'package.json'))).toString())
+      if (!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(metadata.version || '')) return raw
+      const plan = packageLaunch('npx', [`${metadata.name}@${metadata.version}`, ...(raw.args ?? [])])
+      if (!plan || path.relative(path.basename(parent) === 'node_modules' ? parent : path.dirname(parent), directory) !== plan.name) return raw
+      const bins = typeof metadata.bin === 'string' ? { [plan.name.split('/').pop()]: metadata.bin } : metadata.bin || {}
+      const preferred = plan.name.split('/').pop()
+      const bin = bins[preferred] || (Object.keys(bins).length === 1 ? Object.values(bins)[0] : null)
+      if (typeof bin !== 'string' || !inside(directory, path.resolve(directory, bin)) || await fs.realpath(path.resolve(directory, bin)) !== executable) return raw
+      return { ...raw, command: 'npx', args: [`${plan.name}@${plan.requested}`, ...plan.args] }
+    }
+  } catch { /* Unverifiable local commands retain their actionable import issue. */ }
+  return raw
+}
+
+const canonical = value => Array.isArray(value) ? value.map(canonical)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
 
 // Discovery is opt-in and restricted to standard user-owned locations. No
 // project recursion, plugin code, shell profiles, credentials stores or network.
 export async function discover({ sources, home = os.homedir() }) {
   if (!Array.isArray(sources) || !sources.length || sources.some((s) => !SOURCES.includes(s))) throw fail('Select Codex, Claude Code or Cursor.')
-  const items = [], warnings = [], seen = new Map()
+  const items = [], warnings = [], seen = new Map(), skillDigests = new Map()
+  const skillDigest = async root => {
+    if (!skillDigests.has(root)) skillDigests.set(root, readSkill(root, home).then(value => value.digest).catch(() => null))
+    return skillDigests.get(root)
+  }
   const configPaths = { codex: '.codex/config.toml', claude: '.claude.json', cursor: '.cursor/mcp.json' }
   for (const source of [...new Set(sources)]) {
     try {
@@ -178,12 +216,16 @@ export async function discover({ sources, home = os.homedir() }) {
       const entries = Object.entries(data[source === 'codex' ? 'mcp_servers' : 'mcpServers'] ?? {})
       if (entries.length > 200) throw fail('More than 200 MCP configurations; narrow the source first.')
       for (const [name, cfg] of entries) {
-        const item = normalizeMcp(name, cfg, source)
-        const digest = hash(JSON.stringify({ name: item.name, config: item.config, issues: item.issues, credentialFields: item.credentialFields, package: item.package, account: item.credentialFields.length ? source : undefined }))
-        const existing = seen.get('mcp:' + digest)
-        if (existing) { existing.sources.push(source); continue }
+        const item = normalizeMcp(name, await portableMcpConfig(cfg, home), source)
+        const digest = hash(JSON.stringify(canonical({ config: item.config, issues: [...item.issues].sort(), credentialFields: [...item.credentialFields].sort(), credentialBindings: item.credentialBindings, package: item.package, environment: item.environment, auth: item.auth, disabled: item.disabled })))
+        // Account values participate only in the private comparison key, never
+        // in the digest returned to the browser. Unresolved launchers must not
+        // collapse merely because they have the same generic error.
+        const key = 'mcp:' + digest + ':' + hash(JSON.stringify(canonical({ credentials: item._sourceCredentials, unresolved: !item.config && !item.package ? cfg : undefined })))
+        const existing = seen.get(key)
+        if (existing) { if (!existing.sources.includes(source)) existing.sources.push(source); continue }
         const record = { ...item, id: randomUUID(), digest }
-        seen.set('mcp:' + digest, record); items.push(record)
+        seen.set(key, record); items.push(record)
       }
     } catch (error) { warnings.push(`${source}: ${error.code === 'ENOENT' ? 'No user MCP configuration found.' : 'Configuration could not be safely parsed. No contents were returned.'}`) }
     const roots = [path.join(home, source === 'claude' ? '.claude/skills' : `.${source}/skills`), ...(source === 'codex' ? [path.join(home, '.agents/skills')] : [])]
@@ -196,14 +238,26 @@ export async function discover({ sources, home = os.homedir() }) {
         try { resolved = await fs.realpath(dir); if (!inside(await fs.realpath(home), resolved)) continue; if (!(await fs.stat(path.join(resolved, 'SKILL.md'))).isFile()) continue } catch { continue }
         const key = 'skill:' + resolved
         if (seen.has(key)) { const item = seen.get(key); if (!item.sources.includes(source)) item.sources.push(source); continue }
-        // Metadata only until selected for review. Do not read every script in
-        // hundreds of skills just to render the selection list.
+        // Compare complete contents only for same-name copies in different
+        // locations. Different versions stay separate; review reads them again.
+        const candidates = items.filter(item => item.kind === 'skill' && item.name === entry.name)
+        let duplicate = null
+        if (candidates.length) {
+          const digest = await skillDigest(resolved)
+          if (digest) for (const candidate of candidates) {
+            if (await skillDigest(candidate.root) === digest) { duplicate = candidate; break }
+          }
+        }
+        if (duplicate) {
+          if (!duplicate.sources.includes(source)) duplicate.sources.push(source)
+          seen.set(key, duplicate); continue
+        }
         const record = { id: randomUUID(), kind: 'skill', name: entry.name, sources: [source], root: resolved, issues: [], requirements: [], credentialFields: [] }
         seen.set(key, record); items.push(record)
       }
     }
   }
-  return { items, warnings: [...warnings, 'User-level configuration only. Project and plugin-managed items are not included. Skill files are read only when selected for review.'] }
+  return { items, warnings: [...warnings, 'User-level configuration only. Project and plugin-managed items are not included. Same-name skill copies are compared by content; selected skills are read again for review.'] }
 }
 
 export function publicItem(item) {

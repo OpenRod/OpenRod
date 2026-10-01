@@ -388,3 +388,109 @@ test('legacy skill paths migrate without losing files and refuse modified origin
   assert.equal(run('apply').code,0)
   assert.equal(run('remove').code,0)
 })
+
+test('imports a local npm executable as a pinned portable package without executing it', async (t) => {
+  const { home, put } = await fixture(t)
+  const directory = '.nvm/versions/node/v24/lib/node_modules/@magicuidesign/mcp'
+  const executable = await put(`${directory}/dist/server.js`, 'throw new Error("must never execute")')
+  await put(`${directory}/package.json`, JSON.stringify({ name: '@magicuidesign/mcp', version: '2.0.0', bin: { mcp: './dist/server.js' } }))
+  await fs.mkdir(path.join(home, '.nvm/versions/node/v24/bin'), { recursive: true })
+  const command = path.join(home, '.nvm/versions/node/v24/bin/mcp')
+  await fs.symlink(executable, command)
+  await put('.claude.json', JSON.stringify({ mcpServers: { magicui: { command, args: [] } } }))
+  const store = createSetupStore({ home, dir: path.join(home, 'catalog') })
+  const item = (await store.scan(['claude'])).items[0]
+  assert.equal(item.package.name, '@magicuidesign/mcp')
+  assert.equal(item.package.requested, '2.0.0')
+  assert.deepEqual(item.issues, ['Prepare package dependencies in the next step.'])
+  assert.ok(item.requirements.some(r => r.host === 'magicui.design'))
+  await put(`${directory}/package.json`, JSON.stringify({ name: '@magicuidesign/mcp', version: '2.0.0', bin: { mcp: './other.js' } }))
+  assert.equal((await store.scan(['claude'])).items[0].package, undefined)
+})
+
+test('does not translate arbitrary scripts or executable links outside the selected home', async (t) => {
+  const { home, put } = await fixture(t)
+  const { portableMcpConfig } = await import('./setup-discovery.js')
+  const arbitrary = { command: await put('bin/mcp', '#!/bin/sh\nexit 1'), args: [] }
+  assert.deepEqual(await portableMcpConfig(arbitrary, home), arbitrary)
+  const external = path.join(home, 'bin/external')
+  await fs.symlink('/usr/bin/true', external)
+  const raw = { command: external, args: [] }
+  assert.deepEqual(await portableMcpConfig(raw, home), raw)
+})
+
+test('reviewed revisions can add and remove MCPs while retaining drift and target protections', async (t) => {
+  const { home, setup, run, put } = await installerFixture(t)
+  setup.items[0].name = 'figma'
+  assert.equal(run('apply').code, 0)
+  setup.revision = 'second'
+  setup.items.push({id:'magicui123', name:'magicui', kind:'mcp', config:{command:'node',args:['/sandbox/magicui.js']}})
+  const updated = run('apply'); assert.equal(updated.code, 0, updated.error)
+  assert.match(await fs.readFile(path.join(home,'.codex/config.toml'),'utf8'), /magicui/)
+  setup.revision = 'third'
+  setup.items = setup.items.filter(i => i.kind !== 'mcp')
+  assert.equal(run('apply').code, 0)
+  assert.doesNotMatch(await fs.readFile(path.join(home,'.codex/config.toml'),'utf8'), /magicui|figma/)
+  assert.equal(run('apply',['codex']).code, 1)
+  await put('.agents/skills/testing/SKILL.md','user edits')
+  setup.revision = 'fourth'
+  assert.match(run('apply').error, /modified/)
+})
+
+test('multiple sources merge MCP aliases and copied skills, preserving real differences', async (t) => {
+  const {home,put} = await fixture(t)
+  await put('.claude.json', JSON.stringify({mcpServers:{docs:{url:'https://docs.example.com/mcp',env:{B:'two',A:'one'}},account:{url:'https://account.example.com/mcp',headers:{Authorization:'Bearer account-one'}}}}))
+  await put('.cursor/mcp.json', JSON.stringify({mcpServers:{documentation:{env:{A:'one',B:'two'},url:'https://docs.example.com/mcp'},account:{url:'https://account.example.com/mcp',headers:{Authorization:'Bearer account-two'}},other:{url:'https://other.example.com/mcp'}}}))
+  for (const source of ['claude','cursor']) {
+    await put(`.${source}/skills/shared/SKILL.md`,'# Shared')
+    await put(`.${source}/skills/shared/scripts/run.js`,'console.log("same")')
+    await put(`.${source}/skills/versioned/SKILL.md`,'# Same documentation')
+    await put(`.${source}/skills/versioned/scripts/run.js`,source)
+  }
+  const store=createSetupStore({home,dir:path.join(home,'catalog')})
+  const scan=await store.scan(['claude','cursor'])
+  const mcps=scan.items.filter(i=>i.kind==='mcp')
+  assert.equal(mcps.length,4)
+  assert.deepEqual(mcps.find(i=>i.name==='docs').sources,['claude','cursor'])
+  assert.equal(mcps.filter(i=>i.name==='account').length,2)
+  assert.equal(scan.items.filter(i=>i.name==='shared').length,1)
+  assert.deepEqual(scan.items.find(i=>i.name==='shared').sources,['claude','cursor'])
+  assert.equal(scan.items.filter(i=>i.name==='versioned').length,2)
+  assert.ok(!JSON.stringify(scan).includes('account-one'))
+  const selected=scan.items.filter(i=>i.name==='shared'||i.name==='docs')
+  const review=await store.review(scan.token,selected.map(i=>i.id))
+  const saved=await store.save(review.token,'Unified',true)
+  assert.equal(saved.items.length,2)
+  assert.ok(saved.items.every(i=>i.sources.length===2))
+})
+
+test('MCP merging preserves package environment differences and merges identical credentials privately', async (t) => {
+  const { home, put } = await fixture(t)
+  const authenticated = {url:'https://docs.example.com/mcp',headers:{Authorization:'Bearer identical-value'}}
+  await put('.claude.json',JSON.stringify({mcpServers:{docs:authenticated,magicui:{command:'npx',args:['-y','@magicuidesign/mcp@2.0.0'],env:{MODE:'one'}}}}))
+  await put('.cursor/mcp.json',JSON.stringify({mcpServers:{docs:authenticated,magicui:{command:'npx',args:['-y','@magicuidesign/mcp@2.0.0'],env:{MODE:'two'}}}}))
+  const store=createSetupStore({home,dir:path.join(home,'catalog')})
+  const scan=await store.scan(['cursor','claude'])
+  assert.equal(scan.items.length,3)
+  assert.deepEqual(scan.items.find(i=>i.name==='docs').sources,['cursor','claude'])
+  assert.equal(scan.items.filter(i=>i.name==='magicui').length,2)
+  assert.ok(!JSON.stringify(scan).includes('identical-value'))
+})
+
+test('Cursor display names with spaces and scoped package names survive scan, review and save', async t => {
+  const { home, put } = await fixture(t)
+  const names = ['Datadog MCP', 'Playwright MCP', 'Jira MCP', '@magicuidesign/mcp', 'כלים (Dev)']
+  await put('.cursor/mcp.json', JSON.stringify({mcpServers:Object.fromEntries(names.map((name,index)=>[name,{url:`https://example.com/mcp/${index}`}]))}))
+  const store=createSetupStore({home,dir:path.join(home,'catalog')})
+  const scan=await store.scan(['cursor'])
+  assert.deepEqual(scan.items.map(item=>item.name),names)
+  assert.ok(scan.items.every(item=>item.issues.length===0))
+  const review=await store.review(scan.token,scan.items.map(item=>item.id))
+  const saved=await store.save(review.token,'Cursor tools',true)
+  assert.deepEqual((await store.get(saved.id)).items.map(item=>item.name),names)
+  for (const name of ['', '   ', 'bad\nname', 'bad\u202ename', 'x'.repeat(201), 'sk-'+ 'a'.repeat(24)]) {
+    const item=normalizeMcp(name,{url:'https://example.com/mcp'},'cursor')
+    assert.equal(item.name,'Unrecognized item')
+    assert.equal(item.config,null)
+  }
+})
