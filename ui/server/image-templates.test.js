@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { MAX_RECIPE_BYTES, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
 import { imageTemplateRoute, templateView } from './image-templates.js'
 
@@ -228,4 +228,35 @@ test('image builds select the inspected engine and native platform despite an in
 
 test('package index failures fail the image build with the original download error',()=>{
  assert.match(dockerfileFor(newRecipe({name:'dns-check'})),/RUN apt-get update --error-on=any && apt-get install/)
+})
+
+test('Docker JSON commands keep diagnostic stderr out of successful stdout', async () => {
+  const {runDocker} = await import('./image-templates.js')
+  const {EventEmitter} = await import('node:events'), {PassThrough} = await import('node:stream')
+  const child = new EventEmitter();child.stdout = new PassThrough();child.stderr = new PassThrough();child.kill = () => {}
+  const job = {logs:''}
+  const result = runDocker(['info'], {job,spawnProcess:()=>child})
+  child.stderr.end('Cannot connect to the Docker daemon.\n')
+  child.stdout.end('{"ServerErrors":["Cannot connect to the Docker daemon."]}\n')
+  child.emit('close',0)
+  assert.deepEqual(JSON.parse(await result),{ServerErrors:['Cannot connect to the Docker daemon.']})
+  assert.match(job.logs,/Cannot connect/)
+})
+
+for (const cancellation of [false,true]) test(`Docker ${cancellation ? 'cancellation' : 'timeout'} closes descendant helpers holding its output pipes`, {skip:process.platform === 'win32'}, async () => {
+  const {runDocker} = await import('./image-templates.js')
+  const job = {logs:''}
+  const script = `const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});console.log(child.pid);setInterval(()=>{},1000)`
+  let child, deadline
+  try {
+    const result = runDocker(['build'], {job,timeout:250,spawnProcess:(_command,_args,options)=>{
+      child = spawn(process.execPath,['-e',script],options)
+      if(cancellation) child.stdout.once('data',()=>{job.cancelled=true;job.child.kill('SIGKILL')})
+      return child
+    }})
+    await assert.rejects(Promise.race([result,new Promise((_,reject)=>{deadline=setTimeout(()=>reject(Error('Helper kept the build open')),1500)})]),cancellation ? /Operation cancelled/ : /Docker timed out/)
+  } finally {
+    clearTimeout(deadline)
+    for(const pid of [child?.pid,Number(job.logs.trim())]) if(pid) try {process.kill(pid,'SIGKILL')} catch {}
+  }
 })

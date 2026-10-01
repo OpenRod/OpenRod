@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { createApi } from '@/lib/api'
 import { useApi, useCompute } from '@/lib/compute'
-import { copyLocalSandbox, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
+import { copyLocalSandbox, copyCloudSandboxToLocal, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
 import { LOCAL_ORIGIN, localHandoffUrl, isLocalHandoffMessage } from '@/lib/cloud-transfer'
 
 export function ContinueInCloud({ name, sandbox }) {
@@ -39,6 +39,7 @@ export function ContinueInCloud({ name, sandbox }) {
 
 export function ContinueLocally({ name, sandbox }) {
   const api = useApi()
+  const compute = useCompute()
   const [stage, setStage] = React.useState(null)
   const handoff = React.useRef(null)
   React.useEffect(() => {
@@ -82,9 +83,22 @@ export function ContinueLocally({ name, sandbox }) {
   }, [name])
 
   if (sandbox?.phase !== 'ready') return null
+  async function importLocally() {
+    setStage('transfer')
+    try {
+      const result = await copyCloudSandboxToLocal(api, createApi('local', api.signal), name)
+      if (api.signal?.aborted) return
+      toast.success('Workspace running locally', { description: result.warning || 'Your cloud source is unchanged. Reconnect agent credentials locally.' })
+      try { sessionStorage.setItem('gateway-box', result.name) } catch {}
+      compute.selectTarget('local')
+    } catch(error) {
+      if(error.name !== 'AbortError') toast.error('Couldn’t import locally', {description:error.message})
+    } finally { setStage(null) }
+  }
   return (
     <div className="space-y-1.5">
       <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage)} onClick={() => {
+        if (compute?.localViewer) { importLocally(); return }
         const nonce = crypto.randomUUID()
         const popup = window.open(localHandoffUrl(nonce), '_blank')
         if (!popup) { toast.error('Allow popups to continue locally.'); return }
@@ -92,9 +106,9 @@ export function ContinueLocally({ name, sandbox }) {
         setStage('connect')
       }}>
         {stage ? <Spinner className="size-3.5" /> : <Laptop className="size-3.5" aria-hidden="true" />}
-        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue locally'}
+        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Import and run locally'}
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">Open OpenRod on this computer first. Copies files and rebuilds saved templates; reconnect agents locally.</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{compute?.localViewer ? 'Creates a separate local sandbox, copies files and rebuilds the image for this computer. Your cloud source stays available.' : 'Open OpenRod on this computer first. Creates a local sandbox, copies files and rebuilds saved templates.'} Reconnect agents locally.</p>
     </div>
   )
 }

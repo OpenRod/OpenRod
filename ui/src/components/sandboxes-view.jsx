@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowUpRight, ArrowUp, ArrowDown, Box, Cloud, Laptop, Check, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { useApi, useCompute } from "@/lib/compute"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -14,13 +14,15 @@ import { CreateSandboxDialog } from "@/components/create-sandbox-dialog"
 import { useVirtualRows } from "@/hooks/use-virtual-rows"
 import { useDemoFleet } from "@/hooks/use-demo-fleet"
 import { useLive } from "@/lib/live"
+import { useSandboxInventory } from "@/hooks/use-sandbox-inventory"
+import { sandboxInventoryKey, sandboxInventoryApi } from "@/lib/sandbox-inventory"
 import { PHASE_LABEL, STATUS, elapsedSince, imageName, ownerOf, statusOf, styleOf, summarize, uptimeOf } from "@/lib/sandboxes"
 
 export const BOX_HANDOFF = "gateway-box"
-const EMPTY = []
 const ROW_HEIGHT = 40
 const FILTERS = ["all", "running", "sleeping", "provisioning", "error", "unknown"]
-const keyOf = (sandbox) => sandbox.id ?? sandbox.name
+const keyOf = sandboxInventoryKey
+const nameKey = (sandbox) => `${sandbox.computeTarget}:${sandbox.name}`
 const number = (value) => value.toLocaleString("en-US")
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 const COLUMNS = [{ id: "name", label: "Sandbox", width: "28%" }, { id: "phase", label: "Status", width: "12%" }, { id: "owner", label: "Owner", width: "13%" }, { id: "image", label: "Image", width: "26%" }, { id: "startedAt", label: "Uptime", width: "10%" }, { id: "createdAt", label: "Created", width: "11%" }]
@@ -28,11 +30,13 @@ const COLUMNS = [{ id: "name", label: "Sandbox", width: "28%" }, { id: "phase", 
 export function SandboxesView({ onNavigate }) {
   const api = useApi()
   const live = useDemoFleet(useLive())
+  const compute = useCompute()
+  const inventory = useSandboxInventory(live, compute)
   const [creations, setCreations] = React.useState([])
-  const reportedSandboxes = live.sandboxes ?? EMPTY
+  const reportedSandboxes = inventory.sandboxes
   const sandboxes = React.useMemo(() => {
-    const reported = new Set(reportedSandboxes.map((sandbox) => sandbox.name))
-    return [...creations.filter((sandbox) => !sandbox.reported && !reported.has(sandbox.name)), ...reportedSandboxes]
+    const reported = new Set(reportedSandboxes.map(nameKey))
+    return [...creations.filter((sandbox) => !sandbox.reported && !reported.has(nameKey(sandbox))), ...reportedSandboxes]
   }, [reportedSandboxes, creations])
   const [query, setQuery] = React.useState("")
   const [status, setStatus] = React.useState("all")
@@ -45,7 +49,6 @@ export function SandboxesView({ onNavigate }) {
   const [deleting, setDeleting] = React.useState(false)
   const deletionInFlight = React.useRef(false)
   const [deleteErrors, setDeleteErrors] = React.useState([])
-  const compute = useCompute()
   const [creating, setCreating] = React.useState(Boolean(compute?.createRequested))
   React.useEffect(() => { if (compute?.createRequested) { setCreating(true); compute.requestCreate(false) } }, [compute?.createRequested])
   const [now, setNow] = React.useState(Date.now)
@@ -61,23 +64,23 @@ export function SandboxesView({ onNavigate }) {
   }, [])
   React.useEffect(() => {
     if (live.sandboxes === null) return
-    const names = new Set(reportedSandboxes.map((sandbox) => sandbox.name))
+    const names = new Set(reportedSandboxes.map(nameKey))
     setCreations((current) => {
-      const next = current.filter((sandbox) => !sandbox.reported || names.has(sandbox.name))
-        .map((sandbox) => !sandbox.reported && names.has(sandbox.name) ? { ...sandbox, reported: true } : sandbox)
+      const next = current.filter((sandbox) => !sandbox.reported || names.has(nameKey(sandbox)))
+        .map((sandbox) => !sandbox.reported && names.has(nameKey(sandbox)) ? { ...sandbox, reported: true } : sandbox)
       return next.length === current.length && next.every((sandbox, index) => sandbox === current[index]) ? current : next
     })
   }, [reportedSandboxes, live.sandboxes])
   function sandboxCreated(name, sandbox) {
     if (api.signal?.aborted) return
     setOpened(compute?.target === "cloud" ? name : null)
-    setCreations((current) => [...current.filter((item) => item.name !== name), { ...sandbox, name, phase: sandbox?.phase || "provisioning" }])
+    setCreations((current) => [...current.filter((item) => item.name !== name || item.computeTarget !== compute.target), { ...sandbox, name, computeTarget: compute.target, phase: sandbox?.phase || "provisioning" }])
     setQuery(""); setStatus("all"); setImageFilter("")
     setSort({ key: "createdAt", direction: "desc" })
-    live.refresh()
+    inventory.refresh()
   }
   const all = React.useMemo(() => summarize(sandboxes), [sandboxes])
-  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
+  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, sandbox.computeTarget, ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
   const images = React.useMemo(() => [...new Set(indexed.map((row) => row.image))].sort(collator.compare), [indexed])
   const ordered = React.useMemo(() => {
     const q = deferredQuery.trim().toLowerCase()
@@ -131,10 +134,10 @@ export function SandboxesView({ onNavigate }) {
       while (cursor < deleteTargets.length) {
         const sandbox = deleteTargets[cursor++]
         try {
-          await api.lifecycle(sandbox.name, "delete")
+          await sandboxInventoryApi(sandbox, compute.localViewer, api.signal).lifecycle(sandbox.name, "delete")
           succeeded.add(keyOf(sandbox))
         } catch (error) {
-          failures.push({ name: sandbox.name, message: error.message })
+          failures.push({ name: `${sandbox.name} (${sandbox.computeTarget})`, message: error.message })
         }
       }
     }
@@ -144,13 +147,20 @@ export function SandboxesView({ onNavigate }) {
       setDeleteErrors(failures)
       if (succeeded.size) toast.success(`Deletion requested for ${number(succeeded.size)} ${succeeded.size === 1 ? "sandbox" : "sandboxes"}`)
       if (failures.length) toast.error(`${number(failures.length)} ${failures.length === 1 ? "sandbox could" : "sandboxes could"} not be deleted. Review the errors and retry.`)
-      live.refresh()
+      inventory.refresh()
     } finally {
       deletionInFlight.current = false
       setDeleting(false)
       setDeleteTargets(null)
     }
   }
+  const openSandbox = React.useCallback((sandbox) => {
+    if (typeof sandbox === "string") { setOpened(sandbox); return }
+    if (compute.localViewer && sandbox.computeTarget !== compute.target) {
+      try { sessionStorage.setItem(BOX_HANDOFF, sandbox.name) } catch {}
+      compute.selectTarget(sandbox.computeTarget)
+    } else setOpened(sandbox.name)
+  }, [compute.target, compute.localViewer, compute.selectTarget])
   const virtual = useVirtualRows({ count: ordered.length, rowHeight: ROW_HEIGHT })
   React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, status, imageFilter, sort])
   const points = React.useMemo(() => bucketEgress(live.events, 15, now), [live.events, now])
@@ -176,14 +186,15 @@ export function SandboxesView({ onNavigate }) {
           {Object.entries(all.status).map(([key, value]) => value > 0 && <span key={key} className={STATUS[key].strip} style={{ width: `${value / all.total * 100}%` }} />)}
         </div>
         {live.connection === "gateway-down" && sandboxes.length > 0 && <p role="alert" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">Gateway unreachable. Showing the last reading.</p>}
+        {inventory.error && <p role="alert" className="border-b border-border px-6 py-2 text-xs text-destructive">{inventory.error} <button className="underline" onClick={inventory.refresh}>Retry</button></p>}
         {creations.map((created) => {
-          const sandbox = reportedSandboxes.find((item) => item.name === created.name) ?? created
+          const sandbox = reportedSandboxes.find((item) => nameKey(item) === nameKey(created)) ?? created
           const ready = sandbox.phase === "ready"
           const ended = ["error", "stopped", "completed", "deleting"].includes(sandbox.phase)
-          return <div key={created.name} role="status" aria-live="polite" className={`flex shrink-0 items-center gap-3 border-b border-border px-6 py-3 text-xs ${ended ? "bg-red-50 text-red-800" : ready ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
+          return <div key={nameKey(created)} role="status" aria-live="polite" className={`flex shrink-0 items-center gap-3 border-b border-border px-6 py-3 text-xs ${ended ? "bg-red-50 text-red-800" : ready ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
             {ready ? <Check aria-hidden="true" className="size-4 shrink-0" /> : ended ? <Box aria-hidden="true" className="size-4 shrink-0" /> : <Spinner aria-hidden="true" className="size-4 shrink-0" />}
             <div className="min-w-0 flex-1"><p className="break-words font-medium">{ready ? `${created.name} is ready` : ended ? `${created.name} needs attention` : `Preparing ${created.name}…`}</p><p className="mt-0.5 opacity-80">{ready ? "Your sandbox is ready to use." : ended ? `Status: ${PHASE_LABEL[sandbox.phase]}. Open the sandbox to inspect it.` : "Your new sandbox is starting. You can keep browsing while it gets ready."}</p></div>
-            {(ready || ended) && <><Button variant="ghost" size="sm" onClick={() => setOpened(created.name)}>Open sandbox<ArrowUpRight className="size-3" /></Button><Button variant="ghost" size="icon-sm" aria-label={`Dismiss status for ${created.name}`} onClick={() => setCreations((current) => current.filter((item) => item.name !== created.name))}><X className="size-3.5" /></Button></>}
+            {(ready || ended) && <><Button variant="ghost" size="sm" onClick={() => openSandbox(created)}>Open sandbox<ArrowUpRight className="size-3" /></Button><Button variant="ghost" size="icon-sm" aria-label={`Dismiss status for ${created.name}`} onClick={() => setCreations((current) => current.filter((item) => nameKey(item) !== nameKey(created)))}><X className="size-3.5" /></Button></>}
           </div>
         })}
         {live.demo && <p className="border-b border-border px-6 py-2 text-xs text-amber-700">Preview · synthetic sandbox data</p>}
@@ -204,8 +215,8 @@ export function SandboxesView({ onNavigate }) {
             </SelectContent>
           </Select>
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
-          <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={live.refresh}><RefreshCw className="size-3.5" /></Button>
-          <Button size="sm" onClick={() => setCreating(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={inventory.refresh}><RefreshCw className="size-3.5" /></Button>
+          <Button size="sm" onClick={() => setCreating(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New {compute.target} sandbox</Button>
         </div>
         {selectedBoxes.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent/30 px-6 py-2">
           <span role="status" className="mr-auto text-xs"><strong>{number(selectedBoxes.length)}</strong> selected{selectedBoxes.length > matchingSelected && <span className="text-muted-foreground"> · {number(selectedBoxes.length - matchingSelected)} outside current filters</span>}</span>
@@ -218,7 +229,7 @@ export function SandboxesView({ onNavigate }) {
         </div>}
         <div ref={virtual.ref} onScroll={virtual.onScroll} tabIndex={0} role="region" aria-label="Sandbox inventory" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
           {loading ? <p role="status" className="py-20 text-center text-sm text-muted-foreground">Loading sandboxes…</p>
-            : unreachable ? <div role="alert" className="py-16 text-center"><p>Gateway unreachable</p><p className="mt-2 text-sm text-muted-foreground">{live.overview.error}</p><Button variant="outline" onClick={live.refresh} className="mt-4">Retry</Button></div>
+            : unreachable ? <div role="alert" className="py-16 text-center"><p>Gateway unreachable</p><p className="mt-2 text-sm text-muted-foreground">{live.overview.error}</p><Button variant="outline" onClick={inventory.refresh} className="mt-4">Retry</Button></div>
             : !ordered.length ? <div className="py-20 text-center"><Box className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{sandboxes.length ? "No matching sandboxes" : "No sandboxes yet"}</p><Button variant="outline" className="mt-4" onClick={() => sandboxes.length ? clearFilters() : setCreating(true)}>{sandboxes.length ? "Clear filters" : "Create sandbox"}</Button></div>
             : <table aria-label="Sandboxes" aria-rowcount={ordered.length + 1} className="w-full min-w-[1040px] table-fixed border-separate border-spacing-0 text-xs">
               <colgroup><col style={{ width: 48 }} />{COLUMNS.map((column) => <col key={column.id} style={{ width: column.width }} />)}</colgroup>
@@ -230,7 +241,7 @@ export function SandboxesView({ onNavigate }) {
               </tr></thead>
               <tbody>
                 {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={7} style={{ height: virtual.paddingTop, padding: 0, border: 0 }} /></tr>}
-                {ordered.slice(virtual.start, virtual.end).map((row, index) => <InventoryRow key={row.sandbox.id ?? row.sandbox.name} row={row} now={now} index={virtual.start + index + 2} onOpen={setOpened} selected={selected.has(keyOf(row.sandbox))} onSelect={toggleSelected} disabled={deleting} />)}
+                {ordered.slice(virtual.start, virtual.end).map((row, index) => <InventoryRow key={keyOf(row.sandbox)} row={row} now={now} index={virtual.start + index + 2} onOpen={openSandbox} selected={selected.has(keyOf(row.sandbox))} onSelect={toggleSelected} disabled={deleting} />)}
                 {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={7} style={{ height: (ordered.length - virtual.end) * ROW_HEIGHT, padding: 0, border: 0 }} /></tr>}
               </tbody>
             </table>}
@@ -244,7 +255,7 @@ export function SandboxesView({ onNavigate }) {
             <AlertDialogTitle>Delete {number(deleteTargets?.length ?? 0)} {deleteTargets?.length === 1 ? "sandbox" : "sandboxes"}?</AlertDialogTitle>
             <AlertDialogDescription>This permanently deletes the selected sandboxes and their data. This cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
-          <ul aria-label="Sandboxes to delete" className="max-h-48 overflow-auto rounded-md border border-border p-3 text-xs">{deleteTargets?.map((sandbox) => <li key={keyOf(sandbox)} className="break-all py-1">{sandbox.name}</li>)}</ul>
+          <ul aria-label="Sandboxes to delete" className="max-h-48 overflow-auto rounded-md border border-border p-3 text-xs">{deleteTargets?.map((sandbox) => <li key={keyOf(sandbox)} className="break-all py-1">{sandbox.name} · {sandbox.computeTarget === "cloud" ? "Cloud" : "Local"}</li>)}</ul>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" disabled={deleting || !deleteTargets?.length} onClick={deleteSelected}>{deleting ? "Deleting…" : "Delete sandboxes"}</AlertDialogAction>
@@ -259,9 +270,9 @@ export function SandboxesView({ onNavigate }) {
 const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen, selected, onSelect, disabled }) {
   const { sandbox, owner, image } = row
   const cell = "h-10 border-b border-border/60 px-4 py-0 align-middle text-muted-foreground"
-  return <tr aria-rowindex={index} onClick={() => onOpen(sandbox.name)} className={`group cursor-pointer transition-colors hover:bg-muted/60 focus-within:bg-muted/60 ${selected ? "bg-accent/40" : "bg-card"}`}>
-    <td className={cell} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${sandbox.name}`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
-    <td className={`${cell} pl-6`}><button aria-haspopup="dialog" aria-label={`Open ${sandbox.name}`} onClick={(event) => { event.stopPropagation(); onOpen(sandbox.name) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+  return <tr aria-rowindex={index} onClick={() => onOpen(sandbox)} className={`group cursor-pointer transition-colors hover:bg-muted/60 focus-within:bg-muted/60 ${selected ? "bg-accent/40" : "bg-card"}`}>
+    <td className={cell} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${sandbox.name} (${sandbox.computeTarget})`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
+    <td className={`${cell} pl-6`}><button aria-haspopup="dialog" aria-label={`Open ${sandbox.name} (${sandbox.computeTarget})`} onClick={(event) => { event.stopPropagation(); onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"><LocationIcon target={sandbox.computeTarget} /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
     <td className={cell}><span className="flex items-center gap-1.5 whitespace-nowrap"><span className={`size-1.5 shrink-0 rounded-full ${styleOf(sandbox.phase).bar}`} />{PHASE_LABEL[sandbox.phase] ?? "Unknown"}</span></td>
     <td className={cell}><span className="block truncate" title={owner}>{owner}</span></td>
     <td className={cell}><span className="block truncate font-mono text-[11px]" title={sandbox.image || image}>{image}</span></td>
@@ -269,6 +280,11 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
     <td className={cell}><span className="block truncate tabular-nums" title={sandbox.createdAt || "Not reported"}>{elapsedSince(sandbox.createdAt, now)}{sandbox.createdAt ? " ago" : ""}</span></td>
   </tr>
 })
+
+function LocationIcon({target}) {
+  const Icon = target === "cloud" ? Cloud : Laptop
+  return <span role="img" aria-label={`${target === "cloud" ? "Cloud" : "Local"} sandbox`} title={target === "cloud" ? "Cloud compute" : "Local compute"}><Icon aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /></span>
+}
 
 function SelectionCheckbox({ label, checked, mixed = false, disabled, onChange }) {
   const ref = React.useRef(null)

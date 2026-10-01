@@ -13,10 +13,10 @@ export function createLocalCloud({origin=CLOUD,allowTestHttp=false,native}={}) {
  const active=new Set(),exchanging=new Map()
  function clear(){grant=null;clearTimeout(expiry);for(const stream of active)stream.destroy();active.clear()}
  function connection(){if(!grant||grant.expires<=Date.now()){clear();throw remoteFail('Connect to OpenRod Cloud first',401)}return grant}
- function upstream(path,{method='GET',body,token}={}) {
+ function upstream(path,{method='GET',body,token,maxBytes=64000}={}) {
   return new Promise((resolve,reject)=>{
    const req=transport.request(new URL(PREFIX+path,origin),{method,headers:{origin,host:url.host,'content-type':'application/json','x-openshell-console':'1',...(token?{authorization:`Bearer ${token}`}:{})}},res=>{
-    let raw='';res.on('data',c=>{raw+=c;if(raw.length>64000)req.destroy(remoteFail('Cloud response too large',502))});res.on('end',()=>{let value;try{value=JSON.parse(raw)}catch{return reject(remoteFail('Invalid cloud response',502))}if(res.statusCode>=300)return reject(remoteFail(value.error??'Cloud connection unavailable',res.statusCode));resolve(value)})
+    let raw='';res.on('data',c=>{raw+=c;if(Buffer.byteLength(raw)>maxBytes)req.destroy(remoteFail('Cloud response too large',502))});res.on('end',()=>{let value;try{value=JSON.parse(raw)}catch{return reject(remoteFail('Invalid cloud response',502))}if(res.statusCode>=300)return reject(remoteFail(value.error??'Cloud connection unavailable',res.statusCode));resolve(value)})
    });req.setTimeout(30000,()=>req.destroy(remoteFail('Cloud connection timed out',503)));req.on('error',reject);req.end(body===undefined?undefined:JSON.stringify(body))
   })
  }
@@ -58,6 +58,7 @@ export function createLocalCloud({origin=CLOUD,allowTestHttp=false,native}={}) {
      return responseJson(res,200,status())
     }
     if(path==='/api/local-cloud/machine'&&req.method==='GET'){const current=connection(),machine=await call('/machine');if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,{...status(),machine})}
+    if(path==='/api/local-cloud/inventory'&&req.method==='GET'){const current=connection(),inventory=await call('/inventory',{maxBytes:4*1024*1024});if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,inventory)}
     if(path==='/api/local-cloud/start'&&req.method==='POST'){
      const body=await readJson(req),verifier=randomBytes(32).toString('hex'),nonce=randomUUID(),challenge=createHash('sha256').update(verifier).digest('hex')
      const bound=validateLocalConnection({origin:body.origin,nonce,challenge})
