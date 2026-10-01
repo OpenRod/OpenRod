@@ -83,7 +83,7 @@ process.exit(23)
   const result = await sshRoute('POST', ['sandboxes', 'demo', 'ssh-open'], {}, {
     env: { ...tools, PATH: `${root}:/usr/bin:/bin` },
     platform: 'darwin',
-    loadContext: async () => ({ sandbox: ready(), target: { ...remote, name: 'console-ssh-' + 'a'.repeat(24) }, workspace: 'team' }),
+    loadContext: async () => ({ sandbox: ready({ labels: { 'openshell.console/persistent-terminal': '1' } }), target: { ...remote, name: 'console-ssh-' + 'a'.repeat(24) }, workspace: 'team' }),
     runOpenShell: async (args, options) => ({
       code: 0, stdout: `Host openshell-demo.${options.workspace}\n    User sandbox\n`,
     }),

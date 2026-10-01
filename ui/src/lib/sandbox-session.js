@@ -7,7 +7,10 @@ export const SESSION_LABEL = "openshell.console/session"
 // label is read back from the gateway, so its value is checked again here:
 // one path segment of letters, digits, '-', '_' and '.', never "." or "..".
 export const PROJECT_LABEL = "openshell.console/project"
+// Set on sandboxes created with persistentTerminalPolicy; older ones lack its PTY grants.
+export const PERSISTENT_TERMINAL_LABEL = "openshell.console/persistent-terminal"
 export const persistentGateway = target => Boolean(target?.remote && /^console-ssh-[a-f0-9]{24}$/.test(target.name ?? target.gateway ?? ''))
+export const persistentTerminals = (target, sandbox) => persistentGateway(target) && sandbox?.labels?.[PERSISTENT_TERMINAL_LABEL] === '1'
 export const projectOf = (sandbox) => {
   const value = sandbox?.labels?.[PROJECT_LABEL]
   return typeof value === "string" && /^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$/.test(value) ? value : null
@@ -101,7 +104,7 @@ export const sessionArgv = (session) => (isSession(session) ? SESSIONS[session].
 // exec kills only the tmux client; the server owns the agent and its PTY.
 export function persistentSessionArgv(session) {
   if (!isSession(session)) throw new Error('Unknown session type.')
-  const script = `command -v tmux >/dev/null 2>&1 || { printf '%s\\n' 'This image needs tmux for sleep-safe terminals. Rebuild it with the console or add tmux to the image.' >&2; exit 127; }; exec tmux -L openshell-console new-session -A -s ${shellQuote('console-' + session)} ${sessionArgv(session).map(shellQuote).join(' ')}`
+  const script = `command -v tmux >/dev/null 2>&1 || exec ${sessionArgv(session).map(shellQuote).join(' ')}; exec tmux -L openshell-console new-session -A -s ${shellQuote('console-' + session)} ${sessionArgv(session).map(shellQuote).join(' ')}`
   return ['/bin/sh', '-c', script]
 }
 export function persistentTerminalPolicy(policy) {
