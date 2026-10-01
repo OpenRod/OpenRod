@@ -16,6 +16,7 @@ export const api = {
   setups: () => request('/setups'),
   discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
   reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),
+  removeSetupReviewItem: (token, item) => request('/setups/remove-review-item', { method: 'POST', body: { token, item } }),
   prepareSetup: (token, items) => request('/setups/prepare', { method: 'POST', body: { token, items, approved: true } }),
   prepareLaunchSetup: (id, revision) => request(`/setups/${id}/prepare-launch`, { method: 'POST', body: { revision } }),
   prepareSavedSetup: (id) => request(`/setups/${id}/prepare`, { method: 'POST', body: {} }),

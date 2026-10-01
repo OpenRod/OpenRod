@@ -13,6 +13,10 @@ export function createSetupImportJobs(api, workflow = importSetup) {
   return {
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
     getSnapshot: () => snapshot,
+    updateReview(id, review, prepared) {
+      if (active.has(id)) throw new Error('Wait for the import to finish before removing items.')
+      update(id, { review, prepared, preparation: null, status: 'needs-attention', message: review.items.length ? 'Import selection updated. Review it to finish importing.' : 'No items remain in this import.' })
+    },
     dismiss(id) { snapshot = snapshot.filter(job => job.id !== id); listeners.forEach(listener => listener()) },
     async cancel(id) {
       const run = active.get(id)
