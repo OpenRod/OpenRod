@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
+import { Notice } from "@/components/notice"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
@@ -444,10 +445,10 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
         <AlertTriangle className="size-3.5" /><span className="mr-auto">A global policy overrides every sandbox's network rules.</span>
         <Button variant="outline" size="sm" onClick={onOpenGlobal}>Review</Button>
       </div>}
-      {deleteErrors.length > 0 && <div role="alert" className="border-b border-border px-6 py-2 text-xs text-destructive">
-        <div className="flex items-center justify-between gap-2"><p>Some rules could not be deleted. Failed rules remain selected for retry.</p><Button variant="ghost" size="icon-sm" aria-label="Dismiss deletion errors" onClick={() => setDeleteErrors([])}><X className="size-3.5" /></Button></div>
-        <ul className="max-h-28 overflow-auto">{deleteErrors.map((error) => <li key={error.id}><strong>{error.name}</strong>: {error.message}</li>)}</ul>
-      </div>}
+      {deleteErrors.length > 0 && <Notice id="egress:delete-errors" tone="error" title="Some rules could not be deleted" onDismiss={() => setDeleteErrors([])} dismissLabel="Dismiss deletion errors">
+        <p>Failed rules remain selected for retry.</p>
+        <ul className="mt-1 max-h-28 overflow-auto">{deleteErrors.map((error) => <li key={error.id}><strong className="text-foreground">{error.name}</strong>: {error.message}</li>)}</ul>
+      </Notice>}
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {count === 0 && !(view === "rules" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
           <div className="min-w-[960px] bg-card">

@@ -1,6 +1,7 @@
 import * as React from 'react'
 import {api} from '@/lib/api'
 import {CLOUD_ORIGIN} from '@/lib/cloud-transfer'
+import { Notice } from '@/components/notice'
 export function LocalReturn({children}) {
  const nonce=React.useRef(/^#cloud-return=([a-f0-9-]{36})$/.exec(window.location.hash)?.[1])
  const [state,setState]=React.useState(nonce.current&&window.opener?'waiting':'normal'),[message,setMessage]=React.useState('')
@@ -29,7 +30,7 @@ export function LocalReturn({children}) {
   const timer=setInterval(()=>{if(window.opener?.closed||Date.now()>deadline){setMessage('The cloud tab closed or the copy timed out. Open the workspace to check whether a copy was created.');setState('error')}},1000)
   return()=>clearInterval(timer)
  },[state])
- if(state==='normal'||state==='done')return <>{message&&<div role="status" className="border-b px-6 py-3 text-sm text-muted-foreground">{message}</div>}{children}</>
+ if(state==='normal'||state==='done')return <>{message&&<Notice id="local-return" tone={state==='done'?'success':'warning'} title={state==='done'?'Workspace continued locally':'Workspace copy didn’t finish'} onDismiss={()=>setMessage('')}>{message}</Notice>}{children}</>
  return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-md text-center">
   <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10"/>
   <h1 className="text-2xl font-semibold">Continuing your workspace locally…</h1>

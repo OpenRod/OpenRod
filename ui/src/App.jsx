@@ -1,6 +1,7 @@
 import * as React from "react"
 import { Plus } from "lucide-react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
+import { SandboxCreationNotifications } from "@/components/sandbox-creation-notices"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
 import { ActivityView } from "@/components/activity-view"
@@ -151,6 +152,7 @@ export function App() {
             <CloudAccount />
           </header>
           <SetupImportNotifications />
+          <SandboxCreationNotifications />
           <PageBoundary key={`${view}:${pageLocation?.context ?? ""}`} view={view}>
           <ScopedPage location={pageLocation}>
           <ConnectionGate onSetup={view === "sandboxes" || view === "templates" ? undefined : connectMachine}>

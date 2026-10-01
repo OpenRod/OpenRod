@@ -19,6 +19,7 @@ import { useDemoFleet } from "@/hooks/use-demo-fleet"
 import { useActivityHistory } from "@/hooks/use-activity-history"
 import { useLive } from "@/lib/live"
 import { activityKey, activityRow, filterActivity } from "@/lib/activity-inventory"
+import { Notice } from "@/components/notice"
 
 const PAGE_SIZE = 50
 const COLUMNS = [{ id: 'time', label: 'Time', width: 150 }, { id: 'severity', label: 'Security severity', width: 150 }, { id: 'logLevel', label: 'Log level', width: 110 }, { id: 'sandbox', label: 'Sandbox', width: 125 }, { id: 'agent', label: 'Observed agent', width: 145 }, { id: 'action', label: 'Activity', width: 200 }, { id: 'verdict', label: 'Decision', width: 125 }, { id: 'destination', label: 'Target', width: 260 }]
@@ -237,7 +238,7 @@ function ScopedActivityView() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {(history.error || live.historyError) && !live.demo && <div role="alert" className="border-b border-red-200 bg-red-50 px-6 py-2 text-xs text-red-700">History unavailable: {history.error || live.historyError}<Button size="xs" variant="ghost" onClick={history.refresh}>Retry</Button></div>}
+      {(history.error || live.historyError) && !live.demo && <Notice id="activity:history-error" tone="error" title="History unavailable" actions={<Button size="xs" variant="outline" onClick={history.refresh}>Retry</Button>}>{history.error || live.historyError}</Notice>}
       {range === 'custom' && <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs"><label className="flex items-center gap-2">From<input type="datetime-local" aria-label="From time" className={control} value={from} onInput={(e) => change(setFrom)(e.currentTarget.value)} /></label><label className="flex items-center gap-2">To<input type="datetime-local" aria-label="To time" className={control} value={to} onInput={(e) => change(setTo)(e.currentTarget.value)} /></label><span className="text-muted-foreground">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>{invalidRange && <span role="alert" className="text-red-600">Choose a start or end time; the end must follow the start.</span>}</div>}
       {Boolean(filtering) && <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-6 py-2">{chips.map((chip) => <button key={chip.label} onClick={chip.clear} title={`Remove ${chip.label}`} className="flex max-w-72 items-center gap-2 rounded border border-border bg-muted/40 px-2 py-1 text-[11px]"><span className="truncate">{chip.label}</span><X className="size-3 shrink-0" /></button>)}<Button size="xs" variant="ghost" onClick={clear}>Clear all</Button></div>}
       <div className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-6 py-2 text-[11px] text-muted-foreground">
