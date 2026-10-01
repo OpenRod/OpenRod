@@ -47,7 +47,7 @@ The import source does not constrain the destination. `shared/setup-targets.json
 | Cursor | `~/.cursor/mcp.json` | `~/.cursor/skills/` |
 | OpenCode | `~/.config/opencode/opencode.json` (or existing `.jsonc`) | `~/.config/opencode/skills/` |
 | Pi | `~/.pi/agent/mcp.json` | `~/.pi/agent/skills/` |
-| Antigravity CLI | `~/.gemini/config/mcp_config.json` | `~/.gemini/antigravity-cli/skills/` |
+| Antigravity CLI | `~/.gemini/config/mcp_config.json` | `~/.gemini/config/skills/` |
 | GitHub Copilot | `~/.copilot/mcp-config.json` | `~/.copilot/skills/` |
 | Kiro CLI | `~/.kiro/settings/mcp.json` | `~/.kiro/skills/` |
 | Factory Droid | `~/.factory/mcp.json` | `~/.factory/skills/` |
