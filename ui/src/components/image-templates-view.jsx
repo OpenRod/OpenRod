@@ -58,12 +58,14 @@ export function TemplatesView() {
   }, [defaultContext, locations])
   const selected = records.find((t) => resourceKey(t) === selectedKey)
   const owner = (t) => locations.find((location) => location.context === t.location.context) ?? t.location
+  // The location column only tells templates apart when more than one gateway is listed.
+  const multipleLocations = locations.length > 1
   const connected = (t) => owner(t).connected !== false
   const scopedApi = (t) => {
     if (!connected(t)) throw new Error(`${locationLabel(owner(t))} is disconnected. Reconnect before continuing.`)
     return api.forContext(t.location.context)
   }
-  const shown = records.filter((t) => (!locationFilter || t.location.context === locationFilter) && `${t.name} ${t.image || ''} ${t.recipe.repository || ''}`.toLowerCase().includes(query.toLowerCase()))
+  const shown = records.filter((t) => (!multipleLocations || !locationFilter || t.location.context === locationFilter) && `${t.name} ${t.image || ''} ${t.recipe.repository || ''}`.toLowerCase().includes(query.toLowerCase()))
   const selectable = shown.filter((t) => !working(t) && connected(t))
   const checkedRecords = records.filter((t) => checked.has(resourceKey(t)) && !working(t) && connected(t))
   const matchingChecked = selectable.filter((t) => checked.has(resourceKey(t))).length
@@ -161,10 +163,10 @@ export function TemplatesView() {
         <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
         <Input aria-label="Search image templates" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
       </div>
-      <select aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
+      {multipleLocations && <select aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
         <option value="">All locations</option>
         {locations.map((location) => <option key={location.context} value={location.context}>{locationLabel(location)}{location.context === defaultContext ? ' (default)' : ''}{location.connected === false ? ' · disconnected' : ''}</option>)}
-      </select>
+      </select>}
       <Button size="sm" className={action} disabled={!locations.some((location) => location.connected)} onClick={() => { setNewLocation(''); setChooseLocation(true) }}><Plus />New template</Button>
     </div>
     {checkedRecords.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-8">
@@ -183,14 +185,14 @@ export function TemplatesView() {
         <div className="overflow-x-auto">
           <table aria-label="Image templates" className="w-full min-w-[580px] text-left">
             <thead className="border-b text-[11px] text-muted-foreground">
-              <tr><th className="w-10 px-4 py-2 sm:pl-8"><Checkbox aria-label="Select all matching templates" checked={allChecked} indeterminate={matchingChecked > 0 && !allChecked} disabled={busy || !selectable.length} onCheckedChange={toggleMatching} /></th><th className="px-4 py-2 font-normal">Name</th><th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
+              <tr><th className="w-10 px-4 py-2 sm:pl-8"><Checkbox aria-label="Select all matching templates" checked={allChecked} indeterminate={matchingChecked > 0 && !allChecked} disabled={busy || !selectable.length} onCheckedChange={toggleMatching} /></th><th className="px-4 py-2 font-normal">Name</th>{multipleLocations && <th className="px-4 py-2 font-normal">Location</th>}<th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
             </thead>
             <tbody className="divide-y">{shown.map((t) => <tr key={resourceKey(t)} className={checked.has(resourceKey(t)) ? "bg-accent/40 hover:bg-muted/40" : "hover:bg-muted/40"}>
               <td className="px-4 py-2 sm:pl-8"><Checkbox aria-label={`Select ${t.name} in ${locationLabel(owner(t))}`} checked={checked.has(resourceKey(t))} disabled={busy || working(t) || !connected(t)} onCheckedChange={() => toggle(resourceKey(t))} /></td>
               <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedKey(resourceKey(t))}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
-                <div className="mt-1"><LocationBadge location={owner(t)} /></div>
               </td>
+              {multipleLocations && <td className="px-4 py-2"><LocationBadge location={owner(t)} /></td>}
               <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '-' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>

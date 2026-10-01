@@ -6,6 +6,8 @@ import { useInventory } from "@/lib/inventory"
 import { LocationProvider, useLocation } from "@/lib/location-context"
 import { locationLabel, resourceKey } from "@/lib/locations"
 import { LocationBadge } from "@/components/location-badge"
+import { PlacementBadge } from "@/components/placement-badge"
+import { PLACEMENTS, placementOf } from "@/lib/placement"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -29,7 +31,9 @@ const keyOf = resourceKey
 const nameKey = (sandbox) => JSON.stringify([sandbox.location?.context, sandbox.name])
 const number = (value) => value.toLocaleString("en-US")
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
-const COLUMNS = [{ id: "name", label: "Sandbox", width: "28%" }, { id: "phase", label: "Status", width: "12%" }, { id: "owner", label: "Owner", width: "13%" }, { id: "image", label: "Image", width: "26%" }, { id: "startedAt", label: "Uptime", width: "10%" }, { id: "createdAt", label: "Created", width: "11%" }]
+const COLUMNS = [{ id: "name", label: "Sandbox", width: "26%" }, { id: "type", label: "Type", width: "11%" }, { id: "phase", label: "Status", width: "11%" }, { id: "owner", label: "Owner", width: "12%" }, { id: "image", label: "Image", width: "22%" }, { id: "startedAt", label: "Uptime", width: "8%" }, { id: "createdAt", label: "Created", width: "10%" }]
+// Synthetic fleets spread across every placement so the Type column can be judged.
+const DEMO_PLACEMENTS = Object.keys(PLACEMENTS)
 
 export function SandboxesView({ onNavigate, onConnect }) {
   const live = useDemoFleet(useLive())
@@ -56,7 +60,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
   const chosenLocation = locations.find((location) => location.context === creationLocation?.context) ?? creationLocation ?? availableLocation
   const [creations, setCreations] = React.useState([])
   const reportedSandboxes = React.useMemo(() => live.demo
-    ? (live.sandboxes ?? EMPTY).map((sandbox) => ({ ...sandbox, location: defaultLocation ?? availableLocation ?? PREVIEW_LOCATION }))
+    ? (live.sandboxes ?? EMPTY).map((sandbox, index) => { const location = defaultLocation ?? availableLocation ?? PREVIEW_LOCATION; const placement = DEMO_PLACEMENTS[index % DEMO_PLACEMENTS.length]; return { ...sandbox, location: placement === placementOf(location) ? location : { ...location, placement, host: `${placement}-demo` } } })
     : inventory.sandboxes, [live.demo, live.sandboxes, defaultLocation, availableLocation, inventory.sandboxes])
   const sandboxes = React.useMemo(() => {
     const reported = new Set(reportedSandboxes.map(nameKey))
@@ -118,12 +122,12 @@ export function SandboxesView({ onNavigate, onConnect }) {
     inventory.refresh()
   }
   const all = React.useMemo(() => summarize(sandboxes), [sandboxes])
-  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, locationLabel(sandbox.location), ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
+  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), type: PLACEMENTS[placementOf(sandbox.location)].label, image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, locationLabel(sandbox.location), PLACEMENTS[placementOf(sandbox.location)].label, ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
   const images = React.useMemo(() => [...new Set(indexed.map((row) => row.image))].sort(collator.compare), [indexed])
   const ordered = React.useMemo(() => {
     const q = deferredQuery.trim().toLowerCase()
     const matched = indexed.filter((row) => (!locationFilter || row.sandbox.location?.context === locationFilter) && (status === "all" || statusOf(row.sandbox.phase) === status) && (!imageFilter || row.image === imageFilter) && (!q || row.search.includes(q)))
-    const value = (row) => sort.key === "owner" || sort.key === "image" ? row[sort.key] : sort.key === "startedAt" ? row.sandbox.phase === "ready" ? row.sandbox.startedAt : null : row.sandbox[sort.key]
+    const value = (row) => sort.key === "owner" || sort.key === "image" || sort.key === "type" ? row[sort.key] : sort.key === "startedAt" ? row.sandbox.phase === "ready" ? row.sandbox.startedAt : null : row.sandbox[sort.key]
     return matched.sort((a, b) => {
       const av = value(a), bv = value(b)
       if (!av && bv) return 1
@@ -297,9 +301,9 @@ export function SandboxesView({ onNavigate, onConnect }) {
                 </th>)}
               </tr></thead>
               <tbody>
-                {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={7} style={{ height: virtual.paddingTop, padding: 0, border: 0 }} /></tr>}
+                {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={8} style={{ height: virtual.paddingTop, padding: 0, border: 0 }} /></tr>}
                 {ordered.slice(virtual.start, virtual.end).map((row, index) => <InventoryRow key={keyOf(row.sandbox)} row={row} now={now} index={virtual.start + index + 2} onOpen={setOpened} selected={selected.has(keyOf(row.sandbox))} onSelect={toggleSelected} disabled={deleting || live.demo || !row.sandbox.location?.connected} />)}
-                {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={7} style={{ height: (ordered.length - virtual.end) * ROW_HEIGHT, padding: 0, border: 0 }} /></tr>}
+                {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={8} style={{ height: (ordered.length - virtual.end) * ROW_HEIGHT, padding: 0, border: 0 }} /></tr>}
               </tbody>
             </table>}
         </div>
@@ -331,7 +335,8 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
   const label = `${sandbox.name} at ${locationLabel(sandbox.location)}`
   return <tr aria-rowindex={index} aria-disabled={disconnected || undefined} onClick={() => { if (!disconnected) onOpen(sandbox) }} className={`group transition-colors ${disconnected ? "opacity-60" : "cursor-pointer hover:bg-muted/60 focus-within:bg-muted/60"} ${selected ? "bg-accent/40" : "bg-card"}`}>
     <td className={cell} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${label}`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
-    <td className={`${cell} pl-6`}><button disabled={disconnected} aria-haspopup="dialog" aria-label={`Open ${label}`} onClick={(event) => { event.stopPropagation(); if (!disconnected) onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><LocationBadge location={sandbox.location} /><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+    <td className={`${cell} pl-6`}><button disabled={disconnected} aria-haspopup="dialog" aria-label={`Open ${label}`} onClick={(event) => { event.stopPropagation(); if (!disconnected) onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+    <td className={cell}><PlacementBadge location={sandbox.location} /></td>
     <td className={cell}><span className="flex items-center gap-1.5 whitespace-nowrap"><span className={`size-1.5 shrink-0 rounded-full ${styleOf(sandbox.phase).bar}`} />{PHASE_LABEL[sandbox.phase] ?? "Unknown"}</span></td>
     <td className={cell}><span className="block truncate" title={owner}>{owner}</span></td>
     <td className={cell}><span className="block truncate font-mono text-[11px]" title={sandbox.image || image}>{image}</span></td>
