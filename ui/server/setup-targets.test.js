@@ -10,6 +10,22 @@ import { setupPython } from './setup-python.js'
 
 const installer = setupPython('./setup-installer.py')
 const probe = setupPython('./agent-resources.py')
+test('non-login installer finds Antigravity in the image user bin and installs skills for both agents', async t => {
+  const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'setup-user-bin-')))
+  t.after(() => fs.rm(home, { recursive: true, force: true }))
+  const bin = path.join(home, '.local/bin')
+  await fs.mkdir(bin, { recursive: true })
+  for (const name of ['agy', 'opencode']) await fs.writeFile(path.join(bin, name), '#!/bin/sh\nexit 99\n', { mode: 0o700 })
+  const setup = { id: '1234567890abcdef12345678', revision: 'test', items: [{ id: 'skill1234', kind: 'skill', name: 'review', files: [{ path: 'SKILL.md', content: '---\nname: review\ndescription: Review code\n---\n# Review' }] }] }
+  const env = { ...process.env, HOME: home, OPENSHELL_SETUP_HOME: home }
+  const run = operation => JSON.parse(spawnSync('python3', ['-c', installer], { env, input: JSON.stringify({ operation, setup, targets: ['antigravity', 'opencode'] }), encoding: 'utf8' }).stdout)
+  assert.equal(run('probe').executables.agy, path.join(bin, 'agy'))
+  assert.equal(run('apply').status, 'installed')
+  for (const target of SETUP_TARGETS.filter(t => ['antigravity', 'opencode'].includes(t.id))) assert.match(await fs.readFile(path.join(home, target.skills, 'review/SKILL.md'), 'utf8'), /name: review/)
+  await fs.chmod(path.join(bin, 'agy'), 0o600)
+  assert.equal(run('probe').executables.agy, null)
+})
+
 test('every offered agent has an explicit setup capability and quick creation accepts all supported targets', () => {
   assert.deepEqual(new Set(SETUP_AGENTS.map(a => a.id)), new Set(AGENTS.map(a => a.id)))
   assert.equal(validateSetupTargets(SETUP_TARGETS.map(a => a.id)).length, 9)
@@ -18,6 +34,20 @@ test('every offered agent has an explicit setup capability and quick creation ac
   assert.throws(() => validateSetupTargets(['pi','pi']), /Choose/)
   assert.throws(() => validateSetupTargets(['unknown']), /Unknown/)
   assert.throws(() => validateSetupTargets([]), /Choose/)
+})
+
+test('Antigravity reapply migrates managed skills to the current runtime discovery root', async t => {
+  const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'setup-agy-migrate-')))
+  t.after(() => fs.rm(home, { recursive: true, force: true }))
+  await fs.mkdir(path.join(home, '.local/bin'), { recursive: true })
+  await fs.writeFile(path.join(home, '.local/bin/agy'), '#!/bin/sh\nexit 99\n', { mode: 0o700 })
+  const setup = { id: '1234567890abcdef12345678', revision: 'test', items: [{ id: 'skill1234', kind: 'skill', name: 'review', files: [{ path: 'SKILL.md', content: '---\nname: review\ndescription: Review code\n---\n# Review' }] }] }
+  const env = { ...process.env, HOME: home, OPENSHELL_SETUP_HOME: home }
+  const run = script => JSON.parse(spawnSync('python3', ['-c', script], { env, input: JSON.stringify({ operation: 'apply', setup, targets: ['antigravity'] }), encoding: 'utf8' }).stdout)
+  assert.equal(run(installer.replaceAll('.gemini/config/skills', '.gemini/antigravity-cli/skills')).status, 'installed')
+  assert.equal(run(installer).status, 'installed')
+  assert.match(await fs.readFile(path.join(home, '.gemini/config/skills/review/SKILL.md'), 'utf8'), /name: review/)
+  await assert.rejects(fs.stat(path.join(home, '.gemini/antigravity-cli/skills/review/SKILL.md')), { code: 'ENOENT' })
 })
 
 for (const adapter of SETUP_TARGETS) test(`${adapter.name}: install, inventory, idempotence, collision and removal`, async t => {

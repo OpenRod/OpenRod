@@ -8,6 +8,18 @@ if 'parse_agent_json' not in globals(): exec((pathlib.Path(__file__).parent / 's
 CATALOG = json.loads(globals().get('SETUP_TARGET_CATALOG') or (pathlib.Path(__file__).parent.parent / 'shared/setup-targets.json').read_text())
 TARGETS = {t['id']: t for t in CATALOG if t.get('config') and t.get('skills')}
 
+def find_executable(command):
+    found = shutil.which(command)
+    if found or '/' in command: return found
+    # Non-login checks must find image-installed tools without sourcing profiles.
+    roots = [pathlib.Path(p) for p in ('/usr/local/bin', '/usr/bin', '/opt/bin')]
+    roots += [HOME / p for p in ('.local/bin', '.npm-global/bin', '.bun/bin', '.opencode/bin', 'bin', '.cargo/bin')]
+    roots += sorted((HOME / '.nvm/versions/node').glob('*/bin')) + [pathlib.Path('/opt/node/bin')]
+    for root in roots:
+        candidate = root / command
+        if candidate.is_file() and os.access(candidate, os.X_OK): return str(candidate)
+    return None
+
 def network_executable(filename):
     if not filename: return None
     resolved = os.path.realpath(filename)
@@ -166,7 +178,7 @@ def run(request):
     manifest_path = '.openshell/installed-setups/' + sid + '.json'
     original_manifest = read(manifest_path)
     previous = json.loads(original_manifest) if original_manifest else None
-    required = {TARGETS[t]['command']: shutil.which(TARGETS[t]['command']) for t in targets}
+    required = {TARGETS[t]['command']: find_executable(TARGETS[t]['command']) for t in targets}
     if any(i['kind'] == 'mcp' for i in setup['items']): required['node'] = shutil.which('node')
     for item in setup['items']:
         if item['kind'] == 'mcp' and (item.get('config') or {}).get('command'):
