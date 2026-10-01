@@ -19,7 +19,7 @@ const STATUS = {
 
 // Connects an SSH host as a sandbox location. Calls onConnected(job) once the
 // remote gateway is ready; it never reloads the page.
-export function RemoteConnect({ onConnected, onBack, initialHost }) {
+export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost = null, onUseConnected }) {
   const [connections, setConnections] = React.useState(null)
   const [runtimeInstallation, setRuntimeInstallation] = React.useState("download")
   const [selection, setSelection] = React.useState("")
@@ -98,11 +98,13 @@ export function RemoteConnect({ onConnected, onBack, initialHost }) {
   const missingSsh = connections && !connections.tools.ssh
   const status = job && job.host === selection && STATUS[job.status] ? STATUS[job.status] : null
   const refresh = () => setRevision((value) => value + 1)
+  // The machine already connected is used as it is; choosing another host replaces it.
+  const reuse = Boolean(connectedHost && onUseConnected && selection === connectedHost && !job)
 
   return <div className="grid gap-6 text-xs">
     <div className="grid gap-6 md:grid-cols-2 md:gap-8">
     <div className="grid min-w-0 content-start gap-5">
-    <HostLink host={selection || "Your server"} live={job?.status === "working"} />
+    <HostLink host={selection || "Your server"} live={job?.status === "working" || reuse} />
     </div>
 
     <div className="grid min-w-0 content-start gap-5">
@@ -118,7 +120,9 @@ export function RemoteConnect({ onConnected, onBack, initialHost }) {
           <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`} />
         </Button>
       </div>
-      {selected && <p className="text-muted-foreground">First time? Run <code className="rounded bg-muted px-1 font-mono text-foreground">ssh {selection}</code> once to trust the machine.</p>}
+      {reuse ? <p className="text-muted-foreground">Connected now. Choose another host to replace this connection.</p>
+        : connectedHost && selected && <p className="text-muted-foreground">Connecting {selection} replaces the connection to {connectedHost}.</p>}
+      {selected && !reuse && <p className="text-muted-foreground">First time? Run <code className="rounded bg-muted px-1 font-mono text-foreground">ssh {selection}</code> once to trust the machine.</p>}
       {missingSsh && <Notice>OpenSSH isn’t installed on this computer. Install it, then refresh.</Notice>}
     </div>
 
@@ -180,10 +184,11 @@ export function RemoteConnect({ onConnected, onBack, initialHost }) {
 
     <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
       <Button type="button" variant="ghost" className="mr-auto" disabled={Boolean(busy)} onClick={onBack}>Back</Button>
-      <Button type="button" disabled={locked || !selected || missingSsh || blocked} onClick={() => run("connect", () => api.connect({ host: selection, runtimeInstallation }))}
+      {reuse ? <Button type="button" onClick={onUseConnected} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">Continue with {connectedHost}</Button>
+      : <Button type="button" disabled={locked || !selected || missingSsh || blocked} onClick={() => run("connect", () => api.connect({ host: selection, runtimeInstallation }))}
         className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
         {busy === "connect" || job?.status === "working" ? <><Loader2 className="size-3.5 animate-spin" />Connecting…</> : job?.status === "failed" && job.host === selection ? "Try again" : "Connect"}
-      </Button>
+      </Button>}
     </div>
   </div>
 }

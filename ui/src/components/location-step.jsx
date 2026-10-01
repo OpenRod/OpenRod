@@ -50,19 +50,18 @@ function LaptopArt({ live }) {
   </svg>
 }
 
-function ServerArt({ live, dashed }) {
+function ServerArt({ live }) {
   const reduce = useReducedMotion()
   return <svg viewBox="0 0 52 50" className="h-[60px] w-auto text-foreground" aria-hidden="true">
     {[0, 1, 2].map((unit) => <g key={unit}>
-      <rect x="2" y={2 + unit * 16} width="48" height="13" rx="3" fill="var(--popover)" stroke="currentColor" strokeOpacity={dashed ? 0.35 : 0.55} strokeDasharray={dashed ? "3 2.5" : undefined} />
-      {!dashed && <>
+      <rect x="2" y={2 + unit * 16} width="48" height="13" rx="3" fill="var(--popover)" stroke="currentColor" strokeOpacity="0.55" />
+      <>
         <motion.circle cx="9" cy={8.5 + unit * 16} r="1.6" fill="#10b981"
           initial={{ opacity: 0.9 }} animate={reduce || !live ? undefined : { opacity: [0.9, 0.25, 0.9] }} transition={{ duration: 1.6, repeat: Infinity, delay: unit * 0.35 }} />
         <circle cx="14.5" cy={8.5 + unit * 16} r="1.6" fill="currentColor" fillOpacity="0.25" />
         {[0, 1, 2, 3].map((vent) => <rect key={vent} x={30 + vent * 4.2} y={5.5 + unit * 16} width="1.6" height="6" rx="0.8" fill="currentColor" fillOpacity="0.22" />)}
-      </>}
+      </>
     </g>)}
-    {dashed && <path d="M26 18v14M19 25h14" stroke="currentColor" strokeOpacity="0.7" strokeWidth="1.6" strokeLinecap="round" />}
   </svg>
 }
 
@@ -74,7 +73,6 @@ function Scene({ kind, live }) {
   return <div ref={container} className="relative flex h-36 items-center justify-center gap-14">
     <DotPattern width={14} height={14} className="text-foreground/15 transition-colors duration-500 [mask-image:radial-gradient(160px_circle_at_center,white,transparent)] group-hover:text-foreground/30" />
     {kind === "local" && <span className="relative z-10 transition-transform duration-500 group-hover:scale-105"><LaptopArt live={live} /></span>}
-    {kind === "add" && <span className="relative z-10 transition-transform duration-500 group-hover:scale-105"><ServerArt dashed /></span>}
     {kind === "remote" && <>
       <span ref={from} className="relative z-10 transition-transform duration-500 group-hover:-translate-x-1"><LaptopArt live={live} /></span>
       <span ref={to} className="relative z-10 transition-transform duration-500 group-hover:translate-x-1"><ServerArt live={live} /></span>
@@ -150,16 +148,14 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
     <div className="-m-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
       <AnimatePresence mode="wait" initial={false}>
         {view === "choose" ? <motion.div key="choose" {...slide} className="grid gap-3">
-          <div className={`grid gap-4 ${allowRemote && remote?.connected ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+          <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-2" : ""}`}>
           <Place index={0} scene="local" live={local?.connected} title="This computer" caption={localCaption} tone={local?.connected ? "live" : "idle"}
             disabled={local ? !local.connected : !locals?.length || localBusy}
             onClick={() => local ? onPick(local.context) : chooseRegisteredLocal()}
             trailing={localBusy && <Loader2 className="size-4 animate-spin text-muted-foreground" />} />
-          {allowRemote && remote?.connected && <Place index={1} scene="remote" live title={hostOf(remote)} caption="Connected over SSH" tone="live" onClick={() => onPick(remote.context)} />}
-          {allowRemote && <Place index={remote?.connected ? 2 : 1} scene={remote?.connected ? "add" : "remote"}
-            title={remote?.connected ? "Another machine" : remote ? `Reconnect ${hostOf(remote)}` : "Remote machine"}
-            caption={remote?.connected ? "Replaces the current SSH connection" : remote ? "Disconnected" : "Your server, over SSH"}
-            tone={remote && !remote.connected ? "warn" : "idle"} onClick={() => setView("remote")} />}
+          {allowRemote && <Place index={1} scene="remote" live={remote?.connected} title="Remote machine"
+            caption={remote?.connected ? `Connected · ${hostOf(remote)}` : remote ? `${hostOf(remote)} · Disconnected` : "Your server, over SSH"}
+            tone={remote?.connected ? "live" : remote ? "warn" : "idle"} onClick={() => setView("remote")} />}
           </div>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <div className="mt-3 flex justify-end">
@@ -168,7 +164,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
         </motion.div> : <motion.div key="remote" {...slide}>
           {connecting ? <div role="status" className="grid place-items-center gap-3 py-16 text-xs text-muted-foreground">
             <Loader2 className="size-5 animate-spin" />Connected. Opening the sandbox form…
-          </div> : <RemoteConnect initialHost={remote && !remote.connected ? hostOf(remote) : undefined} onConnected={onConnected} onBack={() => setView("choose")} />}
+          </div> : <RemoteConnect initialHost={remote ? hostOf(remote) : undefined} connectedHost={remote?.connected ? hostOf(remote) : null} onUseConnected={() => onPick(remote.context)} onConnected={onConnected} onBack={() => setView("choose")} />}
         </motion.div>}
       </AnimatePresence>
     </div>
