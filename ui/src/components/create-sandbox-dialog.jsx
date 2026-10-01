@@ -399,11 +399,11 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                 const connections = compatibleProviders(providers, agent.id)
                 if (!connections.length) return null
                 return <div key={agent.id} className="grid gap-1.5">
-                  <Label htmlFor={`quick-sign-in-${agent.id}`} className="text-xs">{agent.name} sign-in</Label>
+                  <Label htmlFor={`quick-sign-in-${agent.id}`} className="text-xs">{agent.name} API key</Label>
                   <Select value={quickProviders[agent.id] || ""} onValueChange={(value) => setQuickProviders((current) => ({ ...current, [agent.id]: value ?? "" }))}>
-                    <SelectTrigger id={`quick-sign-in-${agent.id}`} className="w-full text-xs"><SelectValue>{quickProviders[agent.id] || "Set up after creation"}</SelectValue></SelectTrigger>
+                    <SelectTrigger id={`quick-sign-in-${agent.id}`} className="w-full text-xs"><SelectValue>{quickProviders[agent.id] || "None, I’ll use my subscription"}</SelectValue></SelectTrigger>
                     <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
-                      <SelectItem value="" className="text-xs">Set up after creation</SelectItem>
+                      <SelectItem value="" className="text-xs">None, I’ll use my subscription</SelectItem>
                       {connections.map((provider) => <SelectItem key={provider.name} value={provider.name} className="text-xs">{provider.name}</SelectItem>)}
                     </SelectGroup></SelectContent>
                   </Select>
