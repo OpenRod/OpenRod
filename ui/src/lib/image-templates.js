@@ -13,7 +13,9 @@ const choices = [
   { id: 'claude', command: 'claude', featured: true },
   { id: 'codex', command: 'codex', featured: true, npm: '@openai/codex' },
   { id: 'opencode', command: 'opencode', featured: true, npm: 'opencode-ai' },
-  { id: 'pi', command: 'pi', npm: '@earendil-works/pi-coding-agent', ignoreScripts: true },
+  // Pi downloads fd and rg from GitHub Releases when they are missing, which its
+  // egress rule denies, so the image ships them.
+  { id: 'pi', command: 'pi', npm: '@earendil-works/pi-coding-agent', ignoreScripts: true, packages: ['fd-find', 'ripgrep'] },
   { id: 'cursor', command: 'cursor-agent', featured: true, install: installer('https://cursor.com/install') },
   { id: 'antigravity', command: 'agy', install: installer('https://antigravity.google/cli/install.sh') },
   { id: 'copilot', command: 'copilot', npm: '@github/copilot' },
@@ -63,6 +65,13 @@ export function storedRecipe(r) {
     ? { source: 'image', image: r.image, command: r.command, ...(r.setups?.length ? { setups: r.setups, setupRevisions: r.setupRevisions || {} } : {}) }
     : { source: 'build', agents: r.agents, ...(r.setups?.length ? { setups: r.setups, setupRevisions: r.setupRevisions || {} } : {}), ...(r.customAgents?.length ? { customAgents: r.customAgents } : {}), repository: r.repository, runtimes: r.runtimes, base: r.base, packages: r.packages, setup: r.setup, command: r.command }
 }
+// Identifies what a recipe builds today, so a cached image is not reused after
+// the console changes how an agent is installed. FNV-1a keeps it synchronous.
+export function buildFingerprint(recipe) {
+  let hash = 0x811c9dc5
+  for (const char of dockerfileFor(recipe)) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193)
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
 const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'"
 const imagePattern = /^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,255}$/
 export function recipeErrors(recipe) {
@@ -104,6 +113,8 @@ export function dockerfileFor(recipe) {
   if (hasNode) lines.push('', 'COPY --from=node:22-bookworm-slim /usr/local/ /usr/local/')
   if (hasPython) lines.push('', 'RUN python3 -m venv /usr/local/venv', 'ENV PATH="/usr/local/venv/bin:${PATH}"')
   for (const agent of agents.filter((a) => a.npm)) lines.push(`RUN npm install --global ${agent.ignoreScripts ? '--ignore-scripts ' : ''}${agent.npm}`)
+  // Debian and Ubuntu install fd as fdfind; Pi looks for fd.
+  if (recipe.agents.includes('pi')) lines.push('RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd')
   if (recipe.agents.includes('aider')) lines.push('RUN python3 -m venv /opt/aider && /opt/aider/bin/pip install --no-cache-dir aider-chat && ln -s /opt/aider/bin/aider /usr/local/bin/aider')
   if (recipe.agents.includes('claude')) lines.push('RUN curl -fsSL https://claude.ai/install.sh -o /tmp/install-claude.sh && bash /tmp/install-claude.sh && cp -L /root/.local/bin/claude /usr/local/bin/claude && chmod 0755 /usr/local/bin/claude && rm -rf /root/.local /root/.claude* /tmp/install-claude.sh')
   lines.push('', 'ENV HOME=/sandbox', 'ENV PATH="/sandbox/.local/bin:/sandbox/.npm-global/bin:/sandbox/.opencode/bin:${PATH}"', 'ENV NPM_CONFIG_PREFIX=/sandbox/.npm-global', 'USER sandbox', 'WORKDIR /sandbox')

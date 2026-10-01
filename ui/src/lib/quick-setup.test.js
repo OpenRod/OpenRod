@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { QUICK_AGENTS, quickRecipe, matchingQuickTemplate, compatibleProviders, prepareQuickTemplate } from './quick-setup.js'
-import { recipeErrors, dockerfileFor } from './image-templates.js'
+import { recipeErrors, dockerfileFor, buildFingerprint } from './image-templates.js'
 import { agentAccessRules } from '../../shared/agent-access.js'
 
-const ready = (id, changes = {}) => ({ name: 'saved', managed: true, image: 'local:test', status: 'ready', recipe: quickRecipe(id, 'saved'), ...changes })
+const withBuild = (item) => ({ ...item, build: buildFingerprint(item.recipe) })
+const ready = (id, changes = {}) => withBuild({ name: 'saved', managed: true, image: 'local:test', status: 'ready', recipe: quickRecipe(id, 'saved'), ...changes })
 test('every offered agent has a valid install recipe and reviewed access rules', () => {
   for (const id of [...QUICK_AGENTS.map((a) => a.id), 'terminal']) {
     const recipe = quickRecipe(id, 'quick-test')
@@ -25,6 +26,9 @@ test('reuse requires exact recipe, including environment, extra agents and setup
   ]) assert.equal(matchingQuickTemplate([ready('codex', { recipe })], 'codex'), undefined)
   assert.equal(matchingQuickTemplate([ready('codex', { managed: false })], 'codex'), undefined)
   assert.equal(matchingQuickTemplate([ready('codex', { status: 'building' })], 'codex'), undefined)
+  // Images built before the console changed how an agent installs are rebuilt.
+  assert.equal(matchingQuickTemplate([{ ...ready('codex'), build: null }], 'codex'), undefined)
+  assert.equal(matchingQuickTemplate([{ ...ready('codex'), build: '00000000' }], 'codex'), undefined)
 })
 test('saved credential matching does not treat a network profile as sign-in', () => {
   const providers = [{ name: 'network', type: 'cursor' }, { name: 'claude', type: 'claude-code' }, { name: 'codex', type: 'codex' }]
@@ -39,7 +43,7 @@ test('reuse returns without starting a build', async () => {
 test('preparation waits for build readiness before returning', async () => {
   let recipe, polls = 0
   const api = {
-    imageTemplates: async () => recipe ? [{ ...ready('codex'), name: recipe.name, recipe, status: ++polls > 1 ? 'ready' : 'building' }] : [],
+    imageTemplates: async () => recipe ? [withBuild({ ...ready('codex'), name: recipe.name, recipe, status: ++polls > 1 ? 'ready' : 'building' })] : [],
     buildImageTemplate: async (value) => { recipe = value; return { status: 'building' } },
   }
   const result = await prepareQuickTemplate(api, 'codex', { wait: async () => {} })
@@ -91,7 +95,7 @@ test('composed recipes deduplicate and normalize selection order for reuse', () 
   assert.deepEqual(recipe.agents, ['claude', 'codex'])
   assert.equal(recipe.command, '')
   assert.deepEqual(recipeErrors(recipe), {})
-  const saved = { name: 'multi', managed: true, image: 'local:multi', status: 'ready', recipe }
+  const saved = withBuild({ name: 'multi', managed: true, image: 'local:multi', status: 'ready', recipe })
   assert.equal(matchingQuickTemplate([saved], ['claude', 'codex']), saved)
   assert.equal(matchingQuickTemplate([saved], ['codex']), undefined)
   assert.equal(agentAccessRules(recipe).length, 2)
@@ -129,7 +133,7 @@ test('adding a second agent overrides any previous agent session with Shell', as
 test('quick setup attachments require an image with Python without baking private snapshots into shared templates', async () => {
   const withoutPython = ready(['codex'])
   assert.equal(matchingQuickTemplate([withoutPython], ['codex'], 'agent', true), undefined)
-  const prepared = { ...ready(['codex']), recipe: quickRecipe(['codex'], 'saved', 'agent', true) }
+  const prepared = withBuild({ ...ready(['codex']), recipe: quickRecipe(['codex'], 'saved', 'agent', true) })
   assert.equal(matchingQuickTemplate([prepared], ['codex'], 'agent', true), prepared)
   let built
   const api = {
