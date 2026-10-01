@@ -1,0 +1,28 @@
+{
+  "id": "news",
+  "name": "news",
+  "action": "allow",
+  "destinations": [
+    "*.n12.co.il",
+    "*.haaretz.co.il"
+  ],
+  "appliesTo": {
+    "everyone": false,
+    "groups": [
+      "coding-agents"
+    ],
+    "sandboxes": []
+  },
+  "advanced": {
+    "ports": [
+      443,
+      80
+    ],
+    "programs": [],
+    "requests": "any",
+    "allow": [],
+    "deny": [],
+    "enforcement": "enforce",
+    "privateIps": []
+  }
+}

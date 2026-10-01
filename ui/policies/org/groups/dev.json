@@ -1,0 +1,7 @@
+{
+  "id": "dev",
+  "name": "Dev",
+  "description": "This is a group for dev access",
+  "template": null,
+  "outside": "block"
+}

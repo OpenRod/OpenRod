@@ -168,7 +168,7 @@ async function createSandbox(input) {
   // Files, Landlock and process identity are fixed at creation, and so is the
   // group label. The whole policy (template + organization + group rules) is
   // resolved here from stored policy, never accepted raw from the browser.
-  const plan = await planSandbox({ name: String(input.name ?? ''), groups: input.groups ?? input.group, template: input.template ? String(input.template) : null, agentRules, requireGroup: true })
+  const plan = await planSandbox({ name: String(input.name ?? ''), groups: input.groups ?? input.group, template: input.template ? String(input.template) : null, accessTemplates: input.accessTemplates, agentRules, requireGroup: true })
   // A folder or repository to start from is checked before anything is created.
   const seed = await planSeed({ folder: input.folder ? String(input.folder) : null, repository: input.repository ? String(input.repository) : null })
   const template = plan.template
