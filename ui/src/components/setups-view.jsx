@@ -14,6 +14,7 @@ import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
 import { terminalHref } from '@/lib/sandbox-session'
 import { LocationProvider, useApi, useLocation } from '@/lib/location-context'
+import { GroupPicker } from '@/components/group-picker'
 import { LocationBadge } from '@/components/location-badge'
 import { Notice } from '@/components/notice'
 import { importNeedsAttention, inactiveItems, providedCredentials } from '@/lib/import-setup'
@@ -188,7 +189,31 @@ export function SetupImportNotifications() {
 
 // Saving a setup creates or updates its egress policy; this says what it allows.
 function SetupNetworkDialog({ policy, onClose }) {
+  const api = useApi()
   const location = useLocation()
+  // The policy reaches sandboxes that use the setup; groups are what let it follow other sandboxes too.
+  const [groups, setGroups] = React.useState([])
+  const [stored, setStored] = React.useState(null)
+  const [known, setKnown] = React.useState([])
+  const [saving, setSaving] = React.useState(false)
+  const [groupError, setGroupError] = React.useState('')
+  const [applied, setApplied] = React.useState(false)
+  React.useEffect(() => {
+    if (policy.error) return
+    let current = true
+    api.org().then(org => {
+      if (!current) return
+      const found = (org.policies ?? []).find(p => p.id === policy.id)
+      setKnown(org.groups ?? []); setStored(found ?? null); setGroups(found?.appliesTo?.groups ?? [])
+    }).catch(e => { if (current) setGroupError(`Could not load groups: ${e.message}`) })
+    return () => { current = false }
+  }, [api, policy.id, policy.error])
+  const saveGroups = async () => {
+    setSaving(true); setGroupError('')
+    try { await api.savePolicy({ ...stored, appliesTo: { ...stored.appliesTo, everyone: false, groups }, isNew: false }); setStored({ ...stored, appliesTo: { ...stored.appliesTo, groups } }); setApplied(true) }
+    catch (e) { setGroupError(e.message) } finally { setSaving(false) }
+  }
+  const groupsChanged = stored && (groups.length !== stored.appliesTo.groups.length || groups.some(id => !stored.appliesTo.groups.includes(id)))
   const rows = policyRows(policy)
   const openInEgress = () => {
     try { sessionStorage.setItem(POLICY_HANDOFF, JSON.stringify({ edit: policy.id })) } catch { /* optional */ }
@@ -208,8 +233,16 @@ function SetupNetworkDialog({ policy, onClose }) {
     {policy.blocked?.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400">Not allowed because your organization blocks them: {policy.blocked.join(', ')}.</p>}
     {policy.approval?.length > 0 && <p className="text-xs text-muted-foreground">Not in this policy, because an MCP sends credentials there or names it as its sign-in service: {policy.approval.map(a => `${a.host} (${a.items.join(', ')})`).join(', ')}. You approve these for each sandbox when you enable the setup there.</p>}
     {(policy.sync?.error || policy.sync?.failed?.length > 0) && <p className="text-xs text-muted-foreground">The policy is saved, but some sandboxes that use this setup weren’t updated yet. The console keeps retrying in the background.</p>}
+    {stored && <fieldset className="grid gap-1.5 text-xs">
+      <legend className="font-medium">Assign to groups</legend>
+      <p className="text-[11px] text-muted-foreground">Sandboxes in these groups get this policy, whether or not they use the setup.</p>
+      <GroupPicker multiple groups={known} value={groups} onChange={ids => { setApplied(false); setGroups(ids) }} onCreated={group => setKnown(old => [...old, group])} />
+      {groupError && <p role="alert" className="text-[11px] text-red-700">{groupError}</p>}
+      {applied && !groupsChanged && <p role="status" className="text-[11px] text-muted-foreground">Groups saved.</p>}
+    </fieldset>}
+    {!stored && groupError && <p role="alert" className="text-[11px] text-red-700">{groupError}</p>}
     <p className="text-[11px] text-muted-foreground">To let an MCP reach another website, add it to this policy in Network › Egress.</p>
-    <div className="flex justify-end gap-2"><Button variant="outline" onClick={openInEgress}>Edit policy</Button><Button onClick={onClose}>Done</Button></div>
+    <div className="flex justify-end gap-2"><Button variant="outline" onClick={openInEgress}>Edit policy</Button>{groupsChanged && <Button disabled={saving} onClick={saveGroups}>{saving && <Spinner />}Save groups</Button>}<Button variant={groupsChanged ? 'ghost' : 'default'} disabled={saving} onClick={onClose}>{groupsChanged ? 'Skip' : 'Done'}</Button></div>
   </DialogContent></Dialog>
 }
 
