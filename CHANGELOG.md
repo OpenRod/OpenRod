@@ -2,21 +2,51 @@
 
 ## Unreleased
 
-### Guided connection setup
+### SSH connection recovery and preparation
 
-- Added **Set up connection** with tool/path inspection, existing-registration discovery, inspectable user-run registration commands, read-only **Check connection**, and explicit **Use gateway** activation.
-- Fresh consoles no longer connect or start collectors from the CLI active-gateway suggestion alone. Saved selections and environment-pinned gateways reconnect on restart, with persistence and background-work disclosures.
-- Connection checks validate local mTLS material and make a real list-workspaces request without writing configuration/databases, running sandbox exec, or starting collectors. Activation revalidates the selected gateway/workspace before saving it.
-- Documented administrator versus console-user responsibilities, exact private loopback/tunnel registration, existing-name protection, and the OpenShell 0.1.2 requirement to install the original bundle before registration and restore it afterward.
+- Disconnect now restores the available local gateway/workspace or requires connection selection, rather than retaining the stopped SSH gateway endpoint.
+- Missing Docker on Ubuntu/Debian systemd hosts now pauses for explicit installation approval, shows privileged package/service/group effects, verifies a fresh SSH login, and continues the chosen runtime download/upload mode. Existing or broken installations are never automatically replaced or repaired.
+- Verified Docker approval and upload continuation in the browser with isolated SSH fixtures; real privileged installation was not run on the already-prepared EC2 host.
+- SSH image templates now build on local Docker for the remote architecture, transfer over the existing SSH Docker tunnel, and verify engine/image identity before registration. Existing-image selection uses the deployment engine; remote-only bases for MCP/Skill layers are imported under temporary local tags.
+- Verified a real browser-triggered ARM64-Mac → AMD64-EC2 build, transfer, matching image IDs, and Ready template publication. Production build and 335 regression tests passed; all 53 image/engine tests passed after the remote-base follow-up.
+
+### Upstream integration
+
+- Rebased onto main `5847b76`, preserving multi-group membership and serialized policy coverage, global-policy review/removal, Quick Setup build logs, and template-in-use deletion protection alongside SSH-first connections and local-to-SSH image builds. Template usage checks and membership fixtures now retain the selected workspace/storage scope.
+- Verified 377 regression tests and the production build. An isolated browser/server smoke against the live gateway loaded template inventory, sandbox details and network rules; the usage endpoint identified the existing sandbox blocking template deletion. No live policies or workloads were changed, and the primary console was not restarted.
+- Rebased onto current main while retaining cloud authentication, cloud transfer, SSH-first connections, context-scoped Setup storage and template drafts. Restored explicit Python setup in CI.
+- Verified the merged production build and 267 regression tests. Browser smoke covered local connection, refresh cancellation/timeouts/retry, sandbox forms, Setup navigation and template-draft recovery; live API checks rejected cross-origin and stale-context mutations.
+- Reconnected the real `aws-ec2` host through its existing managed gateway state with runtime installation disabled by upload mode. Docker and matching runtime images were already ready. No remote workloads were created or deleted; full sandbox creation/terminal and fresh remote installation remain unverified in this pass.
+
+- Preserved upstream MCP/Skills imports, Quick Setup, template bulk actions, graph/theme controls, OpenEgg Shell branding and new native Terminal sessions alongside remote onboarding.
+- Bound Setup catalogs, preparation artifacts/manifests, previews, cancellation, deployment jobs, credentials and inventory to gateway/workspace context. Legacy checkout Setup data stays untouched and requires explicit re-import/preparation.
+- Scoped browser template draft recovery so another gateway or workspace cannot adopt a draft's Setup references or replacement intent.
+- Retained published Docker images during template deletion because another gateway/workspace may reference them.
+- Included Setup Python helpers, the verifier and shared JSON catalog in npm packages; classified MCP, archive and TOML libraries as runtime dependencies and refreshed license notices. CI provisions Python for installer regressions.
+- Verified the integrated suite (214 tests), production build, installed-package first-run flow, real skill discovery/import, and browser/native SSH sessions through a local gateway. AWS transport was not reverified during this merge because its credential refresh failed.
+
+### SSH-first connection setup
+
+- Replaced the cloud/registration wizard with local-gateway or configured-SSH-host selection. The original local gateway is preserved; an isolated second gateway runs locally for remote Docker workloads.
+- Discover concrete SSH aliases and Include files; retain OpenSSH configuration, strict known-host checking, key/agent authentication and jump hosts.
+- Read connection lists and job status without waiting for the current gateway's workspace discovery, so an unreachable gateway does not block choosing a host.
+- Removed the manual workspace chooser; connections automatically reuse an accessible saved workspace or select `default`/the first accessible workspace, while retaining context isolation internally.
+- Automatically install a missing local remote-work gateway executable from the pinned official OpenShell 0.1.2 release, verify its SHA-256 checksum, and retain it in the console data directory without sudo or overwriting existing installations.
+- Moved connection setup out of the sidebar to **Connect machine** beside **New sandbox**, with the active location shown in the sandbox toolbar.
+- SSH connection now detects and reuses installed OpenShell runtime images, automatically downloads missing images by default, or waits for a package when upload mode is selected.
+- Host refresh retains current choices, leaves connection controls and dialog closing responsive, and aborts after ten seconds with an actionable error. Added a monitor icon to the Connect machine action.
+- Probe native Linux/rootful Docker and version-matched OpenShell sandbox/supervisor images. Missing runtime images can be downloaded remotely or loaded from an uploaded Docker-save package.
+- Isolate gateway databases, keys and registrations by SSH alias/Docker-engine identity. Own gateway/tunnel lifecycle, preserve remote workloads on disconnect, and require explicit reconnect after console restart.
+- Generate separate operator and supervisor credentials for OpenShell 0.1.2's complete guest-mTLS requirement; never copy the original local gateway's keys.
 - Unified CLI and console configuration under `$XDG_CONFIG_HOME/openshell` (default `~/.config/openshell`), removing the console-only directory override that could register a gateway somewhere else. Native/copy commands preserve the same configuration root in newly opened terminals.
 - Made the native SSH target explicit: gateway, workspace, sandbox, and the proxy/tunnel connection path. A loopback gateway address is not treated as evidence of local compute.
 - Browser terminals report Live only after the remote exec session and input handler are ready, preventing early keystrokes from being dropped during gateway connection setup.
 - Reworked source/locally built tarball onboarding, symptom-based troubleshooting, selection precedence, local state/retention, resumed delivery and service deadlines, opt-in policy reconciliation, and SDK-terminal versus real OpenSSH behavior.
-- Kept AWS provisioning isolated as an optional, billable administrator-run evaluation—not a default or production quickstart. Setup never installs tools, provisions infrastructure, executes registration commands, accepts browser credential uploads, or exposes a gateway publicly.
+- Removed obsolete registration-plan helpers and read-only onboarding endpoints. The normal flow no longer asks for cloud, Kubernetes or certificate-bundle configuration.
 
 ### Remote connections
 
-- Added registered-gateway and workspace selection without restarting the console.
+- Retained gateway/workspace context isolation and accessible-workspace selection for local and SSH-managed connections.
 - Pinned SDK operations, CLI commands, terminal tickets, uploads, builds, and service deadlines to their originating gateway/workspace.
 - Reject stale browser requests instead of silently targeting another context; existing interactive sessions keep their original target.
 - Made direct OpenSSH the primary native terminal action, using private temporary SSH configuration with exit cleanup. Kept separate exec and canonical TTY attach actions.

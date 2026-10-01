@@ -202,6 +202,14 @@ export async function selectConsoleContext(input = {}) {
   }
 }
 
+export function clearConsoleContext() {
+  if (process.env.OPENSHELL_GATEWAY) throw new Error('Gateway selection is fixed by OPENSHELL_GATEWAY.')
+  persistContext({})
+  selected = { gateway: cliGateway || 'openshell', workspace: process.env.OPENSHELL_WORKSPACE || 'default' }
+  configured = false
+  selectionSource = cliGateway ? 'cli' : 'default'
+}
+
 // ---- normalization: protobuf wire shapes → small, browser-safe JSON ---------
 
 const PHASES = ['unspecified', 'provisioning', 'ready', 'error', 'deleting', 'unknown', 'stopping', 'stopped', 'starting', 'completed']

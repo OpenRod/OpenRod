@@ -70,9 +70,9 @@ export async function terminalRoute(method, parts, input) {
     const sandbox = { ...sandboxView((await client.raw.getSandbox({ name: parts[1], workspaceScope })).sandbox), workspace }
     const plan = { ...planSession(sandbox, input ?? {}), gateway: target.name, workspace }
     if (input?.setupLogin) {
-      const { setupStore } = await import('./setups.js')
+      const { getSetupStore } = await import('./setups.js')
       const { executeInstaller } = await import('./setup-deployment.js')
-      const setup = await setupStore.get(input.setupLogin)
+      const setup = await getSetupStore().get(input.setupLogin)
       const item = setup.items.find(i => i.id === input.mcp)
       plan.argv = setupLoginArgv(item, setup.id, plan.session)
       const probe = await executeInstaller(client, sandbox, setup, ['codex'], 'probe')

@@ -24,6 +24,9 @@ jobs:
       OPENSHELL_CONSOLE_DATA_DIR: ${{ runner.temp }}/openshell-console-data
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}

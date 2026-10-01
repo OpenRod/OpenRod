@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { SetupPicker } from '@/components/setups-view'
 import { api } from '@/lib/api'
 import { buildTemplateWithSetups } from '@/lib/setup-template-build'
-import { AGENTS, BASES, PENDING_RECIPE_KEY, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
+import { AGENTS, BASES, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
 
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
 
@@ -26,7 +26,7 @@ function Toggle({ selected, onClick, children, disabled = false }) {
 
 // One page: the few choices a team needs to start an agent on its repo, with
 // everything else behind Advanced. `replace` edits an existing template.
-export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
+export function ImageTemplateBuilder({ initial, draftKey, onClose, onStarted }) {
   const [recipe, setRecipe] = React.useState(() => newRecipe(initial?.recipe))
   const replace = Boolean(initial?.replace)
   const [baseline] = React.useState(() => initial?.baseline ?? JSON.stringify(newRecipe(initial?.recipe)))
@@ -50,8 +50,8 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
   const dirty = JSON.stringify(recipe) !== baseline
   const errors = recipeErrors(recipe)
   React.useEffect(() => {
-    try { sessionStorage.setItem(PENDING_RECIPE_KEY, JSON.stringify({ recipe, replace, baseline, advanced })) } catch { /* recovery is best effort */ }
-  }, [recipe, replace, baseline, advanced])
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ recipe, replace, baseline, advanced })) } catch { /* recovery is best effort */ }
+  }, [draftKey, recipe, replace, baseline, advanced])
   React.useEffect(() => { api.localImages().then(setLocal).catch((e) => setLocal({ images: [], error: e.message })) }, [])
   React.useEffect(() => {
     const prevent = (event) => { if (dirty) { event.preventDefault(); event.returnValue = '' } }
@@ -116,6 +116,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
         <Tabs value={recipe.source} onValueChange={(source) => { patch({ source }); if (source === 'build' && recipe.agents.length > 1) setCustom(false); setError('') }}>
           <TabsList className="w-full"><TabsTrigger value="build" className="text-xs">Build an image</TabsTrigger><TabsTrigger value="image" className="text-xs">Use an existing image</TabsTrigger></TabsList>
         </Tabs>
+        {build && <p className="text-[11px] leading-relaxed text-muted-foreground">Images build on the console’s local Docker engine. For an SSH host, the image is built for its architecture and transferred automatically before the template is saved.</p>}
         <Field label="Name" htmlFor="template-name" hint={recipe.name && errors.name ? errors.name : undefined}>
           <Input id="template-name" value={recipe.name} disabled={replace} maxLength={19} onChange={(e) => patch({ name: e.target.value.toLowerCase() })} placeholder="frontend-app" className="font-mono text-xs" autoFocus={!replace} />
         </Field>
@@ -137,10 +138,10 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
           <Field label="Runtime" hint={bundled.length ? `${bundled.join(' and ')} ${bundled.length > 1 ? 'are' : 'is'} included for the selected agents.` : undefined}>
             <div className="grid gap-2 sm:grid-cols-2">{RUNTIMES.map((r) => <Toggle key={r.id} selected={recipe.runtimes.includes(r.id)} onClick={() => toggleRuntime(r.id)}><img src={r.logo} alt="" className="size-5 object-contain" /><span className="font-medium text-foreground">{r.name}</span></Toggle>)}</div>
           </Field>
-        </> : <Field label="Image" htmlFor="template-image" hint={local?.error ? local.error : 'An image in local Docker, or a registry reference Docker is signed in to. OpenShell boots it as is.'}>
+        </> : <Field label="Image" htmlFor="template-image" hint={local?.error ? local.error : 'An image on the selected Docker engine, or a registry reference Docker is signed in to. OpenShell boots it as is.'}>
           <Input id="template-image" value={recipe.image} onChange={(e) => patch({ image: e.target.value.trim() })} placeholder="ghcr.io/your-team/workspace:latest" className="font-mono text-xs" />
-          {local?.images?.length > 0 && <SelectField aria-label="Choose a local image" value={local.images.some((i) => i.reference === recipe.image) ? recipe.image : ''} onChange={(e) => patch({ image: e.target.value })} className="w-full text-xs">
-            <option value="" disabled>Choose a local image</option>
+          {local?.images?.length > 0 && <SelectField aria-label="Choose an available image" value={local.images.some((i) => i.reference === recipe.image) ? recipe.image : ''} onChange={(e) => patch({ image: e.target.value })} className="w-full text-xs">
+            <option value="" disabled>Choose an available image</option>
             {local.images.map((i) => <option key={i.reference} value={i.reference}>{i.reference}</option>)}
           </SelectField>}
         </Field>}

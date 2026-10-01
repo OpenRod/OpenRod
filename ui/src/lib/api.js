@@ -26,12 +26,13 @@ async function boundContext() {
   return binding
 }
 
-async function request(path, { method = "GET", body } = {}) {
-  const context = await boundContext()
+async function request(path, { method = "GET", body, signal, scoped = true } = {}) {
+  const context = scoped ? await boundContext() : null
   const response = await fetch(`/api/os${path}`, {
     method,
+    signal,
     headers: {
-      "x-openshell-context": context,
+      ...(context ? { "x-openshell-context": context } : {}),
       ...(method === "GET" ? {} : { "content-type": "application/json", "x-openshell-console": "1" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -43,6 +44,30 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  context: loadContext,
+  contextKey: boundContext,
+  connections: (signal) => request("/connections", { signal, scoped: false }),
+  connectionJob: (id, signal) => request(`/connections/jobs/${encodeURIComponent(id)}`, { signal, scoped: false }),
+  connect: (body) => request("/connections/connect", { method: "POST", body }),
+  installConnectionDocker: (id) => request(`/connections/jobs/${encodeURIComponent(id)}/docker`, { method: "POST", body: { approve: true } }),
+  installConnectionRuntime: (id) => request(`/connections/jobs/${encodeURIComponent(id)}/install`, { method: "POST", body: { method: "download" } }),
+  uploadConnectionPackage: async (id, file) => {
+    const context = await boundContext()
+    const response = await fetch(`/api/os/connections/jobs/${encodeURIComponent(id)}/package`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-openshell-console": "1",
+        "x-openshell-context": context,
+      },
+      body: file,
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
+    if (!response.ok) throw new Error(payload.error ?? `Package upload failed (${response.status})`)
+    return payload
+  },
+  disconnectRemote: () => request("/connections/disconnect", { method: "POST", body: {} }),
   setups: () => request('/setups'),
   discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
   reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),
@@ -63,10 +88,6 @@ export const api = {
   cloudExport: (name) => request(`/cloud-export?name=${encodeURIComponent(name)}`),
   importCloud: (bundle) => request("/cloud-import", { method: "POST", body: bundle }),
   cloudTransfer: (name, ticket) => request("/cloud-transfer", { method: "POST", body: { name, ticket } }),
-  context: loadContext,
-  contextKey: boundContext,
-  onboarding: () => request("/onboarding"),
-  checkGateway: (gateway) => request("/onboarding/check", { method: "POST", body: { gateway } }),
   selectContext: (body) => request("/context", { method: "POST", body }),
   previewActivityDeletion: (body) => request('/activity/delete-preview', { method: 'POST', body }),
   deleteActivity: (token) => request('/activity/delete', { method: 'POST', body: { token } }),
