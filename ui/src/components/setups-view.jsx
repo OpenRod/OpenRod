@@ -15,6 +15,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { terminalHref } from '@/lib/sandbox-session'
 import { LocationProvider, useApi, useLocation } from '@/lib/location-context'
 import { LocationBadge } from '@/components/location-badge'
+import { Notice } from '@/components/notice'
 import { importNeedsAttention, inactiveItems, providedCredentials } from '@/lib/import-setup'
 import { POLICY_HANDOFF } from '@/components/egress-view'
 import { setupImports } from '@/lib/setup-imports'
@@ -168,16 +169,18 @@ export function SetupImportNotifications() {
   const [reviewing, setReviewing] = React.useState(null)
   const [network, setNetwork] = React.useState(null)
   return <>
-    {jobs.length > 0 && <div aria-label="Import notifications" className="shrink-0 divide-y border-b bg-muted/30">
-      {jobs.map(job => <div key={job.id} role={job.status === 'failed' || job.status === 'needs-attention' ? 'alert' : 'status'} className="flex items-center gap-3 px-4 py-3 text-xs sm:px-8">
-        {job.status === 'importing' ? <Spinner /> : job.status === 'saved' ? <Check className="size-4 shrink-0 text-emerald-600" /> : <ShieldCheck className="size-4 shrink-0 text-amber-600" />}
-        <div className="min-w-0 flex-1"><p className="font-medium">{job.name} · {job.status === 'importing' ? 'Importing' : job.status === 'saved' ? 'Imported' : job.status === 'cancelled' ? 'Import cancelled' : job.status === 'failed' ? 'Import failed' : 'Import needs attention'}</p><p className="mt-0.5 break-words text-muted-foreground">{job.message}</p></div>
+    {jobs.map(job => <Notice key={job.id} id={`setup-import:${job.id}`}
+      tone={job.status === 'importing' ? 'progress' : job.status === 'saved' ? 'success' : job.status === 'failed' ? 'error' : 'warning'}
+      title={<>{job.name} · {job.status === 'importing' ? 'Importing' : job.status === 'saved' ? 'Imported' : job.status === 'cancelled' ? 'Import cancelled' : job.status === 'failed' ? 'Import failed' : 'Import needs attention'}</>}
+      actions={<>
         <LocationBadge location={job.location} />
-        {!['importing', 'saved'].includes(job.status) && <Button size="sm" variant="outline" onClick={() => setReviewing(job)}>Review import</Button>}
-        {job.status === 'saved' && networkOutcome(job.setup) && <Button size="sm" variant="outline" onClick={() => setNetwork({ policy: networkOutcome(job.setup), location: job.location })}>View egress policy</Button>}
-        {job.status !== 'importing' && <Button size="sm" variant="ghost" aria-label={`Dismiss import notification for ${job.name}`} onClick={() => setupImports.dismiss(job.id)}>Dismiss</Button>}
-      </div>)}
-    </div>}
+        {!['importing', 'saved'].includes(job.status) && <Button size="xs" variant="outline" onClick={() => setReviewing(job)}>Review import</Button>}
+        {job.status === 'saved' && networkOutcome(job.setup) && <Button size="xs" variant="outline" onClick={() => setNetwork({ policy: networkOutcome(job.setup), location: job.location })}>View egress policy</Button>}
+      </>}
+      onDismiss={job.status === 'importing' ? undefined : () => setupImports.dismiss(job.id)}
+      dismissLabel={`Dismiss import notification for ${job.name}`}>
+      {job.message}
+    </Notice>)}
     {reviewing && <LocationProvider location={reviewing.location}><ImportSetup key={reviewing.id} initialJob={reviewing} initialReview={reviewing.review} initialName={reviewing.name} onClose={() => setReviewing(null)} onSaved={(saved) => { setNetwork({ policy: networkOutcome(saved), location: reviewing.location }); setReviewing(null) }} /></LocationProvider>}
     {network?.policy && <LocationProvider location={network.location}><SetupNetworkDialog policy={network.policy} onClose={() => setNetwork(null)} /></LocationProvider>}
   </>

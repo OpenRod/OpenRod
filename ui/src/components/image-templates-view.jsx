@@ -256,6 +256,6 @@ export function TemplatesView() {
       </select></label>
       <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setChooseLocation(false)}>Cancel</Button><Button className={action} disabled={!locations.some((location) => location.context === newLocation && location.connected)} onClick={startTemplate}>Continue<ArrowRight /></Button></div>
     </DialogContent></Dialog>
-    {launch && <LocationProvider location={owner(launch)}><CreateSandboxDialog open initialImageTemplate={launch} onOpenChange={(open) => { if (!open) setLaunch(null) }} onCreated={() => { setLaunch(null); toast.success('Sandbox created from image template') }} /></LocationProvider>}
+    {launch && <LocationProvider location={owner(launch)}><CreateSandboxDialog open initialImageTemplate={launch} onOpenChange={(open) => { if (!open) setLaunch(null) }} onStarted={() => setLaunch(null)} /></LocationProvider>}
   </div>
 }

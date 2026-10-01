@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { cloudHandoff } from '@/lib/cloud-machine'
+import { Notice } from '@/components/notice'
 async function request(path,method='GET') {
  const response=await fetch(`/api/cloud/${path}`,{method,headers:method==='POST'?{'x-openshell-console':'1'}:undefined})
  const value=await response.json()
@@ -34,7 +35,7 @@ export function CloudMachine({children,logout}) {
   },1000)
   return()=>{window.removeEventListener('message',receive);clearInterval(timer)}
  },[machine?.status])
- if(machine?.status==='ready'&&(!transfer||transfer.status==='done'))return <>{transfer?.message&&<div role="status" className="border-b px-6 py-3 text-sm text-muted-foreground">{transfer.message}</div>}{children}</>
+ if(machine?.status==='ready'&&(!transfer||transfer.status==='done'))return <>{transfer?.message&&<Notice id="cloud-transfer" tone="success" title="Workspace continued in the cloud" onDismiss={()=>setTransfer(null)}>{transfer.message}</Notice>}{children}</>
  return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-md text-center">
   <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10"/>
   <h1 className="text-2xl font-semibold">{transfer?'Continuing your workspace…':'Preparing your private machine…'}</h1>

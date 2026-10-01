@@ -6,7 +6,7 @@ import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
-import { Check, ChevronDown, ChevronRight, Laptop, Server, Terminal, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Laptop, Server, Terminal } from "lucide-react"
 import { LocationStep, StepTrail } from "@/components/location-step"
 
 import { Button } from "@/components/ui/button"
@@ -15,12 +15,12 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
 import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
 import { locationLabel } from "@/lib/locations"
 import { LocationBadge } from "@/components/location-badge"
+import { sandboxCreations } from "@/lib/sandbox-creations"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
@@ -119,6 +119,12 @@ function GroupField({ org, value, onChange, onCreated, onAddPolicy, setups = [] 
   )
 }
 
+// Names in use at this location, counting sandboxes still being created.
+function takenNames(list, location) {
+  const pending = sandboxCreations.getSnapshot().filter((job) => job.status !== "failed" && job.status !== "cancelled" && job.location?.context === location?.context)
+  return new Set([...list.map((sandbox) => sandbox.name), ...pending.map((job) => job.name)])
+}
+
 function nextName(taken, prefix = "sandbox") {
   for (let i = 1; i < 1000; i++) {
     const name = `${prefix}-${i}`
@@ -168,7 +174,7 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
   </LocationProvider>
 }
 
-function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate = null, locations, onLocationChange, chooser, onChangeLocation }) {
+function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate = null, locations, onLocationChange, chooser, onChangeLocation }) {
   const api = useApi()
   const location = useLocation()
   const reduceMotion = useReducedMotion()
@@ -184,26 +190,6 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
   const [agentIds, setAgentIds] = React.useState([])
   const [openIn, setOpenIn] = React.useState("shell")
   const [quickProviders, setQuickProviders] = React.useState({})
-  const [progress, setProgress] = React.useState("")
-  const [showBuild, setShowBuild] = React.useState(false)
-  const [build, setBuild] = React.useState(null)
-  const [buildProgress, setBuildProgress] = React.useState("")
-  const buildLogs = React.useRef(null)
-  const followLogs = React.useRef(true)
-  const showBuildButton = React.useRef(null)
-  const closeBuildButton = React.useRef(null)
-  React.useEffect(() => {
-    if (showBuild) closeBuildButton.current?.focus()
-  }, [showBuild])
-  React.useEffect(() => {
-    if (showBuild && followLogs.current && buildLogs.current) buildLogs.current.scrollTop = buildLogs.current.scrollHeight
-  }, [showBuild, build?.logs, buildProgress])
-  function reportProgress(message) { setProgress(message); setBuildProgress(message) }
-  function closeBuild() { setShowBuild(false); showBuildButton.current?.focus() }
-  const [preparing, setPreparing] = React.useState(false)
-  const preparation = React.useRef(null)
-  const buildName = React.useRef(null)
-  const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
   const [start, setStart] = React.useState("empty")
@@ -226,14 +212,13 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
       const list = overview.sandboxes ?? []
       const savedProviders = overview.providers ?? []
       setSandboxes(list); setProviders(savedProviders)
-      setName(nextName(new Set(list.map((sandbox) => sandbox.name))))
+      setName(nextName(takenNames(list, location)))
       setChosen(savedProviders.map((provider) => provider.name))
     }).catch((e) => { if (current) setError(e.message) })
     setName("")
     setMode(initialImageTemplate ? "template" : "quick")
-    setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setProgress("")
+    setAgentIds([]); setOpenIn("shell"); setQuickProviders({})
     setSetupIds([])
-    setShowBuild(false); setBuild(null); setBuildProgress(""); followLogs.current = true
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => { if (current) setImages(items.filter((t) => t.status === "ready" || t.exists)) }).catch((e) => { if (current) setError(e.message) })
@@ -265,10 +250,8 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
     setAgentIds(next); setError(null)
     if (next.length !== 1 || !next.includes(openIn)) setOpenIn("shell")
     setQuickProviders((current) => Object.fromEntries(Object.entries(current).filter(([key]) => next.includes(key))))
-    if (/^(sandbox|terminal|claude|codex|cursor|opencode|pi|antigravity|copilot|kiro|droid|aider)-\d+$/.test(name)) setName(nextName(new Set((sandboxes ?? []).map((s) => s.name)), next.length === 1 ? next[0] : "sandbox"))
+    if (/^(sandbox|terminal|claude|codex|cursor|opencode|pi|antigravity|copilot|kiro|droid|aider)-\d+$/.test(name)) setName(nextName(takenNames(sandboxes ?? [], location), next.length === 1 ? next[0] : "sandbox"))
   }
-
-  React.useEffect(() => () => { preparation.current?.abort() }, [])
 
   // The server reads the folder, so it can apply .gitignore and count what it will send.
   React.useEffect(() => {
@@ -289,53 +272,48 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
 
   const filesSummary = start === "folder" ? folder.trim() : start === "repo" ? repository.trim() : ""
 
-  async function submit(event) {
+  // The work runs in the background so the console stays usable; its
+  // progress, build logs and result follow as a notification.
+  function submit(event) {
     event.preventDefault()
-    if (busy || location?.connected === false || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
-    setBusy(true); setError(null); setProgress(""); setBuild(null); setBuildProgress(""); followLogs.current = true
-    const controller = new AbortController()
-    preparation.current = controller
-    buildName.current = null
-    try {
-      const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
-      let environment = chosenImage
-      let launchSetupIds = [], launchAccessReview = null
-      setPreparing(true)
-      if (mode === "quick") {
-        const prepared = await prepareQuickSetups(api, setupIds, setupAccessReview, { signal: controller.signal, onProgress: reportProgress })
-        launchSetupIds = prepared.setups.map(s => s.id)
-        launchAccessReview = prepared.accessReview
-        environment = await prepareQuickTemplate(api, agentIds, {
-          withSetups: setupIds.length > 0, setups: prepared.setups, signal: controller.signal, onProgress: reportProgress,
-          onBuildUpdate: (value) => setBuild((previous) => ({ ...value, logs: value.logs ?? previous?.logs })),
-          onBuild: (value) => {
-            buildName.current = value
-            if (controller.signal.aborted) void api.cancelImageBuild(value).catch(() => {})
-          },
-        })
-      }
-      if (controller.signal.aborted) return
-      setPreparing(false); reportProgress("Creating sandbox…")
-      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, groups: group, ...files })
-      toast.success(`Creating ${created.name}`)
+    if (location?.connected === false || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
+    const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
+    const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
+    const setups = setupIds, accessReview = setupAccessReview, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
+    sandboxCreations.start({ name: sandboxName, location, task: async ({ signal, progress, build, creating }) => {
+      let environment = template, launchSetupIds = [], launchAccessReview = null, buildName = null
+      const cancelBuild = () => { if (buildName) void api.cancelImageBuild(buildName).catch((e) => toast.error(e.message)) }
+      signal.addEventListener("abort", cancelBuild)
+      try {
+        if (quick) {
+          const prepared = await prepareQuickSetups(api, setups, accessReview, { signal, onProgress: progress })
+          launchSetupIds = prepared.setups.map(s => s.id)
+          launchAccessReview = prepared.accessReview
+          environment = await prepareQuickTemplate(api, agents, {
+            withSetups: setups.length > 0, setups: prepared.setups, signal, onProgress: progress,
+            onBuildUpdate: build,
+            onBuild: (value) => { buildName = value; if (signal.aborted) cancelBuild() },
+          })
+        }
+      } finally { signal.removeEventListener("abort", cancelBuild) }
+      if (signal.aborted) throw new DOMException("Cancelled", "AbortError")
+      creating()
+      const created = await api.create({ name: sandboxName, imageTemplate: environment.name, includeTemplateAccess: !quick, ...session, providers, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets: targets, groups, ...files })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
-      onOpenChange(false)
-      onCreated?.(created.name, { ...created, image: environment.image, providers: attachedProviders, createdAt: new Date().toISOString(), ...(location ? { location } : {}) })
-    } catch (e) {
-      if (e.name !== "AbortError") setError(e.message)
-    } finally {
-      setBusy(false); setPreparing(false); setProgress(""); preparation.current = null; buildName.current = null
-    }
+      return { ...created, image: environment.image, providers, createdAt: new Date().toISOString(), ...(location ? { location } : {}) }
+    } })
+    onOpenChange(false)
+    onStarted?.()
   }
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value) }}>
-      <DialogContent showCloseButton={!busy && !showBuild} className={`max-h-[90svh] gap-4 bg-transparent p-0 ring-0 ${chooser ? "sm:max-w-3xl" : showBuild ? "sm:max-w-md lg:max-w-[960px] lg:grid-cols-[28rem_minmax(0,1fr)]" : "sm:max-w-4xl"}`}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={`max-h-[90svh] gap-4 bg-transparent p-0 ring-0 ${chooser ? "sm:max-w-3xl" : "sm:max-w-4xl"}`}>
         {chooser ?? <>
-        <form onSubmit={submit} className={`@container flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-popover ring-1 ring-foreground/10 ${showBuild ? "max-h-[52svh] lg:max-h-[90svh]" : "max-h-[90svh]"}`}>
-          <Tabs value={mode} onValueChange={(value) => { if (!busy) { setMode(value); setError(null) } }} className="contents">
+        <form onSubmit={submit} className={`@container flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-popover ring-1 ring-foreground/10 max-h-[90svh]`}>
+          <Tabs value={mode} onValueChange={(value) => { setMode(value); setError(null) }} className="contents">
           <DialogHeader className="shrink-0 gap-3 px-5 pt-5 pb-4 @3xl:px-7 @3xl:pt-6">
             {onChangeLocation && <div className="pr-8"><StepTrail step={2} /></div>}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pr-8">
@@ -343,16 +321,16 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
               {onChangeLocation ? <span className="flex items-center gap-1.5 rounded-full border border-border bg-muted/30 py-0.5 pr-1 pl-2.5 text-[11px] text-muted-foreground">
                 {location?.remote ? <Server aria-hidden="true" className="size-3" /> : <Laptop aria-hidden="true" className="size-3" />}
                 <span className="max-w-40 truncate text-foreground">{location?.remote ? locationLabel(location).replace(/^SSH · /, "") : "This computer"}</span>
-                <Button type="button" variant="ghost" size="sm" className="h-5 rounded-full px-2 text-[11px]" disabled={busy} onClick={onChangeLocation}>Change</Button>
+                <Button type="button" variant="ghost" size="sm" className="h-5 rounded-full px-2 text-[11px]" onClick={onChangeLocation}>Change</Button>
               </span> : !initialImageTemplate && locations.length > 0 ? null : <LocationBadge location={location} />}
               <TabsList className="ml-auto w-fit" aria-label="Sandbox creation method">
-                <TabsTrigger value="quick" disabled={busy} className="px-3 text-xs">Quick setup</TabsTrigger>
-                <TabsTrigger value="template" disabled={busy} className="px-3 text-xs">From template</TabsTrigger>
+                <TabsTrigger value="quick" className="px-3 text-xs">Quick setup</TabsTrigger>
+                <TabsTrigger value="template" className="px-3 text-xs">From template</TabsTrigger>
               </TabsList>
             </div>
             {!onChangeLocation && locations.length > 0 && !initialImageTemplate && <div className="grid gap-1.5">
               <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
-              <Select value={location?.context ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: item.context, label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
+              <Select value={location?.context ?? ""} onValueChange={onLocationChange} items={locations.map((item) => ({ value: item.context, label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
                 <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
                 <SelectContent>{locations.map((item) => <SelectItem key={item.context} value={item.context} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
               </Select>
@@ -361,7 +339,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
           </DialogHeader>
 
           <div className="grid min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border @3xl:grid-cols-[minmax(0,1fr)_19rem] @3xl:overflow-hidden">
-          <fieldset disabled={busy || location?.connected === false} className="contents">
+          <fieldset disabled={location?.connected === false} className="contents">
             <motion.div initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
               className="grid min-w-0 content-start gap-6 p-5 @3xl:overflow-y-auto @3xl:p-7">
             <div className="grid gap-1.5">
@@ -376,7 +354,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                 <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
                   {PRIMARY_QUICK_AGENTS.map((agent) => (
                     <label key={agent.id} className="relative min-w-0">
-                      <input type="checkbox" checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} disabled={busy} className="peer sr-only" />
+                      <input type="checkbox" checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} className="peer sr-only" />
                       <span className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-all hover:-translate-y-px hover:bg-muted/50 hover:shadow-sm motion-reduce:hover:translate-y-0 @3xl:min-h-14 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
                         <img src={agent.logo} alt="" className="size-4 shrink-0 object-contain" />
                         <span className="min-w-0 flex-1">{agent.name}</span>
@@ -386,13 +364,13 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                   ))}
                 </div>
                 <DropdownMenu>
-                  <DropdownMenuTrigger render={<Button type="button" variant="outline" disabled={busy} className="mt-2 w-full justify-between text-xs" />}>
+                  <DropdownMenuTrigger render={<Button type="button" variant="outline" className="mt-2 w-full justify-between text-xs" />}>
                     <span className="truncate">{OTHER_QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id)).map((agent) => agent.name).join(", ") || "More agents"}</span>
                     <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
                     {OTHER_QUICK_AGENTS.map((agent) => (
-                      <DropdownMenuCheckboxItem key={agent.id} checked={agentIds.includes(agent.id)} onCheckedChange={() => toggleAgent(agent.id)} closeOnClick={false} disabled={busy} className="text-xs">
+                      <DropdownMenuCheckboxItem key={agent.id} checked={agentIds.includes(agent.id)} onCheckedChange={() => toggleAgent(agent.id)} closeOnClick={false} className="text-xs">
                         <img src={agent.logo} alt="" className="size-4 shrink-0 object-contain" />
                         {agent.name}
                       </DropdownMenuCheckboxItem>
@@ -405,7 +383,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                 <div className="grid grid-cols-2 gap-2">
                   {[{ id: "shell", name: "Shell" }, ...(selectedAgents.length === 1 ? selectedAgents : [])].map((option) => (
                     <label key={option.id} className="relative min-w-0">
-                      <input type="radio" name="quick-open-in" value={option.id} checked={openIn === option.id} onChange={() => setOpenIn(option.id)} disabled={busy} className="peer sr-only" />
+                      <input type="radio" name="quick-open-in" value={option.id} checked={openIn === option.id} onChange={() => setOpenIn(option.id)} className="peer sr-only" />
                       <span className="flex min-h-16 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-3 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
                         {option.id === "shell" ? <Terminal className="size-5 shrink-0" aria-hidden="true" /> : <img src={option.logo} alt="" className="size-5 shrink-0 object-contain" />}
                         <span className="min-w-0 flex-1 font-medium">{option.name}</span>
@@ -422,7 +400,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                 if (!connections.length) return null
                 return <div key={agent.id} className="grid gap-1.5">
                   <Label htmlFor={`quick-sign-in-${agent.id}`} className="text-xs">{agent.name} sign-in</Label>
-                  <Select value={quickProviders[agent.id] || ""} onValueChange={(value) => setQuickProviders((current) => ({ ...current, [agent.id]: value ?? "" }))} disabled={busy}>
+                  <Select value={quickProviders[agent.id] || ""} onValueChange={(value) => setQuickProviders((current) => ({ ...current, [agent.id]: value ?? "" }))}>
                     <SelectTrigger id={`quick-sign-in-${agent.id}`} className="w-full text-xs"><SelectValue>{quickProviders[agent.id] || "Set up after creation"}</SelectValue></SelectTrigger>
                     <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
                       <SelectItem value="" className="text-xs">Set up after creation</SelectItem>
@@ -435,7 +413,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
             <TabsContent value="template" className="grid gap-4">
               <div className="grid gap-1.5">
                 <Label htmlFor="sandbox-image-template" className="text-xs">Environment</Label>
-                <Select value={imageTemplate} onValueChange={(value) => setImageTemplate(value ?? "")} disabled={busy}>
+                <Select value={imageTemplate} onValueChange={(value) => setImageTemplate(value ?? "")}>
                   <SelectTrigger id="sandbox-image-template" className="w-full text-xs"><SelectValue>{imageTemplate || "Choose a template"}</SelectValue></SelectTrigger>
                   <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
                     {images.map((item) => <SelectItem key={item.name} value={item.name} className="text-xs">{item.name}</SelectItem>)}
@@ -540,30 +518,11 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
           </div>
 
           <DialogFooter className="mx-0 mb-0 shrink-0 items-center rounded-none border-t border-border bg-popover px-5 py-4 @3xl:px-7">
-            {progress && <p role="status" className="mr-auto text-xs text-muted-foreground">{progress}</p>}
-            <Button type="button" variant="ghost" disabled={busy && !preparing} onClick={() => {
-              if (preparing) {
-                preparation.current?.abort()
-                if (buildName.current) void api.cancelImageBuild(buildName.current).catch((e) => toast.error(e.message))
-              } else onOpenChange(false)
-            }}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
-            {mode === "quick" && (preparing || build) && <Button ref={showBuildButton} type="button" variant="outline" aria-expanded={showBuild} aria-controls="quick-build-logs" onClick={() => setShowBuild(true)}>Show build</Button>}
-            <Button type="submit" disabled={busy || location?.connected === false || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
-              {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
-            </Button>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={location?.connected === false || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">Create sandbox</Button>
           </DialogFooter>
           </Tabs>
         </form>
-        {showBuild && <section id="quick-build-logs" aria-label="Build logs" className="flex h-[32svh] min-h-0 min-w-0 flex-col gap-3 rounded-xl bg-popover p-4 ring-1 ring-foreground/10 lg:h-[min(36rem,90svh)]">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-medium">Build logs</h2>
-            <Button ref={closeBuildButton} type="button" variant="ghost" size="icon-sm" aria-label="Close build logs" onClick={closeBuild}><X /></Button>
-          </div>
-          <p role="status" className="text-xs text-muted-foreground">{build?.status === "failed" ? "Build failed" : build?.status === "ready" ? "Build complete" : buildProgress || "Preparing environment…"}</p>
-          {build?.name && <p className="truncate font-mono text-[11px] text-muted-foreground">{build.name}</p>}
-          <pre ref={buildLogs} tabIndex={0} aria-label="Build output" onScroll={(event) => { const el = event.currentTarget; followLogs.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40 }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/30 p-3 font-mono text-[10px] leading-relaxed">{build?.logs || (build?.status === "ready" ? "Using a ready image template. No build was needed." : "Waiting for build output…")}</pre>
-          {(build?.error || error) && <p role="alert" className="text-xs text-destructive">{build?.error || error}</p>}
-        </section>}
         </>}
       </DialogContent>
     </Dialog>
