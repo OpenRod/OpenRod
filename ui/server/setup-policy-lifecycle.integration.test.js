@@ -54,7 +54,7 @@ export async function gateway(context = contextSelection()) { return { client: {
   const { getSetupStore, setupRoute } = await module('setups.js')
   const setupStore = getSetupStore()
   const { policyDirectory } = await module('paths.js')
-  const policies = await policyDirectory()
+  const policyDir = await policyDirectory()
   const { orgRoute, syncAll, startOrgSweeper } = await module('org.js')
   const { listPolicies } = await module('egress.js')
   const { state } = await module('gateway.js')
@@ -63,6 +63,8 @@ export async function gateway(context = contextSelection()) { return { client: {
   async function save(hosts, group = false) {
     const review = setupStore.stage(hosts.map(item))
     const setup = await setupRoute('POST', ['setups', 'save'], { token: review.token, name: 'Work tools', acknowledged: true })
+    assert.equal(setup.egressPolicyError, undefined)
+    assert.equal(setup.egressPolicy.id, `setup-${setup.id}`)
     if (group) {
       await orgRoute('POST', ['org', 'groups'], { id: 'work', name: 'Work' })
       const policy = (await listPolicies()).find(p => p.setup?.id === setup.id)
@@ -72,7 +74,7 @@ export async function gateway(context = contextSelection()) { return { client: {
     return setup
   }
   const hosts = () => Object.values(state.rules).flatMap(rule => rule.endpoints.map(e => e.host)).sort()
-  return { root, policies, setupStore, setupRoute, orgRoute, syncAll, startOrgSweeper, listPolicies, state, item, save, hosts, createSetupEgress }
+  return { root, policyDir, setupStore, setupRoute, orgRoute, syncAll, startOrgSweeper, listPolicies, state, item, save, hosts, createSetupEgress }
 }
 
 test('failed host revocation reconciles after recovery without rewriting equal protobuf rules', async t => {
@@ -103,9 +105,9 @@ test('automatic recompute and manual policy edits share the write queue', async 
   const read = fs.readFile
   let pause = true, watch = true
   fs.readFile = async function(file, ...args) {
-    if (String(file) === path.join(h.policies, 'org/organization.json') && pause) { pause = false; await blocked }
+    if (String(file) === path.join(h.policyDir, 'org/organization.json') && pause) { pause = false; await blocked }
     const data = await read.call(this, file, ...args)
-    if (String(file) === path.join(h.policies, 'egress', manual.id + '.json') && watch) { watch = false; captured() }
+    if (String(file) === path.join(h.policyDir, 'egress', manual.id + '.json') && watch) { watch = false; captured() }
     return data
   }
   try {
@@ -126,7 +128,7 @@ test('failed policy-file deletion leaves the setup present and can be retried', 
   const setup = await h.save(['cleanup.example.com'])
   const rm = fs.rm
   fs.rm = async function(file, ...args) {
-    if (String(file) === path.join(h.policies, 'egress', `setup-${setup.id}.json`)) throw Object.assign(new Error('Policy file is read-only'), { code: 'EACCES' })
+    if (String(file) === path.join(h.policyDir, 'egress', `setup-${setup.id}.json`)) throw Object.assign(new Error('Policy file is read-only'), { code: 'EACCES' })
     return rm.call(this, file, ...args)
   }
   try {
@@ -164,7 +166,7 @@ test('a partial automatic policy write preserves manual edits and the setup for 
   const setup = await h.save(['old.example.com', 'keep.example.com'])
   const policy = (await h.listPolicies())[0]
   const { policy: manual } = await h.orgRoute('POST', ['egress', 'policies'], { ...policy, name: 'Manual name', destinations: [...policy.destinations, 'manual.example.com'] })
-  const policyFile = path.join(h.policies, 'egress', policy.id + '.json')
+  const policyFile = path.join(h.policyDir, 'egress', policy.id + '.json')
   const write = fs.writeFile
   fs.writeFile = async function(file, data, ...args) {
     if (String(file).startsWith(policyFile)) {

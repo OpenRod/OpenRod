@@ -51,6 +51,17 @@ const abortWhenStarted = (expression) => `
   });
   const outcome = ${expression}.then(value => ({value}), error => ({error:error.message,status:error.status}));
   await ready;
+  // File creation can be observed before writeFileSync writes the PID.
+  // Abort only after the test process has published its complete identity.
+  const { readFile } = await import('node:fs/promises');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  let pid;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const report = await readFile(process.env.REPORT, 'utf8');
+    if (/^[1-9][0-9]*$/.test(report)) { pid = Number(report); break; }
+    await delay(10);
+  }
+  if (!pid) throw new Error('SSH fixture did not publish its PID');
   controller.abort();
   console.log(JSON.stringify(await outcome));
 `
@@ -112,10 +123,12 @@ test('SSH diagnostic failures, output overflow, and timeouts reject partial outp
 })
 
 test('abort kills the SSH process and reports cancellation', async (t) => {
-  const { run, env } = await fixture(t, `require('node:fs').writeFileSync(process.env.REPORT, String(process.pid)); setInterval(()=>{},1000)`)
+  const { run, env } = await fixture(t, `const fs = require('node:fs'); fs.writeFileSync(process.env.REPORT, '');
+setTimeout(() => fs.writeFileSync(process.env.REPORT, String(process.pid)), 100); setInterval(()=>{},1000)`)
   const result = await run(abortWhenStarted("remote.runSsh('target','true',{signal:controller.signal})"))
   assert.match(result.error, /cancelled/)
   const pid = Number(await readFile(env.REPORT, 'utf8'))
+  assert.ok(Number.isSafeInteger(pid) && pid > 0)
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
 })
 
@@ -183,6 +196,7 @@ if(process.argv.at(-1).includes('engine load --quiet')) {
   const cancelled = await run(abortWhenStarted(call), { BLOCK: '1' })
   assert.match(cancelled.error, /cancelled/)
   const pid = Number(await readFile(env.REPORT, 'utf8'))
+  assert.ok(Number.isSafeInteger(pid) && pid > 0)
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
 })
 
