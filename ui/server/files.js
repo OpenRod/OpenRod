@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { CONFIG_DIR, gateway } from './gateway.js'
+import { CONFIG_DIR, gateway, contextKey, contextSelection, runWithContext } from './gateway.js'
 import { SANDBOX_ROOT, TRANSFER_LIMIT, downloadCommand, formatBytes } from '../src/lib/files.js'
 import { reasonFrom, runOpenShell } from './openshell-cli.js'
 
@@ -21,6 +21,7 @@ const HOME = os.homedir()
 
 // Vite reloads server modules during development; transfers in flight must survive that.
 const state = globalThis[Symbol.for('openshell.console.files')] ??= { seeds: new Map(), batches: new Map(), downloads: new Map() }
+const seedKey = (name) => JSON.stringify([contextKey(), name])
 
 // ---- processes --------------------------------------------------------------
 
@@ -41,9 +42,9 @@ function run(command, args, { cwd, env } = {}) {
 // it never carries an upload. Downloads stream out of exec instead (below):
 // the CLI's download needs GNU `realpath -e` inside the sandbox, which the
 // busybox images, OpenShell's default among them, do not have.
-async function openshell(args, { cwd, timeout = 15 * 60_000 } = {}) {
-  const { target } = await gateway()
-  const result = await runOpenShell(args, { cwd, gateway: target.name, timeoutMs: timeout, outputLimit: 20_000 })
+async function openshell(args, { cwd, timeout = 15 * 60_000, context } = {}) {
+  const { target, workspace } = context ?? await gateway()
+  const result = await runOpenShell(args, { cwd, gateway: target.name, workspace, timeoutMs: timeout, outputLimit: 20_000 })
   const output = `${result.stdout}${result.stderr}`
   if (result.timedOut) throw fail('The transfer timed out.', 504)
   if (result.outputExceeded) throw fail('The openshell CLI produced too much output.', 502)
@@ -71,8 +72,8 @@ case "$r" in /sandbox|/sandbox/*) ;; *) exit 4 ;; esac`
 const EXITS = { 3: ['That path does not exist.', 404], 4: ['That path leads outside /sandbox.', 403], 5: ['That is not a folder.', 400] }
 
 async function inSandbox(name, script, arg) {
-  const { client } = await gateway()
-  const result = await client.sandbox.exec(name, ['/bin/sh', '-c', `${RESOLVE}\n${script}`, 'sh', arg], { noLoginShell: true, timeoutSecs: 30 })
+  const { client, workspace } = await gateway()
+  const result = await client.sandbox.exec(name, ['/bin/sh', '-c', `${RESOLVE}\n${script}`, 'sh', arg], { workspace, noLoginShell: true, timeoutSecs: 30 })
   if (EXITS[result.exitCode]) throw fail(...EXITS[result.exitCode])
   if (result.exitCode !== 0) throw fail(result.stderr.toString().trim().slice(-400) || `The sandbox command exited with ${result.exitCode}.`, 502)
   return result.stdout.toString('utf8').split('\0').slice(0, -1)
@@ -126,7 +127,7 @@ async function list(name, input) {
 // for a tar stream. Only what busybox has: `cat` for a file, `tar cf -` for
 // a folder, whose symlinks travel as links.
 async function pull(name, argv, file, { gzip = false } = {}) {
-  const { client } = await gateway()
+  const { client, workspace } = await gateway()
   const out = createWriteStream(file, { mode: 0o600 })
   const sink = gzip ? zlib.createGzip() : out
   if (gzip) sink.pipe(out)
@@ -134,7 +135,7 @@ async function pull(name, argv, file, { gzip = false } = {}) {
   let stderr = ''
   let exit = null
   try {
-    for await (const event of client.sandbox.execStream(name, argv, { noLoginShell: true, timeoutSecs: 900 })) {
+    for await (const event of client.sandbox.execStream(name, argv, { workspace, noLoginShell: true, timeoutSecs: 900 })) {
       if (event.stream === 'stdout') await write(event.data)
       else if (event.stream === 'stderr') stderr = (stderr + event.data.toString()).slice(-400)
       else if (event.type === 'exit') exit = event.exitCode
@@ -168,7 +169,7 @@ printf '%s\\0' "$(du -sb "$r" | cut -f1)"`, target)
     const token = randomUUID()
     const timer = setTimeout(() => discardDownload(token), 10 * 60_000)
     timer.unref?.()
-    state.downloads.set(token, { file, filename, temp, bytes, timer })
+    state.downloads.set(token, { file, filename, temp, bytes, timer, scope: contextKey() })
     return { token, filename, bytes }
   } catch (error) {
     await fs.rm(temp, { recursive: true, force: true })
@@ -188,7 +189,7 @@ const disposition = (filename) => `attachment; filename="${filename.replace(/[^\
 
 export function serveDownload(res, token) {
   const item = ID.test(token ?? '') ? state.downloads.get(token) : null
-  if (!item) {
+  if (!item || item.scope !== contextKey()) {
     res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' })
     res.end('This download has expired. Start it again from the Files tab.')
     return
@@ -217,13 +218,13 @@ async function startUpload(name) {
   await fs.mkdir(root)
   await fs.chmod(root, 0o755)
   const id = randomUUID()
-  state.batches.set(id, { sandbox: name, temp, root, files: 0, bytes: 0, touched: Date.now(), committing: false })
+  state.batches.set(id, { sandbox: name, scope: contextKey(), context: contextSelection(), temp, root, files: 0, bytes: 0, touched: Date.now(), committing: false })
   return { id }
 }
 
 function batchFor(name, id) {
   const batch = ID.test(id ?? '') ? state.batches.get(id) : null
-  if (!batch || batch.sandbox !== name) throw fail('That upload has expired. Drop the files again.', 404)
+  if (!batch || batch.sandbox !== name || batch.scope !== contextKey()) throw fail('That upload has expired or belongs to another gateway/workspace. Drop the files again.', 404)
   if (batch.committing) throw fail('That upload is already being sent.', 409)
   batch.touched = Date.now()
   return batch
@@ -266,12 +267,14 @@ async function commitUpload(name, id, input) {
   batch.committing = true
   try {
     // Upload into the real folder, never through a link that leaves /sandbox.
-    const [dest, free] = await inSandbox(name, `[ -d "$r" ] || exit 5
+    return await runWithContext(batch.context, async () => {
+      const [dest, free] = await inSandbox(name, `[ -d "$r" ] || exit 5
 printf '%s\\0' "$r"
 ${FREE}`, sandboxPath(input?.dir))
-    if (batch.bytes > Number(free) * 1024) throw fail(`The sandbox has ${formatBytes(Number(free) * 1024)} free; this upload is ${formatBytes(batch.bytes)}.`, 413)
-    await openshell(['sandbox', 'upload', '--no-git-ignore', name, '.', dest], { cwd: batch.root })
-    return { files: batch.files, bytes: batch.bytes, dest }
+      if (batch.bytes > Number(free) * 1024) throw fail(`The sandbox has ${formatBytes(Number(free) * 1024)} free; this upload is ${formatBytes(batch.bytes)}.`, 413)
+      await openshell(['sandbox', 'upload', '--no-git-ignore', name, '.', dest], { cwd: batch.root })
+      return { files: batch.files, bytes: batch.bytes, dest }
+    })
   } finally {
     discardBatch(id)
   }
@@ -425,22 +428,23 @@ function cloneError(stderr, exitCode) {
 
 async function runSeed(name, seed) {
   const job = { kind: seed.kind, source: seed.source, dest: seed.dest, state: 'waiting', error: null, startedAt: new Date().toISOString(), finishedAt: null, seed }
-  state.seeds.set(name, job)
+  state.seeds.set(seedKey(name), job)
   try {
-    const { client } = await gateway()
-    await client.sandbox.waitReady(name, 600)
+    const context = await gateway()
+    const { client, workspace } = context
+    await client.sandbox.waitReady(name, 600, { workspace })
     if (seed.kind === 'folder') {
       job.state = 'uploading'
       // Re-read the folder: a retry may come long after the first attempt.
       const plan = seed.folder = await localFolder(seed.folder.path)
       if (plan.over) throw fail(`${plan.display} is now over ${formatBytes(TRANSFER_LIMIT)}.`, 413)
-      await openshell(['sandbox', 'upload', name, plan.path, SANDBOX_ROOT])
-      if (plan.git === 'included') await openshell(['sandbox', 'upload', '--no-git-ignore', name, path.join(plan.path, '.git'), `${plan.dest}/`])
+      await openshell(['sandbox', 'upload', name, plan.path, SANDBOX_ROOT], { context })
+      if (plan.git === 'included') await openshell(['sandbox', 'upload', '--no-git-ignore', name, path.join(plan.path, '.git'), `${plan.dest}/`], { context })
       job.files = plan.files
       job.bytes = plan.bytes + plan.gitBytes
     } else {
       job.state = 'cloning'
-      const result = await client.sandbox.exec(name, ['git', 'clone', '--', seed.repo.url, seed.repo.dest], { timeoutSecs: 900, environment: { GIT_TERMINAL_PROMPT: '0' } })
+      const result = await client.sandbox.exec(name, ['git', 'clone', '--', seed.repo.url, seed.repo.dest], { workspace, timeoutSecs: 900, environment: { GIT_TERMINAL_PROMPT: '0' } })
       if (result.exitCode !== 0) throw fail(cloneError(result.stderr.toString(), result.exitCode))
     }
     job.state = 'done'
@@ -452,7 +456,7 @@ async function runSeed(name, seed) {
 }
 
 export function startSeed(name, seed) {
-  runSeed(name, seed)
+  void runWithContext(contextSelection(), () => runSeed(name, seed))
 }
 
 const seedView = ({ seed, ...job }) => job
@@ -467,7 +471,7 @@ export async function filesRoute(method, parts, input, url) {
   const [, name, area, id, action] = parts
   if (method === 'GET') {
     if (!area) return list(name, url.searchParams.get('path'))
-    if (area === 'seed' && !id) { const job = state.seeds.get(name); return job ? seedView(job) : null }
+    if (area === 'seed' && !id) { const job = state.seeds.get(seedKey(name)); return job ? seedView(job) : null }
     return undefined
   }
   if (area === 'download' && !id) return prepareDownload(name, input?.path)
@@ -475,11 +479,11 @@ export async function filesRoute(method, parts, input, url) {
   if (area === 'uploads' && action === 'commit') return commitUpload(name, id, input)
   if (area === 'uploads' && action === 'cancel') { batchFor(name, id); discardBatch(id); return { ok: true } }
   if (area === 'seed' && id === 'retry') {
-    const job = state.seeds.get(name)
+    const job = state.seeds.get(seedKey(name))
     if (!job) throw fail('This sandbox was not started with files by this console.', 404)
     if (job.state !== 'failed') throw fail('Only a failed start can be retried.', 409)
-    runSeed(name, job.seed)
-    return seedView(state.seeds.get(name))
+    startSeed(name, job.seed)
+    return seedView(state.seeds.get(seedKey(name)))
   }
   return undefined
 }

@@ -76,8 +76,8 @@ test('actual sync, port edits and overview bind setup access to the sandbox and 
   state.id = 'box-original'; state.endpoint = 'https://gateway-b'
   await h.syncAll()
   assert.deepEqual(state.rules, {}, 'same name/id on another gateway has no setup membership')
-  const { client } = await h.gateway()
-  const ops = await h.managedOpsFor(client, 'web', [8443], state.endpoint)
+  const { client, workspaceScope } = await h.gateway()
+  const ops = await h.managedOpsFor(client, workspaceScope, 'web', [8443], state.endpoint)
   assert.equal(ops.filter(op => op.operation.case === 'addRule').length, 0)
   state.endpoint = endpoint
   await h.syncAll()

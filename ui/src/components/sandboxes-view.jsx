@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, Monitor, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -25,8 +25,19 @@ const number = (value) => value.toLocaleString("en-US")
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 const COLUMNS = [{ id: "name", label: "Sandbox", width: "28%" }, { id: "phase", label: "Status", width: "12%" }, { id: "owner", label: "Owner", width: "13%" }, { id: "image", label: "Image", width: "26%" }, { id: "startedAt", label: "Uptime", width: "10%" }, { id: "createdAt", label: "Created", width: "11%" }]
 
-export function SandboxesView({ onNavigate }) {
+export function SandboxesView({ onNavigate, onConnect }) {
   const live = useDemoFleet(useLive())
+  const gateway = live.overview?.gateway
+  const [remoteLocation, setRemoteLocation] = React.useState(null)
+  const canConnect = Boolean(onConnect)
+  React.useEffect(() => {
+    if (!canConnect) return
+    const controller = new AbortController()
+    api.connections(controller.signal).then((next) => {
+      if (!controller.signal.aborted) setRemoteLocation(next.active)
+    }).catch(() => { /* Gateway metadata remains available if discovery fails. */ })
+    return () => controller.abort()
+  }, [gateway?.name, canConnect])
   const [creations, setCreations] = React.useState([])
   const reportedSandboxes = live.sandboxes ?? EMPTY
   const sandboxes = React.useMemo(() => {
@@ -201,6 +212,8 @@ export function SandboxesView({ onNavigate }) {
           </Select>
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={live.refresh}><RefreshCw className="size-3.5" /></Button>
+          <span className="max-w-48 truncate text-xs text-muted-foreground" title={gateway?.endpoint}>Running on: {remoteLocation?.gateway === gateway?.name && remoteLocation?.host ? remoteLocation.host : gateway?.remote ? gateway.name : gateway?.name ? "This computer" : "Not connected"}</span>
+          {canConnect && <Button variant="outline" size="sm" onClick={onConnect}><Monitor aria-hidden="true" className="size-3.5" />Connect machine</Button>}
           <Button size="sm" onClick={() => setCreating(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
         </div>
         {selectedBoxes.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent/30 px-6 py-2">
