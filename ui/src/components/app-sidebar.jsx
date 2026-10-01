@@ -49,7 +49,8 @@ export function AppSidebar({ view, onNavigate }) {
       <SidebarHeader className="h-14 shrink-0 justify-center px-6 py-0">
         <div className="flex items-center gap-2">
           <img src="/openegg.png" alt="" aria-hidden="true" className="size-9 shrink-0 object-contain" />
-          <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">OpenEgg Shell</span>
+          <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">ShellOS
+          </span>
         </div>
       </SidebarHeader>
 
