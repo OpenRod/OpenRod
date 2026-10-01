@@ -16,7 +16,6 @@ import { GroupPicker } from "@/components/group-picker"
 import { api } from "@/lib/api"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
-import { sessionCommand } from "@/lib/sandbox-session"
 import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -97,12 +96,12 @@ function GroupField({ org, value, onChange, onCreated, name }) {
       <GroupPicker groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
       <p className="text-[11px] text-muted-foreground">
         {reach.length
-          ? <>Gets {reach.length === 1 ? "this egress policy" : `these ${reach.length} egress policies`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
-          : chosen ? <>No egress policy targets {chosen.name} yet. Add one on the Egress page, and it applies to every sandbox in the group.</>
-          : org.groups.length ? "Groups let egress policies follow sandboxes. You can change the group later on the Groups page."
-          : "Create a group to share network access between sandboxes. Egress policies can then target the whole group."}
+          ? <>Gets {reach.length === 1 ? "this network rule" : `these ${reach.length} network rules`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
+          : chosen ? <>No network rule targets {chosen.name} yet. Add one on the Network page, and it applies to every sandbox in the group.</>
+          : org.groups.length ? "Groups let network rules follow sandboxes. You can change the group later on the Groups page."
+          : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
       </p>
-      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the security preset (<span className="font-mono">{chosen.template}</span>), which overrides your security preset.</p>}
+      {chosen?.template && <p className="text-[11px] text-amber-700">{chosen.name} sets the policy (<span className="font-mono">{chosen.template}</span>), which replaces the choice below.</p>}
     </div>
   )
 }
@@ -235,7 +234,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       if (controller.signal.aborted) return
       setPreparing(false); setProgress("Creating sandbox…")
       const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, ...(group ? { group } : {}), ...files })
-      toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
+      toast.success(`Creating ${created.name}`)
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
       onOpenChange(false)
@@ -362,9 +361,9 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
 
             <div className="grid gap-1.5">
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="sandbox-template" className="text-xs">Security preset</Label>
+                <Label htmlFor="sandbox-template" className="text-xs">Policy</Label>
                 <Tooltip>
-                  <TooltipTrigger type="button" aria-label="About this security preset" className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><Info className="size-3.5" aria-hidden="true" /></TooltipTrigger>
+                  <TooltipTrigger type="button" aria-label="About this policy" className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><Info className="size-3.5" aria-hidden="true" /></TooltipTrigger>
                   <TooltipContent>{templates.find((t) => t.id === effectivePreset)?.description || "Filesystem and network access."} Shared rules still apply.</TooltipContent>
                 </Tooltip>
               </div>

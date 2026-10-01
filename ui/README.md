@@ -14,31 +14,32 @@ npm run dev        # http://127.0.0.1:4600
 - **Activity**: retained, searchable logs and platform events with collection coverage, separate policy decisions and outcomes, evidence details, investigation pivots, saved views, and JSON export.
 - **Gateway**: health, runtime, auth, providers, and a live traffic map.
 
-### Policies
+### Security
 
-- **Egress**: reusable egress policies. **Add policy** asks for a name, destinations (hosts, with `*.` and `**.` wildcards) and an action, Allow or Block, plus what it applies to: **Groups** (the default), **Specific sandboxes**, or **Every sandbox**. A group can be created right in the form. Below the choice, the form lists the sandboxes the policy reaches today. Sandboxes start locked down, so nothing leaves one until an allow policy covers it, and a block always beats an allow. Blocking a host also blocks its subdomains. **Advanced** (allow only) holds ports (default 443 and 80), requests (any, read only, read & write, or specific method/path pairs, plus blocked requests), programs (default any), enforce vs audit, and private addresses. Presets: GitHub read and clone, npm, PyPI. Saved as JSON in `policies/egress/`; saving re-applies the policy to every sandbox it covered before or after. The page also lists destinations, recently blocked hosts (Allow opens a pre-filled policy) and each sandbox's rules and revisions, where one-off sandbox rules can still be added.
-  - How a policy maps to OpenShell: an allow is one rule named `egress_<id>` with an endpoint per destination (no inspection unless Advanced asks for it) and binaries `/**` unless programs are set. OpenShell has no host-level deny, so a block is an inspected endpoint per host (and `**.host`) whose deny rules match every request, on every port the sandbox's rules open (allow policies, its template, one-off rules and providers). It answers HTTP with `policy_denied` and refuses non-HTTP traffic.
+- **Policies**: create-time policies (writable and read-only paths, Landlock mode, starting network rules), picked independently from the image in New sandbox. Built-ins plus your own, saved as JSON in `policies/`. Capture a running sandbox's rules, duplicate, or edit a policy. Existing group references and service-opening defaults are preserved. A policy is fixed once the sandbox exists; later network changes happen on the Network page.
+- **Network**: one page with an **Egress** tab and an **Ingress** tab (`#egress`, `#ingress`).
+- **Egress** (Network): reusable network rules. **Add rule** asks for a name, destinations (hosts, with `*.` and `**.` wildcards) and an action, Allow or Block, plus what it applies to: **Groups** (the default), **Specific sandboxes**, or **Every sandbox**. A group can be created right in the form. Below the choice, the form lists the sandboxes the rule reaches today. Sandboxes start locked down, so nothing leaves one until an allow rule covers it, and a block always beats an allow. Blocking a host also blocks its subdomains. **Advanced** (allow only) holds ports (default 443 and 80), requests (any, read only, read & write, or specific method/path pairs, plus blocked requests), programs (default any), enforce vs audit, and private addresses. Presets: GitHub read and clone, npm, PyPI. Saved as JSON in `policies/egress/`; saving re-applies the rule to every sandbox it covered before or after. The tab also lists destinations, recently blocked hosts (Allow opens a pre-filled rule) and each sandbox's rules and revisions, where one-off sandbox rules can still be added.
+  - How a network rule maps to OpenShell: an allow is one OpenShell rule named `egress_<id>` with an endpoint per destination (no inspection unless Advanced asks for it) and binaries `/**` unless programs are set. OpenShell has no host-level deny, so a block is an inspected endpoint per host (and `**.host`) whose deny rules match every request, on every port the sandbox's rules open (allow rules, its policy, one-off rules and providers). It answers HTTP with `policy_denied` and refuses non-HTTP traffic.
   - "All destinations" (Open) is shown but disabled: OpenShell 0.1.2 rejects `*` hosts, and endpoints without a host only open IP addresses in the VM driver.
-- **Groups**: sandboxes that share network access. Create a group on the Groups page (optionally adding sandboxes in the same step), inline in the policy form, or inline in the New sandbox dialog. Put a sandbox in a group from the Groups page (a group menu per sandbox, bulk **Move to**, or a group's panel), or pick the group when creating the sandbox; the dialog lists the egress policies it will get. A sandbox is in one group at a time and can change groups whenever; its policy is rewritten right away. Egress policies aimed at a group reach every sandbox in it, including ones added later. Deleting a group moves its sandboxes to No group; the sandboxes are kept.
-  - Membership is stored by the console in `policies/org/members.json`, not in the sandbox: gateway labels are fixed at creation. A sandbox with no stored membership falls back to the group label it was created with. Deleting a sandbox from the console forgets its membership, so a later sandbox with the same name starts ungrouped. Groups are saved in `policies/org/groups/<id>.json`; one from before the console managed groups may pin a security preset (`template`), which the New sandbox dialog shows.
-- **Blocked everywhere** (top row of Egress → Policies, and "Block everywhere" on a blocked host): hosts blocked in every sandbox, with their subdomains, written into each one as the `org_blocked` rule. They override every policy. Saved in `policies/org/organization.json`; a background pass every 15s settles requests policy already decides and adds missing rules to sandboxes created outside the console. The Organization page itself is the Enterprise Version.
-- **Ingress**: every way into a sandbox, per sandbox. A sandbox starts closed (it has no network interface); the page lists what's open and who can use it. Open a port as a gateway URL with presets (dev server, Vite, Jupyter) and an auto-close timer (1h / 8h / 1 day / until closed), change the timer, or close it. Also shows terminal/exec sessions from the gateway's audit log, the session lifetime from `gateway.toml`, and inbound visits. Templates can open services at start. Auto-close deadlines live in `.state/ingress.json` and are enforced every 30 s while the console runs (and on startup for anything overdue).
+- **Groups**: sandboxes that share network access. Create a group on the Groups page (optionally adding sandboxes in the same step), inline in the rule form, or inline in the New sandbox dialog. Put a sandbox in a group from the Groups page (a group menu per sandbox, bulk **Move to**, or a group's panel), or pick the group when creating the sandbox; the dialog lists the network rules it will get. A sandbox is in one group at a time and can change groups whenever; its rules are rewritten right away. Network rules aimed at a group reach every sandbox in it, including ones added later. Deleting a group moves its sandboxes to No group; the sandboxes are kept.
+  - Membership is stored by the console in `policies/org/members.json`, not in the sandbox: gateway labels are fixed at creation. A sandbox with no stored membership falls back to the group label it was created with. Deleting a sandbox from the console forgets its membership, so a later sandbox with the same name starts ungrouped. Groups are saved in `policies/org/groups/<id>.json`; one from before the console managed groups may pin a policy (`template`), which the New sandbox dialog shows.
+- **Blocked everywhere** (top row of Network → Egress → Rules, and "Block everywhere" on a blocked host): hosts blocked in every sandbox, with their subdomains, written into each one as the `org_blocked` rule. They override every rule. Saved in `policies/org/organization.json`; a background pass every 15s settles requests policy already decides and adds missing rules to sandboxes created outside the console. The Organization page itself is the Enterprise Version.
+- **Ingress** (Network): every way into a sandbox, per sandbox. A sandbox starts closed (it has no network interface); the page lists what's open and who can use it. Open a port as a gateway URL with presets (dev server, Vite, Jupyter) and an auto-close timer (1h / 8h / 1 day / until closed), change the timer, or close it. Also shows terminal/exec sessions from the gateway's audit log, the session lifetime from `gateway.toml`, and inbound visits. Policies can open services at start. Auto-close deadlines live in `.state/ingress.json` and are enforced every 30 s while the console runs (and on startup for anything overdue).
 - **Secrets**: add (masked, never shown again), rotate, set expiry, attach/detach, delete. Each secret shows exactly which hosts it can be sent to, how it's injected, and which programs may use it. Import NVIDIA's published provider profiles (pinned to v0.1.2).
-- **Security presets** (under Templates): create-time policies (writable and read-only paths, Landlock mode, starting network rules), picked independently from the image in New sandbox. Built-ins plus your own, saved as JSON in `policies/`. Capture a running sandbox's rules, duplicate, or edit a preset. Existing group references and service-opening defaults are preserved.
 - **Activity collection**: automatically collects and retains gateway events while the console server runs. Export and Webhook are available in Activity. The separate gateway setting for sandbox OCSF JSON files remains available through the CLI; it does not control Activity collection and is not exposed as an Activity toggle. Legacy `#guardrails` links redirect to Activity.
 
 Changes go through the gateway's server-side patch operations (`UpdateConfig.merge_operations`), so the gateway validates every edit before storing it.
 
 ## Image templates
 
-Templates also has an **Image templates** tab. An image template is an OpenShell sandbox template (`openshell sandbox template create`), so the list is the gateway's own and `openshell sandbox create --template <name>` works too.
+The Templates page lists image templates. An image template is an OpenShell sandbox template (`openshell sandbox template create`), so the list is the gateway's own and `openshell sandbox create --template <name>` works too.
 
 - One page: a name, the agents to install, an optional public repository and a runtime (Node.js, Python). Claude Code, Codex, OpenCode and Gemini CLI are shown; Pi, Cursor, Antigravity, Copilot, Kiro, Factory Droid and Aider are under **More agents**, and any other agent installs through setup commands. **Advanced** holds what the sandbox starts in (any installed agent opens as a session, or a shell, or a custom command), the OS, apt packages, setup commands, non-secret environment variables and the generated Dockerfile. **Use an existing image** takes a local image or a registry reference instead of building one.
 - A build runs in local Docker (tagged `openshell-template/<name>:<id>`, as the non-root UID 1000 sandbox user). On success the console creates the OpenShell template: image and environment go into the template itself; the recipe and start command go into the `openshell.console/recipe` annotation so the console can edit it. Nothing is stored in `.state/`; a running or failed build lives only in server memory.
 - OpenShell has no template update. Editing rebuilds, then deletes and recreates the template under the same name. Existing sandboxes are unaffected: a previous build's image is removed from Docker only if no sandbox or template still points at it, because a stopped sandbox resolves its image again when it starts. The gateway records the template each sandbox came from, but recreating resets the version, so sandboxes from before and after an edit both show `<name>@1`.
 - Template and sandbox names follow OpenShell's rule: lowercase letters, digits and dashes, at most 19 characters.
 - Built templates add each selected agent's sign-in and model destinations to the sandbox policy at launch, as rules named `agent-<id>` from the reviewed table in `shared/agent-access.js`; the launch dialog lists them per agent with any sign-in note. Agents such as Pi finish browser sign-in by redirecting to a `localhost` callback inside the sandbox, which the host browser can't reach: copy the full URL from the "site can't be reached" page, paste it into the agent's prompt and press Enter. Existing sandboxes keep the policy they were created with.
-- Security presets, providers and ingress are chosen in New sandbox, as before; OpenShell templates don't hold policy. CPU and memory aren't offered because the VM driver ignores per-sandbox limits. Templates created with the CLI show up and can be launched, but not edited here.
+- Policies, providers and ingress are chosen in New sandbox, as before; OpenShell templates don't hold policy. CPU and memory aren't offered because the VM driver ignores per-sandbox limits. Templates created with the CLI show up and can be launched, but not edited here.
 
 Run recipe checks with `node --test server/image-templates.test.js` from `ui/`.
 
@@ -62,7 +63,7 @@ missing attribution displays “Not reported”.
 - **Start with** in New sandbox: a local folder or a public git repository.
   - **Local folder:** the server reads a folder under your home folder. It refuses hidden folders such as `~/.ssh` and `~/.config`, `~/Library`, and any folder holding the gateway certificate. Before you create the sandbox it shows what will be sent: file count, size, whether `.gitignore` applied, and files that look like secrets (`.env`, `*.pem`).
   - Once the sandbox is ready, `openshell sandbox upload` puts the folder in `/sandbox/<folder>`, the same as `sandbox create --upload`. `.git` follows as a second upload, because the CLI's `.gitignore` filter leaves it out; worktrees and subfolders arrive without history.
-  - **Git repository:** cloned inside the sandbox into `/sandbox/<repo>` with `git clone`. The security preset must let git reach the host, and cloning needs POST to `/git-upload-pack`, so a GET-only GitHub rule is not enough.
+  - **Git repository:** cloned inside the sandbox into `/sandbox/<repo>` with `git clone`. The policy must let git reach the host, and cloning needs POST to `/git-upload-pack`, so a GET-only GitHub rule is not enough.
   - Sessions open in the project folder (`--workdir`, stored as the `openshell.console/project` label). Progress and a Retry button are in the Files tab. Progress is kept in memory, so a console restart forgets it.
 - **Files tab** in the sandbox popup:
   - Browse `/sandbox` (listed through `exec`: `realpath`, `find` and `stat`, at most 2,000 entries; nothing GNU-only, so busybox images work too).
@@ -86,6 +87,117 @@ the browser, and provider credential values are never returned.
 The server binds to 127.0.0.1 only. Every route checks the socket, Host and
 Origin, and each change additionally requires a same-origin POST with
 an `x-openshell-console` header. Writes use JSON.
+
+### SSH connections
+
+The sandbox popup's **Connect** section uses the gateway already selected by
+the console, whether its endpoint is local or remote. Every generated CLI
+command includes `--gateway <name>` so changing the CLI's active gateway cannot
+redirect a connection.
+
+- **Open in browser** keeps the SDK-backed xterm session inside the console.
+- **Native SSH → New session** opens the sandbox's configured shell or agent in
+  the project directory with `openshell sandbox exec --tty`.
+- **Native SSH → Attach** uses `openshell sandbox connect` for sandboxes whose
+  canonical process owns a TTY. It is omitted otherwise.
+- **Show SSH config** runs `openshell sandbox ssh-config` and displays the Host
+  block for review and copying. It never changes `~/.ssh/config`. The existing
+  editor action follows OpenShell's `sandbox connect --editor` behavior, which
+  may install OpenShell's managed SSH config.
+
+#### Connection architecture
+
+```mermaid
+flowchart LR
+    Operator["Operator"]
+
+    subgraph Browser["Browser"]
+        UI["Console UI"]
+        XTerm["xterm.js"]
+    end
+
+    subgraph Host["Operator machine"]
+        Server["Console server"]
+        Terminal["System terminal"]
+        CLI["openshell CLI"]
+        SSH["OpenSSH"]
+        Proxy["openshell ssh-proxy"]
+        Credentials["Gateway mTLS bundle"]
+        Docker["Docker Desktop"]
+    end
+
+    subgraph Gateway["Selected gateway: local or remote"]
+        API["Gateway API"]
+        Relay["SSH relay"]
+        Driver["Compute driver"]
+    end
+
+    subgraph Sandbox["Sandbox"]
+        Supervisor["OpenShell supervisor"]
+        Session["Shell or agent"]
+    end
+
+    Operator --> UI
+    UI -->|"/api/os/*"| Server
+    Credentials -->|"server-side only"| Server
+
+    UI -->|"Open in browser"| XTerm
+    XTerm -->|"WebSocket + one-use ticket"| Server
+    Server -->|"SDK execInteractive over mTLS"| API
+
+    UI -->|"Open or copy gateway-pinned command"| Terminal
+    Terminal -->|"sandbox exec / connect"| CLI
+    CLI -->|"Gateway API"| API
+    CLI -->|"Attach"| SSH
+
+    Terminal -->|"ssh -F config alias"| SSH
+    SSH -->|"ProxyCommand"| Proxy
+    Proxy -->|"mTLS + ephemeral SSH session"| Relay
+
+    API --> Driver
+    Relay --> Supervisor
+    Driver --> Supervisor
+    Supervisor --> Session
+
+    Docker -.->|"Build OCI image only"| Driver
+```
+
+There are three connection paths:
+
+1. **Browser terminal:** the page obtains a one-use ticket, opens a WebSocket to
+   the console server, and the server starts `execInteractive` through the SDK.
+2. **New native session:** the console opens a system terminal with a
+   gateway-pinned `openshell sandbox exec --tty` command.
+3. **Canonical attach or direct OpenSSH:** `sandbox connect`, or an `ssh`
+   command using the generated Host block, runs OpenSSH through
+   `openshell ssh-proxy`. The proxy authenticates to the selected gateway and
+   requests an ephemeral relay session. Sandbox port 22 is never exposed.
+
+**Show SSH config** asks the CLI to render the Host block and returns it to the
+browser. The browser receives the gateway name, host alias, and command, but no
+certificate private key or ephemeral relay token. The action does not write the
+Host block; the operator may save it or use it as a temporary config:
+
+```bash
+openshell sandbox ssh-config codex > /tmp/openshell-codex-ssh-config
+chmod 600 /tmp/openshell-codex-ssh-config
+ssh -F /tmp/openshell-codex-ssh-config openshell-codex.default
+```
+
+Moving from a local gateway to a gateway on GCP or another remote host changes
+only the selected gateway endpoint and its authentication material. The console
+and OpenSSH still connect through the gateway; no sandbox SSH port is opened.
+Docker is used to build local OCI images and is not part of the SSH transport.
+
+Native terminal launch requires the `openshell` CLI and OpenSSH on the console
+machine. Set `OPENSHELL_BIN` to an executable path when the CLI is not on
+`PATH`. Opening a terminal is supported on macOS and Linux; other platforms can
+copy the pinned command and generated config. The browser receives gateway
+location metadata and commands, never mTLS material, SSH session tokens, or
+provider credentials.
+
+Focused checks:
+`node --test server/openshell-cli.test.js server/editor.test.js server/files.test.js server/ssh.test.js server/terminal.test.js src/lib/sandbox-session.test.js`.
 
 ## Notes
 

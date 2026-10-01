@@ -39,15 +39,29 @@ export function sessionLaunch(session, command) {
   return { command, tty: command.length > 0, labels: {} }
 }
 
-export function sessionCommand(sandbox) {
-  const session = sandbox.labels?.[SESSION_LABEL]
-  // Sandbox names are validated by the server; quote defensively for copied commands.
-  const name = `'${sandbox.name.replaceAll("'", "'\\''")}'`
-  // A checked label value has only letters, digits, '-', '_' and '.', so the path needs no quoting.
-  const project = projectOf(sandbox)
-  const workdir = project ? ` --workdir /sandbox/${project}` : ""
-  if (isSession(session)) return `openshell sandbox exec --name ${name}${workdir} --tty -- ${SESSIONS[session]}`
-  return `openshell sandbox connect ${name}`
+const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
+
+// Native terminal commands are always pinned to the gateway shown by the
+// console. Exec starts a fresh console-managed session; attach reconnects to
+// the sandbox's canonical TTY process.
+export function connectionPlan(sandbox, { gateway, mode = "exec", executable = "openshell" } = {}) {
+  if (!["exec", "attach"].includes(mode)) throw new Error("Unknown connection mode.")
+  if (mode === "attach" && !sandbox.tty) throw new Error("This sandbox has no canonical TTY session.")
+  const argv = ["--gateway", gateway, "sandbox"]
+  if (mode === "attach") argv.push("connect", sandbox.name)
+  else {
+    const project = projectOf(sandbox)
+    argv.push("exec", "--name", sandbox.name)
+    if (project) argv.push("--workdir", `/sandbox/${project}`)
+    argv.push("--tty", "--", ...sessionArgv(defaultSession(sandbox)))
+  }
+  return {
+    mode,
+    argv,
+    command: [executable, ...argv].map(shellQuote).join(" "),
+    session: mode === "exec" ? defaultSession(sandbox) : null,
+    workdir: mode === "exec" && projectOf(sandbox) ? `/sandbox/${projectOf(sandbox)}` : null,
+  }
 }
 
 // The browser terminal runs the same programs. What a tab opens by default is

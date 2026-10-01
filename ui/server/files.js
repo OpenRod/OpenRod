@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { CONFIG_DIR, gateway } from './gateway.js'
 import { SANDBOX_ROOT, TRANSFER_LIMIT, downloadCommand, formatBytes } from '../src/lib/files.js'
+import { reasonFrom, runOpenShell } from './openshell-cli.js'
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
@@ -35,20 +36,6 @@ function run(command, args, { cwd, env } = {}) {
   })
 }
 
-// miette prints "Error:   × message" and wraps the rest onto "│ …" lines.
-export function cliError(output) {
-  const lines = output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split('\n')
-  const start = lines.findIndex((line) => line.includes('×'))
-  if (start < 0) return lines.map((line) => line.trim()).filter(Boolean).slice(-3).join(' ') || 'The openshell CLI failed.'
-  const message = [lines[start].slice(lines[start].indexOf('×') + 1)]
-  for (const line of lines.slice(start + 1)) {
-    const more = /^\s*│(.*)$/.exec(line)
-    if (!more) break
-    message.push(more[1])
-  }
-  return message.map((part) => part.trim()).filter(Boolean).join(' ')
-}
-
 // Uploads go through the `openshell` CLI: tar over the gateway's SSH relay,
 // with its .gitignore filter. The SDK's exec takes at most 4 MiB of stdin, so
 // it never carries an upload. Downloads stream out of exec instead (below):
@@ -56,22 +43,12 @@ export function cliError(output) {
 // busybox images, OpenShell's default among them, do not have.
 async function openshell(args, { cwd, timeout = 15 * 60_000 } = {}) {
   const { target } = await gateway()
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.env.OPENSHELL_BIN || 'openshell', ['--gateway', target.name, ...args], {
-      cwd, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' },
-    })
-    let output = ''
-    const append = (chunk) => { output = (output + chunk).slice(-20_000) }
-    child.stdout.on('data', append)
-    child.stderr.on('data', append)
-    const timer = setTimeout(() => child.kill('SIGKILL'), timeout)
-    child.once('error', (error) => { clearTimeout(timer); reject(fail(error.code === 'ENOENT' ? 'The openshell CLI is not installed on this computer.' : error.message, 500)) })
-    child.once('close', (code, signal) => {
-      clearTimeout(timer)
-      if (code === 0) resolve(output)
-      else reject(fail(signal ? 'The transfer timed out.' : cliError(output), 502))
-    })
-  })
+  const result = await runOpenShell(args, { cwd, gateway: target.name, timeoutMs: timeout, outputLimit: 20_000 })
+  const output = `${result.stdout}${result.stderr}`
+  if (result.timedOut) throw fail('The transfer timed out.', 504)
+  if (result.outputExceeded) throw fail('The openshell CLI produced too much output.', 502)
+  if (result.code !== 0) throw fail(reasonFrom(output), 502)
+  return output
 }
 
 // ---- inside the sandbox -------------------------------------------------------
