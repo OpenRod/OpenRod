@@ -14,6 +14,7 @@ import { fail, findExecutable, runCli, sshBinary } from './openshell-cli.js'
 import { listSshHosts, probeHost, installDocker as installHostDocker, installRuntime, sshArgs } from './remote-hosts.js'
 import { prepareGatewayState, registerManagedGateway } from './remote-gateway-state.js'
 import { ensureGateway } from './gateway-install.js'
+import { reapOrphans } from './orphan-processes.js'
 
 const PACKAGE_LIMIT = 4 * 1024 ** 3
 const localGateways = () => listGateways().filter(target => target.name !== 'aws-eks' && target.supported && !target.remote && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(target.endpoint).hostname))
@@ -218,6 +219,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     await stopRemote()
     unlock = await acquireLock()
     try {
+      await reapOrphans({ stateRoot: stateDirectory(), logger })
       temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'os-ssh-'))
       const socket = path.join(temporary, 'docker.sock')
       const state = await prepareGatewayState(value.host, value.probe, socket)
