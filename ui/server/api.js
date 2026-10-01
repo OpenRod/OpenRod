@@ -1,3 +1,4 @@
+import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -7,7 +8,7 @@ import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { PROJECT_LABEL, isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
+import { PROJECT_LABEL, templateSession, isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
@@ -16,6 +17,9 @@ import { expose, ingressRoute, startSweeper } from './ingress.js'
 import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 import { editorRoute } from './editor.js'
 import { terminalRoute, terminalUpgrade } from './terminal.js'
+import { assertPackagesPrepared } from '../shared/setup-launch.js'
+import { setupRoute, resolveSetups } from './setups.js'
+import { deploymentRoute, startSetupInstall, launchSetupAccess, setupJobsForSandbox } from './setup-deployment.js'
 import { sshRoute } from './ssh.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
@@ -106,10 +110,17 @@ async function sandboxDetail(name) {
     client.raw.getSandbox({ name, workspaceScope: WORKSPACE }),
     client.sandbox.getConfig(name).catch(() => null),
   ])
-  const [view] = nameSandboxImages([sandboxView(sandbox.sandbox)], await listImageTemplates().catch(() => []))
+  const templates = await listImageTemplates().catch(() => [])
+  const [view] = nameSandboxImages([sandboxView(sandbox.sandbox)], templates)
+  const setupJobs = setupJobsForSandbox(name, view.createdAt)
+  const inventory = await agentInventory(client, view, target.endpoint, JSON.stringify(setupJobs.map(job => [job.setup, job.status, job.at])))
+  const setupIds = [...new Set([...(templates.find(t => t.name === view.workloadTemplate)?.recipe?.setups ?? []), ...(inventory.installedSetupIds ?? []), ...setupJobs.filter(job => job.status !== 'removed').map(job => job.setup)])]
+  const installing = setupJobs.some(job => job.status === 'waiting')
   return {
     ...view,
-    agentInventory: await agentInventory(client, view, target.endpoint),
+    setupJobs,
+    setupIds,
+    agentInventory: installing ? { ...inventory, resources: null } : inventory,
     policy: policyView(config?.policy),
     policySource: config?.policySource ?? null,
     policyHash: config?.policyHash ?? null,
@@ -131,8 +142,17 @@ async function createSandbox(input) {
   if (saved?.managed) { try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) } }
   if (saved) {
     const start = saved.recipe.command.trim()
-    input = { ...input, image: '', session: !start ? 'shell' : start !== 'shell' && isSession(start) ? start : null, command: start ? ['/bin/bash', '-lc', start] : [] }
+    let selectedSession
+    try { selectedSession = templateSession(saved, input.session) } catch (error) { throw fail(error.message) }
+    input = { ...input, image: '', session: selectedSession, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
+  const setupIds = [...new Set([...(saved?.recipe?.setups ?? []), ...(Array.isArray(input.setups) ? input.setups : [])])]
+  const setupTargets = input.setupTargets ?? setupTargetsFor(saved?.recipe?.agents ?? [])
+  const selectedSetups = await resolveSetups(setupIds)
+  assertPackagesPrepared(selectedSetups)
+  const approvedSetupRevisions = launchSetupAccess(selectedSetups, saved?.recipe, input.setupAccessReview, input.includeTemplateAccess === true)
+  if (setupIds.length) { try { validateSetupTargets(setupTargets) } catch (error) { throw fail(error.message) } }
+  if (setupIds.length) input = { ...input, session: 'shell', command: [] }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
   const providers = Array.isArray(input.providers) ? input.providers.map(String) : []
@@ -179,7 +199,8 @@ async function createSandbox(input) {
   // Files arrive once the sandbox is ready, as with `sandbox create --upload`.
   // Console sessions start through exec, so an agent opened later finds them.
   if (seed) startSeed(ref.name, seed)
-  return { name: ref.name, phase: ref.phase, opened, labels, seed: seed ? { kind: seed.kind, source: seed.source, dest: seed.dest } : null }
+  if (setupIds.length) await startSetupInstall(ref.name, setupIds, setupTargets, ref.id, approvedSetupRevisions)
+  return { name: ref.name, phase: ref.phase, opened, labels, setups: setupIds, seed: seed ? { kind: seed.kind, source: seed.source, dest: seed.dest } : null }
 }
 
 async function lifecycle(name, action) {
@@ -194,7 +215,6 @@ async function lifecycle(name, action) {
   }
   return { ok: true }
 }
-
 
 // ---- live stream ------------------------------------------------------------
 
@@ -362,7 +382,7 @@ export function openshellApi() {
               return send(res, 200, store.query(options))
             }
             if (parts[0] === 'downloads' && parts.length === 2) return serveDownload(res, parts[1])
-            const routed = (await sshRoute('GET', parts)) ?? (await editorRoute('GET', parts)) ?? (await filesRoute('GET', parts, undefined, url)) ?? (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
+            const routed = (await sshRoute('GET', parts)) ?? (await setupRoute('GET', parts)) ?? (await deploymentRoute('GET', parts)) ?? (await editorRoute('GET', parts)) ?? (await filesRoute('GET', parts, undefined, url)) ?? (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
             if (routed !== undefined) return send(res, 200, routed)
             return send(res, 404, { error: 'Not found' })
           }
@@ -372,7 +392,7 @@ export function openshellApi() {
             return send(res, 200, await receiveUpload(req, parts[1], parts[3], url.searchParams.get('path')))
           }
           if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
-          const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : 65536)
+          const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : parts[0] === 'setups' ? 128 * 1024 : 65536)
           if (parts[0] === 'activity' && parts.length === 2) {
             if (parts[1] === 'delete-preview') return send(res, 200, store.previewDeletion(input))
             if (parts[1] === 'delete') {
@@ -390,7 +410,7 @@ export function openshellApi() {
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          const routed = (await sshRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await sshRoute('POST', parts, input)) ?? (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
         } catch (error) {

@@ -3,6 +3,8 @@ import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
+import { resolveSetups, usableSetup } from './setups.js'
+import { artifactFile } from './setup-packages.js'
 import { WORKSPACE, gateway, resolveGateway, iso } from './gateway.js'
 
 // Image templates are OpenShell sandbox templates (`openshell sandbox template
@@ -131,6 +133,12 @@ function clean(input) {
 
 async function start(input) {
   const recipe = clean(input)
+  const setups = (await resolveSetups(recipe.setups)).map(usableSetup)
+  if (setups.some(s => recipe.setupRevisions?.[s.id] && recipe.setupRevisions[s.id] !== s.revision)) throw fail('A selected Setup changed. Review it before building the image.',409)
+  recipe.setupRevisions = Object.fromEntries(setups.map(s => [s.id, s.revision]))
+  const pinnedErrors = recipeErrors(recipe)
+  if (Object.keys(pinnedErrors).length) throw fail(Object.values(pinnedErrors)[0])
+  if (setups.some((s) => !s.items.length)) throw fail('A selected Setup has unresolved import requirements. Resolve or re-import those items before building.')
   const { name } = recipe
   const replace = input.replace === true
   if (running(jobs.get(name))) throw fail('This template is already building.', 409)
@@ -147,23 +155,30 @@ async function start(input) {
     let temp
     try {
       let image = recipe.image
-      if (recipe.source === 'build') {
+      if (recipe.source === 'build' || setups.length) {
         temp = await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-image-'))
-        await fs.writeFile(path.join(temp, 'Dockerfile'), dockerfileFor(recipe))
+        await fs.writeFile(path.join(temp, 'Dockerfile'), recipe.source === 'build' ? dockerfileFor(recipe) : `FROM ${recipe.image}\nCOPY --chown=1000:1000 setup-bundles/ /sandbox/.openshell/bundles/\n`)
+        if (setups.length) {
+          await fs.mkdir(path.join(temp, 'setup-bundles'), { mode: 0o700 })
+          for (const setup of setups) {
+            await fs.writeFile(path.join(temp, 'setup-bundles', setup.id + '.json'), JSON.stringify(setup), { mode: 0o600 })
+            for (const item of setup.items.filter(i => i.artifact)) { const { data } = await artifactFile(item.artifact); await fs.writeFile(path.join(temp, 'setup-bundles', item.artifact.digest + '.tar.gz'), data, { mode: 0o600 }) }
+          }
+        }
         await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
         image = `${BUILT_PREFIX}${name}:${Date.now().toString(36)}`
-        await run(['build', '--progress=plain', '--tag', image, temp], { job, timeout: 30 * 60_000 })
+        await run(['build', ...(recipe.source === 'image' ? ['--network=none'] : []), '--progress=plain', '--tag', image, temp], { job, engine, timeout: 30 * 60_000 })
       } else {
         // OpenShell resolves the reference itself; check it once so a typo or
         // the wrong CPU architecture fails here rather than at launch.
-        try { await run(['image', 'inspect', image], { engine }) } catch { await run(['pull', image], { job, timeout: 30 * 60_000 }) }
+        try { await run(['image', 'inspect', image], { engine }) } catch { await run(['pull', image], { job, engine, timeout: 30 * 60_000 }) }
       }
       await inspect(image, engine)
       if (job.cancelled) throw fail('Operation cancelled.')
       job.saving = true
       try { await saveTemplate(client, recipe, image, previous) } catch (e) {
         // Nothing points at an image whose template was never saved.
-        if (recipe.source === 'build') await run(['image', 'rm', image], { engine }).catch(() => {})
+        if (recipe.source === 'build' || setups.length) await run(['image', 'rm', image], { engine }).catch(() => {})
         throw e
       }
       jobs.delete(name)

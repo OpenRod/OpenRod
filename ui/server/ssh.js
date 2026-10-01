@@ -1,10 +1,12 @@
 import { execFile, spawn } from 'node:child_process'
+import { createTerminalQueue, macTerminalScript, terminalLaunchError } from './local-terminal.js'
 import { connectionPlan } from '../src/lib/sandbox-session.js'
 import { WORKSPACE, gateway, sandboxView } from './gateway.js'
 import { fail, openshellBinary, reasonFrom, runOpenShell, shellQuote, sshBinary } from './openshell-cli.js'
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const MODES = new Set(['exec', 'attach'])
+const queueTerminal = createTerminalQueue()
 
 async function loadContext(name) {
   const { client, target } = await gateway()
@@ -44,12 +46,10 @@ export function launchNativeTerminal(command, {
   spawnProcess = spawn,
 } = {}) {
   if (platform === 'darwin') {
-    const escaped = command.replace(/[\\"]/g, '\\$&')
-    const script = `tell application "Terminal" to do script "${escaped}"`
-    return new Promise((resolve, reject) => exec('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], { timeout: 10_000 },
-      (error) => error
-        ? reject(fail('Could not open Terminal. Allow the console to control Terminal in System Settings → Privacy & Security → Automation.', 502))
-        : resolve()))
+    return queueTerminal(() => new Promise((resolve, reject) => exec('osascript', ['-e', macTerminalScript(command)], { timeout: 15_000 },
+      (error, stdout, stderr) => error
+        ? reject(fail(terminalLaunchError(error, stderr), 502))
+        : resolve())))
   }
   if (platform === 'linux') {
     return new Promise((resolve, reject) => {

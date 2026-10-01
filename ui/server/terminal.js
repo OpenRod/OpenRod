@@ -68,6 +68,19 @@ export async function terminalRoute(method, parts, input) {
     const { client } = await gateway()
     const sandbox = sandboxView((await client.raw.getSandbox({ name: parts[1], workspaceScope: WORKSPACE })).sandbox)
     const plan = planSession(sandbox, input ?? {})
+    if (input?.setupLogin) {
+      const { setupStore } = await import('./setups.js')
+      const { executeInstaller } = await import('./setup-deployment.js')
+      const setup = await setupStore.get(input.setupLogin)
+      const item = setup.items.find(i => i.id === input.mcp)
+      plan.argv = setupLoginArgv(item, setup.id, plan.session)
+      const probe = await executeInstaller(client, sandbox, setup, ['codex'], 'probe')
+      if (!probe.installed || !probe.targets.includes('codex') || !probe.items.includes(item.id) || probe.revision !== setup.revision) throw fail('Enable this Setup for Codex in the sandbox first.', 409)
+      plan.argv = setupLoginArgv(item, setup.id, plan.session, probe.mcpNames?.codex?.[item.id])
+      const help = await client.sandbox.exec(sandbox.name, ['codex', 'mcp', 'login', '--help'], {noLoginShell:true,timeoutSecs:10})
+      if (!help.stdout.toString().includes('--no-browser')) throw fail('Update Codex in this image to a version with MCP --no-browser sign-in.',409)
+      plan.workdir = '/sandbox'
+    }
     return { ticket: tickets.issue(plan), session: plan.session }
   }
   return undefined
@@ -144,4 +157,11 @@ async function run(ws, plan) {
     clearInterval(ping)
     if (running()) session.cancel()
   }
+}
+
+// Fixed argv only: neither the browser nor imported configuration supplies a shell command.
+export function setupLoginArgv(item, setupId, session, installedName) {
+  if (session !== 'codex' || !/^[a-f0-9]{24}$/.test(setupId) || !item?.config?.url || !/^[a-zA-Z0-9-]{1,100}$/.test(item.id) || item.disabled || item.issues?.length || item.credentialRef) throw fail('Choose an installed remote MCP for Codex sign-in.')
+  if (installedName !== undefined && !/^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,99}$/.test(installedName)) throw fail('Invalid installed MCP name.')
+  return ['codex', 'mcp', 'login', '--no-browser', installedName ?? `os-${setupId.slice(0,8)}-${item.id.slice(0,8)}`]
 }

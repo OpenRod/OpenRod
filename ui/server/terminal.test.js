@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { controlOf, createTickets, dimension, planSession } from './terminal.js'
+import { controlOf, createTickets, dimension, planSession, setupLoginArgv } from './terminal.js'
 
 const ready = (labels = {}, extra = {}) => ({ name: 'box', phase: 'ready', tty: false, labels, ...extra })
 
@@ -54,4 +54,13 @@ test('frames from the page: bytes are input, resize is checked, the rest is drop
   assert.deepEqual(controlOf(Buffer.from('{"type":"resize","cols":"x","rows":-1}'), false), { type: 'resize', cols: 0, rows: 0 })
   assert.equal(controlOf(Buffer.from('{"type":"stdin","data":"ls"}'), false), null, 'text frames never reach stdin')
   assert.equal(controlOf(Buffer.from('not json'), false), null)
+})
+
+test('MCP sign-in runs only the managed Codex server with a headless callback flow', () => {
+  const item={id:'abcdef12-1234',config:{url:'https://example.com/mcp'}}
+  assert.deepEqual(setupLoginArgv(item,'1234567890abcdef12345678','codex'),['codex','mcp','login','--no-browser','os-12345678-abcdef12'])
+  assert.equal(setupLoginArgv(item,'1234567890abcdef12345678','codex','figma').at(-1),'figma')
+  assert.throws(()=>setupLoginArgv(item,'1234567890abcdef12345678','codex','--bad'), /Invalid/)
+  for(const change of [{id:'; rm -rf'}, {config:{command:'sh'}}, {disabled:true}, {credentialRef:{provider:'p'}}]) assert.throws(()=>setupLoginArgv({...item,...change},'1234567890abcdef12345678','codex'),/Choose/)
+  assert.throws(()=>setupLoginArgv(item,'1234567890abcdef12345678','shell'),/Choose/)
 })
