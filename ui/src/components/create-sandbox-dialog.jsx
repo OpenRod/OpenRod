@@ -6,7 +6,8 @@ import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
-import { Check, ChevronDown, ChevronRight, Terminal, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Laptop, Server, Terminal, X } from "lucide-react"
+import { LocationStep, StepTrail } from "@/components/location-step"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -102,8 +103,8 @@ function GroupField({ org, value, onChange, onCreated, onAddPolicy, setups = [] 
   const counts = Object.fromEntries(org.groups.map((g) => [g.id, org.members?.[g.id]?.length ?? 0]))
   const chosen = org.groups.filter((g) => value.includes(g.id))
   return (
-    <fieldset className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3">
-      <legend className="px-1 text-xs font-medium">Groups <span className="text-muted-foreground">· Required</span></legend>
+    <fieldset className="grid min-w-0 gap-2.5">
+      <legend className="mb-2.5 text-xs font-medium">Groups <span className="text-muted-foreground">· Required</span></legend>
       <GroupPicker multiple required groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
       <motion.p key={value.join(",") || "empty"} initial={reducedMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} aria-live="polite" className="text-[11px] leading-relaxed text-muted-foreground">
         {reach.length
@@ -126,7 +127,7 @@ function nextName(taken, prefix = "sandbox") {
   return ""
 }
 
-export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, ...props }) {
+export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, onRefreshLocations, allowRemote = false, ...props }) {
   const inheritedLocation = useLocation()
   const [selectedContext, setSelectedContext] = React.useState(null)
   const templateLocation = props.initialImageTemplate?.location
@@ -135,8 +136,13 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
   const location = owner
     ? available.find((item) => item.context === owner.context) ?? (inheritedLocation?.context === owner.context ? inheritedLocation : owner)
     : available.find((item) => item.context === selectedContext) ?? inheritedLocation ?? available.find((item) => item.connected) ?? null
+  // Every new sandbox starts by choosing where it runs, unless a template already decides that.
+  const askWhere = !props.initialImageTemplate && (allowRemote || available.length > 1)
+  const [step, setStep] = React.useState("where")
+  const [pendingGateway, setPendingGateway] = React.useState(null)
   React.useEffect(() => {
     if (!props.open) setSelectedContext(null)
+    setStep("where"); setPendingGateway(null)
   }, [props.open])
   const changeLocation = (context) => {
     const next = available.find((item) => item.context === context && item.connected)
@@ -144,14 +150,28 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
     setSelectedContext(context)
     onLocationChange?.(next)
   }
+  // A just-connected host appears in the inventory a moment later; continue as soon as it does.
+  React.useEffect(() => {
+    if (!pendingGateway) return
+    const found = available.find((item) => item.gateway === pendingGateway && item.connected)
+    if (found) { setPendingGateway(null); changeLocation(found.context); setStep("form"); return }
+    const timer = setInterval(() => onRefreshLocations?.(), 1500)
+    return () => clearInterval(timer)
+  }, [pendingGateway, available])
+  const chooser = askWhere && step === "where" ? <LocationStep locations={available} allowRemote={allowRemote} connecting={Boolean(pendingGateway)}
+    onPick={(context) => { changeLocation(context); setStep("form") }}
+    onConnected={(job) => { setPendingGateway(job.gateway); onRefreshLocations?.() }}
+    onCancel={() => props.onOpenChange(false)} /> : null
   return <LocationProvider location={location}>
-    <CreateSandboxForm key={location?.context ?? "default"} {...props} locations={available} onLocationChange={changeLocation} />
+    <CreateSandboxForm key={location?.context ?? "default"} {...props} locations={available} onLocationChange={changeLocation}
+      chooser={chooser} onChangeLocation={askWhere ? () => setStep("where") : undefined} />
   </LocationProvider>
 }
 
-function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate = null, locations, onLocationChange }) {
+function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate = null, locations, onLocationChange, chooser, onChangeLocation }) {
   const api = useApi()
   const location = useLocation()
+  const reduceMotion = useReducedMotion()
   const [sandboxes, setSandboxes] = React.useState([])
   const [providers, setProviders] = React.useState([])
   const [name, setName] = React.useState("")
@@ -312,47 +332,52 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
   return (
     <>
     <Dialog open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value) }}>
-      <DialogContent showCloseButton={!busy && !showBuild} className={`max-h-[90svh] gap-4 bg-transparent p-0 ring-0 ${showBuild ? "sm:max-w-md lg:max-w-[960px] lg:grid-cols-[28rem_minmax(0,1fr)]" : "sm:max-w-md"}`}>
-        <form onSubmit={submit} className={`flex min-h-0 min-w-0 flex-col gap-4 rounded-xl bg-popover p-4 ring-1 ring-foreground/10 ${showBuild ? "max-h-[52svh] lg:max-h-[90svh]" : "max-h-[90svh]"}`}>
-          <DialogHeader className="shrink-0">
-            <DialogTitle>New sandbox</DialogTitle>
-          </DialogHeader>
-          {locations.length > 0 && !initialImageTemplate ? <div className="grid shrink-0 gap-1.5">
-            <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
-            <Select value={location?.context ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: item.context, label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
-              <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
-              <SelectContent>{locations.map((item) => <SelectItem key={item.context} value={item.context} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
-            </Select>
-          </div> : <LocationBadge location={location} />}
-          {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to create a sandbox.</p>}
-
+      <DialogContent showCloseButton={!busy && !showBuild} className={`max-h-[90svh] gap-4 bg-transparent p-0 ring-0 ${chooser ? "sm:max-w-3xl" : showBuild ? "sm:max-w-md lg:max-w-[960px] lg:grid-cols-[28rem_minmax(0,1fr)]" : "sm:max-w-4xl"}`}>
+        {chooser ?? <>
+        <form onSubmit={submit} className={`@container flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-popover ring-1 ring-foreground/10 ${showBuild ? "max-h-[52svh] lg:max-h-[90svh]" : "max-h-[90svh]"}`}>
           <Tabs value={mode} onValueChange={(value) => { if (!busy) { setMode(value); setError(null) } }} className="contents">
-            <TabsList className="w-full shrink-0" aria-label="Sandbox creation method">
-              <TabsTrigger value="quick" disabled={busy}>Quick setup</TabsTrigger>
-              <TabsTrigger value="template" disabled={busy}>From template</TabsTrigger>
-            </TabsList>
-          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto overscroll-contain px-1">
-          <fieldset disabled={busy || location?.connected === false} className="grid min-w-0 gap-4 pb-3">
+          <DialogHeader className="shrink-0 gap-3 px-5 pt-5 pb-4 @3xl:px-7 @3xl:pt-6">
+            {onChangeLocation && <div className="pr-8"><StepTrail step={2} /></div>}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pr-8">
+              <DialogTitle>New sandbox</DialogTitle>
+              {onChangeLocation ? <span className="flex items-center gap-1.5 rounded-full border border-border bg-muted/30 py-0.5 pr-1 pl-2.5 text-[11px] text-muted-foreground">
+                {location?.remote ? <Server aria-hidden="true" className="size-3" /> : <Laptop aria-hidden="true" className="size-3" />}
+                <span className="max-w-40 truncate text-foreground">{location?.remote ? locationLabel(location).replace(/^SSH · /, "") : "This computer"}</span>
+                <Button type="button" variant="ghost" size="sm" className="h-5 rounded-full px-2 text-[11px]" disabled={busy} onClick={onChangeLocation}>Change</Button>
+              </span> : !initialImageTemplate && locations.length > 0 ? null : <LocationBadge location={location} />}
+              <TabsList className="ml-auto w-fit" aria-label="Sandbox creation method">
+                <TabsTrigger value="quick" disabled={busy} className="px-3 text-xs">Quick setup</TabsTrigger>
+                <TabsTrigger value="template" disabled={busy} className="px-3 text-xs">From template</TabsTrigger>
+              </TabsList>
+            </div>
+            {!onChangeLocation && locations.length > 0 && !initialImageTemplate && <div className="grid gap-1.5">
+              <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
+              <Select value={location?.context ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: item.context, label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
+                <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
+                <SelectContent>{locations.map((item) => <SelectItem key={item.context} value={item.context} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>}
+            {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to create a sandbox.</p>}
+          </DialogHeader>
 
+          <div className="grid min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border @3xl:grid-cols-[minmax(0,1fr)_19rem] @3xl:overflow-hidden">
+          <fieldset disabled={busy || location?.connected === false} className="contents">
+            <motion.div initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              className="grid min-w-0 content-start gap-6 p-5 @3xl:overflow-y-auto @3xl:p-7">
             <div className="grid gap-1.5">
               <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
-              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="font-mono text-xs" required
+              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="h-10 font-mono text-sm" required
                 pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
-
-            {org ? <GroupField org={org} value={group} onChange={setGroup} setups={(mode === "quick" ? setupIds : chosenImage?.recipe?.setups ?? []).flatMap((id) => [id, setupSources[id]].filter(Boolean))}
-              onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
-              onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
-              : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}
 
             <TabsContent value="quick" className="grid gap-4">
               <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-xs font-medium">Agents</legend>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
                   {PRIMARY_QUICK_AGENTS.map((agent) => (
                     <label key={agent.id} className="relative min-w-0">
                       <input type="checkbox" checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} disabled={busy} className="peer sr-only" />
-                      <span className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
+                      <span className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-all hover:-translate-y-px hover:bg-muted/50 hover:shadow-sm motion-reduce:hover:translate-y-0 @3xl:min-h-14 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
                         <img src={agent.logo} alt="" className="size-4 shrink-0 object-contain" />
                         <span className="min-w-0 flex-1">{agent.name}</span>
                         {agentIds.includes(agent.id) && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
@@ -421,14 +446,6 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
               </div>
             </TabsContent>
 
-            {(mode === "quick" || (hasSetups && (missingSetupAgent || setupAgentIds.includes('aider')))) && <div className="space-y-3 border-t pt-4">
-              {mode === "quick" && <SetupPicker autoPrepare automaticAccess preparationContext="sandbox" accessReview={setupAccessReview} onAccessReview={setSetupAccessReview} value={setupIds} onChange={setSetupIds} />}
-              {hasSetups && missingSetupAgent && <p role="alert" className="text-xs text-destructive">
-                {setupAgentIds.includes('aider') ? 'Setup installation is unavailable for Aider. Choose another agent.' : mode === "quick" ? 'Choose an agent to use this Setup.' : 'Choose a template with a supported agent to use this Setup.'}
-              </p>}
-              {hasSetups && !missingSetupAgent && setupAgentIds.includes('aider') && <p className="text-xs text-muted-foreground">Setup installation is unavailable for Aider.</p>}
-            </div>}
-
             {mode === "template" && <div className="grid gap-1.5">
               <span className="text-xs font-medium">Providers</span>
               {providers.length ? (
@@ -450,7 +467,23 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
 
             </div>}
 
-            <p className="text-[11px] text-muted-foreground">Agent sign-in and service connections are included automatically. Network rules from all selected groups combine. Block rules take precedence.</p>
+            {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
+            </motion.div>
+
+            <motion.aside initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
+              className="grid min-w-0 content-start gap-6 border-t border-border bg-muted/25 p-5 @3xl:overflow-y-auto @3xl:border-t-0 @3xl:border-l @3xl:p-6">
+            {org ? <GroupField org={org} value={group} onChange={setGroup} setups={(mode === "quick" ? setupIds : chosenImage?.recipe?.setups ?? []).flatMap((id) => [id, setupSources[id]].filter(Boolean))}
+              onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
+              onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
+              : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}
+
+            {(mode === "quick" || (hasSetups && (missingSetupAgent || setupAgentIds.includes('aider')))) && <div className="space-y-3">
+              {mode === "quick" && <SetupPicker autoPrepare automaticAccess preparationContext="sandbox" accessReview={setupAccessReview} onAccessReview={setSetupAccessReview} value={setupIds} onChange={setSetupIds} />}
+              {hasSetups && missingSetupAgent && <p role="alert" className="text-xs text-destructive">
+                {setupAgentIds.includes('aider') ? 'Setup installation is unavailable for Aider. Choose another agent.' : mode === "quick" ? 'Choose an agent to use this Setup.' : 'Choose a template with a supported agent to use this Setup.'}
+              </p>}
+              {hasSetups && !missingSetupAgent && setupAgentIds.includes('aider') && <p className="text-xs text-muted-foreground">Setup installation is unavailable for Aider.</p>}
+            </div>}
 
             <div className="grid min-w-0">
               <SetupSection title="Add project files" summary={filesSummary}>
@@ -502,15 +535,12 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                   </SetupSection>}
 
             </div>
-
-            {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
-
+            </motion.aside>
           </fieldset>
           </div>
 
-          </Tabs>
-          {progress && <p role="status" className="text-xs text-muted-foreground">{progress}</p>}
-          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none bg-popover px-0 pb-0">
+          <DialogFooter className="mx-0 mb-0 shrink-0 items-center rounded-none border-t border-border bg-popover px-5 py-4 @3xl:px-7">
+            {progress && <p role="status" className="mr-auto text-xs text-muted-foreground">{progress}</p>}
             <Button type="button" variant="ghost" disabled={busy && !preparing} onClick={() => {
               if (preparing) {
                 preparation.current?.abort()
@@ -522,6 +552,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
               {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
             </Button>
           </DialogFooter>
+          </Tabs>
         </form>
         {showBuild && <section id="quick-build-logs" aria-label="Build logs" className="flex h-[32svh] min-h-0 min-w-0 flex-col gap-3 rounded-xl bg-popover p-4 ring-1 ring-foreground/10 lg:h-[min(36rem,90svh)]">
           <div className="flex items-center justify-between gap-3">
@@ -533,6 +564,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
           <pre ref={buildLogs} tabIndex={0} aria-label="Build output" onScroll={(event) => { const el = event.currentTarget; followLogs.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40 }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/30 p-3 font-mono text-[10px] leading-relaxed">{build?.logs || (build?.status === "ready" ? "Using a ready image template. No build was needed." : "Waiting for build output…")}</pre>
           {(build?.error || error) && <p role="alert" className="text-xs text-destructive">{build?.error || error}</p>}
         </section>}
+        </>}
       </DialogContent>
     </Dialog>
     <PolicyDialog open={Boolean(policyDraft)} initial={policyDraft} onOpenChange={(value) => { if (!value) setPolicyDraft(null) }}

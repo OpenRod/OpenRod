@@ -1,5 +1,9 @@
 import { ThemeSwitcher } from "@/components/theme-switcher"
-import { Activity, Package, Box, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
+import * as React from "react"
+import { Activity, Package, Box, DoorOpen, Layers3, Inbox, KeyRound, Network, Server, Users } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { api } from "@/lib/api"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -134,9 +138,38 @@ export function AppSidebar({ view, onNavigate }) {
                 ))}
               </dl>
             ) : overview?.error ? <p className="font-mono text-[10px] text-muted-foreground">{overview.error}</p> : null}
+            <RemoteMachine />
           </PopoverContent>
         </Popover>
       </SidebarFooter>
     </Sidebar>
   )
+}
+
+// The SSH machine is a second location next to the gateway above; this is where it is disconnected.
+function RemoteMachine() {
+  const [remote, setRemote] = React.useState(null)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState(null)
+  React.useEffect(() => {
+    let alive = true
+    api.connections().then((next) => { if (alive) setRemote(next.active) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  if (!remote || remote.status !== "connected") return null
+  async function disconnect() {
+    setBusy(true); setError(null)
+    try { await api.disconnectRemote(); setRemote(null) } catch (reason) { setError(reason.message) } finally { setBusy(false) }
+  }
+  return <div className="grid gap-2 border-t border-border pt-3">
+    <div className="flex items-center gap-2">
+      <Server aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{remote.host}</span>
+        <span className="block text-[10px] text-muted-foreground">SSH machine · connected</span>
+      </span>
+      <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" disabled={busy} onClick={disconnect}>{busy ? "Disconnecting…" : "Disconnect"}</Button>
+    </div>
+    {error && <p role="alert" className="text-[10px] text-destructive">{error}</p>}
+  </div>
 }
