@@ -1,3 +1,4 @@
+import { groupsFromLabels } from "../../shared/group-membership.js"
 // Gateway phases folded onto the OpenRod Desk status palette. The palette has five
 // states and the gateway ten; the fold keeps each colour meaning one thing.
 export const STATUS = {
@@ -44,7 +45,7 @@ export function summarize(sandboxes) {
 export const GROUP_LABEL = "openshell.console/group"
 
 export function groupKey(sandbox, by) {
-  if (by === "group") return sandbox.labels?.[GROUP_LABEL] ?? "No group"
+  if (by === "group") return groupsFromLabels(sandbox.labels).sort().join(", ") || "No group"
   if (by === "image") return imageName(sandbox.image, sandbox.imageTemplateName)
   if (by === "provider") return sandbox.providers.length ? sandbox.providers.join(", ") : "No provider"
   return PHASE_LABEL[sandbox.phase] ?? "Unknown"

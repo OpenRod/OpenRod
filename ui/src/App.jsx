@@ -5,7 +5,6 @@ import { SandboxesView } from "@/components/sandboxes-view"
 import { ActivityView } from "@/components/activity-view"
 import { GroupsView } from "@/components/groups-view"
 import { NetworkView } from "@/components/network-view"
-import { PoliciesView } from "@/components/policies-view"
 import { SecretsView } from "@/components/secrets-view"
 import { TemplatesView } from "@/components/image-templates-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
@@ -19,7 +18,6 @@ const TITLES = {
   sandboxes: "Sandboxes",
   activity: "Activity",
   groups: "Groups",
-  policies: "Policies",
   egress: "Network",
   ingress: "Network",
   secrets: "Secrets",
@@ -54,6 +52,10 @@ function terminalFromLocation() {
 
 function viewFromLocation() {
   const view = window.location.hash.slice(1)
+  if (view === "policies") {
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#egress`)
+    return "egress"
+  }
   if (view === "guardrails") {
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#activity`)
     return "activity"
@@ -105,7 +107,6 @@ export function App() {
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} />}
           {view === "activity" && <ActivityView />}
           {view === "groups" && <GroupsView onNavigate={navigate} />}
-          {view === "policies" && <PoliciesView />}
           {(view === "egress" || view === "ingress") && <NetworkView tab={view} onNavigate={navigate} />}
           {view === "secrets" && <SecretsView />}
           {view === "templates" && <TemplatesView />}

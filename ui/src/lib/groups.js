@@ -1,3 +1,4 @@
+import { groupIds } from "../../shared/group-membership.js"
 import { appliesTo } from "@/lib/egress"
 
 // Groups collect sandboxes so egress policies can follow them. Membership is
@@ -6,7 +7,7 @@ import { appliesTo } from "@/lib/egress"
 export const groupId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48).replace(/-$/, "")
 
 // The group a sandbox is in, from the console's overview.
-export const groupFor = (org, name) => org?.assignments?.[name] ?? null
+export const groupFor = (org, name) => groupIds(org?.assignments?.[name])
 
 // The policies that reach one sandbox, whether or not it exists yet.
 export const policiesFor = (policies, sandbox) => (policies ?? []).filter((p) => appliesTo(p, sandbox))
