@@ -238,3 +238,22 @@ test('usage returns every blocker across pages and permits deletion once they ar
   assert.equal((await deleteImageTemplate(client, 'test')).ok, true)
   assert.deepEqual(calls, ['delete'])
 })
+
+test('image builds select the inspected engine and native platform despite an inherited AMD default', async () => {
+  const { buildImage } = await import('./image-templates.js')
+  const previous = process.env.DOCKER_DEFAULT_PLATFORM
+  process.env.DOCKER_DEFAULT_PLATFORM = 'linux/amd64'
+  try {
+    const calls = []
+    const engine = { endpoint: 'unix:///test/docker.sock', architecture: 'arm64' }
+    await buildImage('test/native:1', '/test/context', engine, {}, async (args, options) => calls.push({ args, options }))
+    assert.equal(calls.length, 1)
+    const { args, options } = calls[0]
+    assert.equal(args[args.indexOf('--platform') + 1], 'linux/arm64')
+    assert.equal(options.engine, engine)
+    assert.equal(args.at(-1), '/test/context')
+  } finally {
+    if (previous === undefined) delete process.env.DOCKER_DEFAULT_PLATFORM
+    else process.env.DOCKER_DEFAULT_PLATFORM = previous
+  }
+})

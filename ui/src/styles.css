@@ -223,6 +223,20 @@
   button, [role="button"] { @apply cursor-pointer; }
 }
 
+@keyframes sidebar-icon-jump {
+  0%, 100% { transform: translateY(0) scale(1); }
+  15% { transform: translateY(0) scale(1.08, 0.92); }
+  45% { transform: translateY(-8px) scale(0.96, 1.04); }
+  75% { transform: translateY(0) scale(1.06, 0.94); }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .sidebar-icon-hover:hover .sidebar-icon {
+    transform-origin: center bottom;
+    animation: sidebar-icon-jump 500ms ease-in-out;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

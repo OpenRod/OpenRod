@@ -1,4 +1,5 @@
 import { SetupsView } from "@/components/setups-view"
+import { useCloudMode } from "./auth-gate"
 import * as React from "react"
 import { AlertTriangle, Box, Copy, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Terminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -13,6 +14,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
 import { CopyCommand } from "@/components/copy-command"
+import { ContinueInCloud, ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
@@ -42,8 +44,10 @@ function Section({ title, icon: Icon, children, aside, className }) {
 // keep retrying while the sheet is open if that first request fails.
 let editorsRequest
 function useEditors() {
+  const cloud = useCloudMode()
   const [editors, setEditors] = React.useState([])
   React.useEffect(() => {
+    if (cloud) return
     let cancelled = false
     let timer
     const load = () => {
@@ -53,11 +57,12 @@ function useEditors() {
     }
     load()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [])
+  }, [cloud])
   return editors
 }
 
-function OpenIn({ name, editors }) {
+// Cloud sandboxes have no local SSH or editors, so only the browser terminal applies.
+function OpenIn({ name, editors, cloud }) {
   const [connection, setConnection] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [opening, setOpening] = React.useState(false)
@@ -65,13 +70,14 @@ function OpenIn({ name, editors }) {
   const [config, setConfig] = React.useState(null)
 
   React.useEffect(() => {
+    if (cloud) return
     let cancelled = false
     setConnection(null); setError(null); setConfig(null)
     api.sshConnection(name)
       .then((value) => { if (!cancelled) setConnection(value) })
       .catch((e) => { if (!cancelled) setError(e.message) })
     return () => { cancelled = true }
-  }, [name])
+  }, [name, cloud])
 
   const plan = connection?.modes.exec
   const unavailable = error || (!connection ? "Checking connection…"
@@ -113,6 +119,12 @@ function OpenIn({ name, editors }) {
     finally { setLoadingConfig(false) }
   }
 
+  const browser = <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} render={<a href={terminalHref(name)} target="_blank" rel="noreferrer" />}>
+    <Globe className="size-3.5" />Browser
+  </Button>
+
+  if (cloud) return <Section title="Open in"><div className="grid grid-cols-2 gap-1.5">{browser}</div></Section>
+
   return (
     <>
       <Section title="Open in">
@@ -126,9 +138,7 @@ function OpenIn({ name, editors }) {
               <img src={`/logos/${editor.id}.svg`} alt="" className="size-3.5 dark:invert" />{editor.label}
             </Button>
           })}
-          <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} render={<a href={terminalHref(name)} target="_blank" rel="noreferrer" />}>
-            <Globe className="size-3.5" />Browser
-          </Button>
+          {browser}
         </div>
         <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3">
           <Button variant="outline" size="sm" className="justify-start text-xs font-normal text-muted-foreground" disabled={!plan} onClick={copyCommand}>
@@ -173,6 +183,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const cloud = useCloudMode()
   const editors = useEditors()
   const summary = live.sandboxes?.find((s) => s.name === name)
 
@@ -277,7 +288,8 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && !live.demo && <OpenIn key={name} name={name} editors={editors} />}
+                    {phase === "ready" && !live.demo && <OpenIn key={name} name={name} editors={editors} cloud={cloud} />}
+                    {!live.demo && phase === "ready" && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}

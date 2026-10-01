@@ -7,6 +7,8 @@ import { openshellApi } from "./server/api.js";
 // The console talks to the gateway only through ./server, which holds the
 // operator's mTLS bundle. Bound to loopback: this surface is the gateway's
 // full authority and is never meant to be reachable from the LAN.
+if (process.env.OPENROD_MODE && process.env.OPENROD_MODE !== 'local' && process.env.OPENROD_BUILD !== '1') throw new Error('Cloud mode requires npm start, not the Vite development server')
+
 export default defineConfig({
   plugins: [react(), tailwindcss(), openshellApi()],
   resolve: {
