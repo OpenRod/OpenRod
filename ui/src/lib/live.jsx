@@ -46,23 +46,35 @@ export function LiveProvider({ children }) {
   }, [addEvents])
 
   React.useEffect(() => {
-    loadOverview(); loadHistory()
-    const source = new EventSource("/api/os/stream")
+    let source, slow, cancelled = false
     const resetHistory = () => {
       cacheEpoch.current++
       seen.current.clear(); setEvents([]); setActivityRevision((n) => n + 1)
       loadHistory()
     }
-    source.onopen = () => { setConnection("live"); resetHistory() }
-    source.addEventListener("activity-deleted", (e) => { setCollection(JSON.parse(e.data).coverage); resetHistory() })
-    source.onerror = () => setConnection("reconnecting")
-    source.addEventListener("sandboxes", (e) => { setConnection("live"); setSandboxes(JSON.parse(e.data)) })
-    source.addEventListener("log", (e) => addEvents([JSON.parse(e.data)]))
-    source.addEventListener("collection", (e) => setCollection(JSON.parse(e.data)))
-    source.addEventListener("gateway-health", () => setConnection("live"))
-    source.addEventListener("gateway-error", () => setConnection("gateway-down"))
-    const slow = setInterval(() => { loadOverview() }, 15000)
-    return () => { source.close(); clearInterval(slow) }
+    api.context().then(async (selection) => {
+      if (cancelled) return
+      if (!selection.configured) {
+        setConnection("setup-required")
+        setSandboxes([])
+        return
+      }
+      loadOverview(); loadHistory()
+      slow = setInterval(loadOverview, 15000)
+      const context = await api.contextKey()
+      if (cancelled) return
+      source = new EventSource(`/api/os/stream?context=${encodeURIComponent(context)}`)
+      source.onopen = () => { setConnection("live"); resetHistory() }
+      source.addEventListener("context-changed", () => window.location.reload())
+      source.addEventListener("activity-deleted", (e) => { setCollection(JSON.parse(e.data).coverage); resetHistory() })
+      source.onerror = () => setConnection("reconnecting")
+      source.addEventListener("sandboxes", (e) => { setConnection("live"); setSandboxes(JSON.parse(e.data)) })
+      source.addEventListener("log", (e) => addEvents([JSON.parse(e.data)]))
+      source.addEventListener("collection", (e) => setCollection(JSON.parse(e.data)))
+      source.addEventListener("gateway-health", () => setConnection("live"))
+      source.addEventListener("gateway-error", () => setConnection("gateway-down"))
+    }).catch(() => { if (!cancelled) setConnection("gateway-down") })
+    return () => { cancelled = true; source?.close(); clearInterval(slow) }
   }, [addEvents, loadHistory, loadOverview])
 
   const value = React.useMemo(() => ({

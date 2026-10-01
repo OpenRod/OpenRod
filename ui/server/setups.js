@@ -3,6 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { discover, readSkill, publicItem, hash, fail } from './setup-discovery.js'
+import { scopedStateDirectory } from './paths.js'
 
 export const usableSetup = (setup) => ({ ...setup, items: setup.items.filter(i => !i.disabled && !i.issues.length && (i.kind === 'skill' || i.config)) })
 export const SETUP_ID = /^[a-f0-9]{24}$/
@@ -10,7 +11,7 @@ const TTL = 15 * 60_000
 export const MAX_SELECTION = 64 * 1024 * 1024
 // Tokens pin the reviewed snapshot. The browser cannot submit arbitrary paths,
 // executable configuration or replacement skill contents to the save endpoint.
-export function createSetupStore({ home = os.homedir(), dir = path.resolve(import.meta.dirname, '../.state/setups'), now = Date.now, maxSelection = MAX_SELECTION, state = { scans: new Map(), previews: new Map(), edits: Promise.resolve() } } = {}) {
+export function createSetupStore({ home = os.homedir(), dir = path.join(scopedStateDirectory(), 'setups'), now = Date.now, maxSelection = MAX_SELECTION, state = { scans: new Map(), previews: new Map(), edits: Promise.resolve() } } = {}) {
   const { scans, previews } = state
   const expire = (map) => { for (const [key, value] of map) if (value.expires < now()) map.delete(key); if (map.size >= 20) throw fail('Too many pending imports. Finish one or wait 15 minutes.', 429) }
   const token = (map, id) => { const value = map.get(id); if (!value || value.expires < now()) throw fail('This preview expired. Scan and review again.', 409); return value }
@@ -120,11 +121,20 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
   }
 }
 // Keep import tokens and the edit queue across reloads, but always recreate methods.
-const stateKey = Symbol.for('openshell.console.setup-store-state.v1')
-const state = globalThis[stateKey] ??= { scans: new Map(), previews: new Map(), edits: Promise.resolve() }
-export const setupStore = createSetupStore({ state })
+const stateKey = Symbol.for('openshell.console.setup-store-contexts.v1')
+const states = globalThis[stateKey] ??= new Map()
+export function getSetupStore() {
+  const dir = path.join(scopedStateDirectory(), 'setups')
+  let state = states.get(dir)
+  if (!state) {
+    state = { scans: new Map(), previews: new Map(), edits: Promise.resolve() }
+    states.set(dir, state)
+  }
+  return createSetupStore({ dir, state })
+}
 export async function resolveSetups(ids = []) {
   if (!Array.isArray(ids) || ids.length > 8 || new Set(ids).size !== ids.length) throw fail('Choose up to eight unique Setups.')
+  const setupStore = getSetupStore()
   return Promise.all(ids.map((id) => setupStore.get(id)))
 }
 // Each saved Setup keeps one managed egress policy in step with its items.
@@ -135,6 +145,7 @@ async function syncEgress(id) {
 }
 export async function setupRoute(method, parts, input) {
   if (parts[0] !== 'setups') return undefined
+  const setupStore = getSetupStore()
   if (method === 'GET' && parts.length === 3 && parts[1] === 'preparations') return (await import('./setup-preparation.js')).preparationStatus(parts[2])
   if (method === 'POST' && parts.length === 4 && parts[1] === 'preparations' && parts[3] === 'cancel') return (await import('./setup-preparation.js')).cancelPreparation(parts[2])
   if (method === 'POST' && parts.length === 3 && parts[2] === 'prepare-launch') return (await import('./setup-preparation.js')).prepareLaunch(setupStore, parts[1], input)

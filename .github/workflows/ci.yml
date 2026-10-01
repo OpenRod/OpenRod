@@ -39,3 +39,10 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: node server/cli.js --version
+      - run: npm pack --ignore-scripts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openshell-console-${{ matrix.os }}-node${{ matrix.node }}
+          path: ui/openshell-console-*.tgz
+          if-no-files-found: error
