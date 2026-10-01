@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { terminalLaunchError } from './local-terminal.js'
+import { createTerminalQueue, terminalLaunchError } from './local-terminal.js'
 
 test('only Automation denial is reported as an Automation permission issue', () => {
   assert.match(terminalLaunchError(new Error('failed'), 'Not authorized (-1743)'), /Automation/)
@@ -9,5 +9,21 @@ test('only Automation denial is reported as an Automation permission issue', () 
 })
 
 test('a timeout is reported separately from permissions', () => {
-  assert.equal(terminalLaunchError({ killed: true }), 'Terminal took too long to respond. Check the new window before trying again.')
+  assert.equal(terminalLaunchError({ killed: true }), 'Terminal took too long to respond. Check the new tab before trying again.')
+})
+
+test('overlapping launches wait for discovery and recover after a failed launch', async () => {
+  const queue = createTerminalQueue()
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const events = []
+  const first = queue(async () => { events.push('first'); await gate; throw new Error('denied') })
+  const rejected = assert.rejects(first, /denied/)
+  const second = queue(() => { events.push('second'); return 'opened' })
+  await Promise.resolve()
+  assert.deepEqual(events, ['first'])
+  release()
+  await rejected
+  assert.equal(await second, 'opened')
+  assert.deepEqual(events, ['first', 'second'])
 })
