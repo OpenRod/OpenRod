@@ -79,6 +79,16 @@ export async function gateway() {
     assert.ok(state.rules.etl.egress_shared)
     overview = await orgRoute('GET', ['org'])
     assert.deepEqual(overview.assignments.web, ['data', 'frontend', 'extra'])
+    // web and etl inherit only "data" and "shared". Deleting both at once must
+    // leave one: the second request has to see the first one's deletion.
+    const deletions = await Promise.allSettled(['data', 'shared'].map((id) => orgRoute('POST', ['egress', 'policies', id, 'delete'], {})))
+    assert.equal(deletions.filter((d) => d.status === 'fulfilled').length, 1)
+    assert.match(deletions.find((d) => d.status === 'rejected').reason.message, /last network rule/)
+    const kept = ['data', 'shared'][deletions.findIndex((d) => d.status === 'rejected')]
+    const { listPolicies } = await import(pathToFileURL(path.join(root, 'server/egress.js')))
+    assert.deepEqual((await listPolicies()).map((p) => p.id), [kept])
+    assert.deepEqual(Object.keys(state.rules.web), [`egress_${kept}`])
+    assert.deepEqual(Object.keys(state.rules.etl), [`egress_${kept}`])
     await write('policies/org/groups/frontend.json', { id: 'frontend', template: 'locked-down' })
     await write('policies/org/groups/data.json', { id: 'data', template: 'claude' })
     await assert.rejects(planSandbox({ groups: ['frontend', 'data'], requireGroup: true }), /different base policies/)
