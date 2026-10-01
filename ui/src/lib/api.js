@@ -8,6 +8,7 @@ async function request(path, { method = "GET", body } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const payload = await response.json().catch(() => ({}))
+  if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
   if (!response.ok) throw new Error(payload.error ?? `Request failed (${response.status})`)
   return payload
 }
@@ -29,6 +30,9 @@ export const api = {
   enableSetup: (id, sandbox, token, approveAccess = false) => request(`/setups/${id}/enable`, { method: 'POST', body: { sandbox, token, approveAccess } }),
   removeSetup: (id, sandbox, token) => request(`/setups/${id}/remove`, { method: 'POST', body: { sandbox, token } }),
   setupJobs: (id) => request(`/setups/${id}/jobs`),
+  cloudExport: (name) => request(`/cloud-export?name=${encodeURIComponent(name)}`),
+  importCloud: (bundle) => request("/cloud-import", { method: "POST", body: bundle }),
+  cloudTransfer: (name, ticket) => request("/cloud-transfer", { method: "POST", body: { name, ticket } }),
   previewActivityDeletion: (body) => request('/activity/delete-preview', { method: 'POST', body }),
   deleteActivity: (token) => request('/activity/delete', { method: 'POST', body: { token } }),
   activityDestinations: () => request('/activity-destinations'),
@@ -92,7 +96,8 @@ export const api = {
       method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1" }, body: file, signal,
     })
     const payload = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(payload.error ?? `Upload failed (${response.status})`)
+    if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
+  if (!response.ok) throw new Error(payload.error ?? `Upload failed (${response.status})`)
     return payload
   },
   commitUpload: (sandbox, id, dir) => request(`/files/${encodeURIComponent(sandbox)}/uploads/${id}/commit`, { method: "POST", body: { dir } }),

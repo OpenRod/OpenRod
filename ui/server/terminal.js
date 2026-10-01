@@ -1,3 +1,4 @@
+import { identityContext } from './security.js'
 // Browser terminals. xterm.js runs in the page, a WebSocket ends here, and the
 // gateway's interactive exec sits behind it: the same RPC that
 // `openshell sandbox exec --tty` uses, so nothing new reaches the sandbox.
@@ -51,11 +52,11 @@ export function createTickets({ ttl = TICKET_TTL_MS, now = Date.now } = {}) {
       setTimeout(() => tickets.delete(ticket), ttl).unref?.()
       return ticket
     },
-    claim(ticket) {
+    claim(ticket, principal) {
       const plan = ID.test(ticket ?? '') ? tickets.get(ticket) : undefined
       if (!plan) return null
       tickets.delete(ticket)
-      return plan.expires > now() ? plan : null
+      return plan.expires > now() && plan.principal === principal ? plan : null
     },
     get size() { return tickets.size },
   }
@@ -81,7 +82,7 @@ export async function terminalRoute(method, parts, input) {
       if (!help.stdout.toString().includes('--no-browser')) throw fail('Update Codex in this image to a version with MCP --no-browser sign-in.',409)
       plan.workdir = '/sandbox'
     }
-    return { ticket: tickets.issue(plan), session: plan.session }
+    return { ticket: tickets.issue({ ...plan, principal: identityContext.getStore()?.uid }), session: plan.session }
   }
   return undefined
 }
@@ -95,12 +96,12 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
 
 // Handles the console's own upgrade requests and leaves every other one (Vite's
 // HMR socket) alone. `isLocal` is the same check the HTTP routes apply.
-export function terminalUpgrade(req, socket, head, isLocal) {
+export function terminalUpgrade(req, socket, head, isLocal, principal) {
   const url = new URL(req.url ?? '/', 'http://local')
   if (url.pathname !== TERMINAL_PATH) return false
   if (!isLocal(req)) { refuse(socket, 403); return true }
-  const plan = tickets.claim(url.searchParams.get('ticket'))
-  if (!plan) { refuse(socket, 403); return true }
+  const plan = tickets.claim(url.searchParams.get('ticket'), principal)
+  if (!plan || plan.principal !== principal) { refuse(socket, 403); return true }
   wss.handleUpgrade(req, socket, head, (ws) => { run(ws, plan).catch(() => { try { ws.close(1011) } catch {} }) })
   return true
 }

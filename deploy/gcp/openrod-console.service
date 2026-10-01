@@ -1,0 +1,30 @@
+[Unit]
+Description=OpenRod customer console
+After=network-online.target docker.service openrod-metadata-guard.service
+Wants=network-online.target
+Requires=docker.service openrod-metadata-guard.service
+RequiresMountsFor=/var/lib/openrod
+
+[Service]
+Type=simple
+User=openrod
+Group=openrod
+SupplementaryGroups=docker
+WorkingDirectory=/var/lib/openrod/app/ui
+Environment=OPENROD_MODE=cloud
+EnvironmentFile=/etc/openrod/console.env
+ExecStart=/usr/local/bin/node server/start.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LimitNOFILE=65536
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

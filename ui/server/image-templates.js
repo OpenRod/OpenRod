@@ -71,6 +71,12 @@ async function inspect(reference, engine) {
   if (image.Architecture !== engine.architecture) throw fail(`This image is ${image.Architecture}; the local engine uses ${engine.architecture}. Choose a matching image.`)
 }
 
+export function buildImage(image, context, engine, job, execute = run, { networkNone = false } = {}) {
+  // Match the engine that will run this image, even when the operator's shell
+  // defaults Docker builds to a different platform or context.
+  return execute(['build', ...(networkNone ? ['--network=none'] : []), '--platform', `linux/${engine.architecture}`, '--progress=plain', '--tag', image, context], { engine, job, timeout: 30 * 60_000 })
+}
+
 export function templateView(t) {
   const meta = t.metadata ?? {}
   const workload = t.spec?.workload ?? {}
@@ -167,7 +173,7 @@ async function start(input) {
         }
         await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
         image = `${BUILT_PREFIX}${name}:${Date.now().toString(36)}`
-        await run(['build', ...(recipe.source === 'image' ? ['--network=none'] : []), '--progress=plain', '--tag', image, temp], { job, engine, timeout: 30 * 60_000 })
+        await buildImage(image, temp, engine, job, run, { networkNone: recipe.source === 'image' })
       } else {
         // OpenShell resolves the reference itself; check it once so a typo or
         // the wrong CPU architecture fails here rather than at launch.

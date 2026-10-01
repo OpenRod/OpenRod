@@ -64,3 +64,12 @@ test('MCP sign-in runs only the managed Codex server with a headless callback fl
   for(const change of [{id:'; rm -rf'}, {config:{command:'sh'}}, {disabled:true}, {credentialRef:{provider:'p'}}]) assert.throws(()=>setupLoginArgv({...item,...change},'1234567890abcdef12345678','codex'),/Choose/)
   assert.throws(()=>setupLoginArgv(item,'1234567890abcdef12345678','shell'),/Choose/)
 })
+
+test('cloud terminal tickets cannot be claimed by a different user or anonymously', () => {
+  const tickets = createTickets()
+  const ticket = tickets.issue({ name: 'box', principal: 'alice' })
+  assert.equal(tickets.claim(ticket, 'bob'), null)
+  assert.equal(tickets.claim(ticket, 'alice'), null, 'a rejected ticket is consumed')
+  assert.equal(tickets.claim(tickets.issue({ name: 'box', principal: 'alice' })), null)
+  assert.equal(tickets.claim(tickets.issue({ name: 'box', principal: 'alice' }), 'alice').name, 'box')
+})
