@@ -383,7 +383,6 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
           <Button variant="ghost" size="sm" onClick={() => onOpen(forSandbox)}>Rules &amp; history<ArrowUpRight className="size-3" /></Button>
         </>}
         <Button variant="ghost" size="icon-sm" aria-label="Refresh egress" onClick={onRefresh}><RefreshCw className="size-3.5" /></Button>
-        <Button variant="outline" size="sm" onClick={() => onOpen("global")}><Network className="size-3.5" />Global policy</Button>
         <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus className="size-3.5" />Add rule</Button>
       </div>
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
@@ -601,56 +600,6 @@ function BackLink({ onClick }) {
     <button onClick={onClick} className="group flex items-center gap-1.5 text-[12.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
       <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />All sandboxes
     </button>
-  )
-}
-
-function GlobalPanel({ onBack }) {
-  const [data, setData] = React.useState(null)
-  const [confirm, setConfirm] = React.useState(false)
-  const load = React.useCallback(() => api.globalPolicy().then(setData).catch((e) => setData({ error: e.message })), [])
-  React.useEffect(() => { load() }, [load])
-  return (
-    <div className="space-y-6 px-4 py-5 sm:px-6">
-      <BackLink onClick={onBack} />
-      {!data ? <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p> : data.error ? <p className="py-16 text-center text-sm text-muted-foreground">{data.error}</p> : (
-        <>
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight">{data.active ? `Global policy · v${data.current?.revision.version}` : "No global policy"}</h2>
-            <p className="mt-3 text-[13px] text-muted-foreground">{data.active ? "Overrides every sandbox's own rules." : "Each sandbox follows its own rules."}</p>
-            {data.active ? (
-              <Button variant="outline" className="mt-5 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5" onClick={() => setConfirm(true)}><ShieldOff />Remove</Button>
-            ) : <p className="mt-5 inline-block rounded-lg bg-muted px-3 py-2 font-mono text-[11.5px] text-muted-foreground" title="Set from the CLI">openshell policy set --global --policy policy.yaml</p>}
-          </div>
-          {data.current?.policy?.rules.length > 0 && <Card className="divide-y divide-border/70 overflow-hidden">{data.current.policy.rules.map((rule) => <RuleRow key={rule.key} rule={rule} locked onOp={() => {}} />)}</Card>}
-          {data.revisions.length > 0 && (
-            <Section title="History">
-              <Card className="divide-y divide-border/60">
-                {data.revisions.map((r) => (
-                  <div key={r.version} className="flex h-11 items-center gap-3 px-5 text-[12.5px]">
-                    <span className={cn("size-1.5 rounded-full", REVISION[r.status]?.dot)} aria-hidden="true" />
-                    <span className="font-mono">v{r.version}</span><span className="text-muted-foreground">{REVISION[r.status]?.label}</span><span className="ml-auto text-muted-foreground">{relativeTime(r.createdAt)}</span>
-                  </div>
-                ))}
-              </Card>
-            </Section>
-          )}
-        </>
-      )}
-      <AlertDialog open={confirm} onOpenChange={setConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove the global policy?</AlertDialogTitle>
-            <AlertDialogDescription>Every sandbox reverts to its own rules.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={async () => {
-              try { await api.removeGlobal(); toast.success("Global policy removed"); load() } catch (e) { toast.error(e.message) } finally { setConfirm(false) }
-            }}>Remove</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
   )
 }
 
@@ -956,8 +905,7 @@ export function EgressView({ onNavigate }) {
 
   return (
     <div ref={scroller} className="h-full overflow-y-auto">
-      {scope === "global" ? <GlobalPanel onBack={back} />
-        : scope ? (
+      {scope ? (
           <SandboxDetail key={scope} name={scope} sandbox={fleet?.sandboxes?.find((s) => s.name === scope) ?? live.sandboxes?.find((s) => s.name === scope)}
             events={live.events} onBack={back} onNavigate={onNavigate} reloadSignal={signal}
             onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} onEditPolicy={editPolicy} />
