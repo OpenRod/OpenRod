@@ -19,7 +19,9 @@ const digest = value => createHash('sha256').update(JSON.stringify(value)).diges
 // get new remote identities: neither existing remote rules nor memberships are
 // overwritten. Sandbox-specific grants and memberships never cross gateways.
 export function planLocalCatalog(snapshot, source, architecture) {
-  const generation = digest([contextKey(source), snapshot])
+  // Publish a new generation when the import format changes: old snapshots
+  // remain attached to their sandboxes and are never overwritten in place.
+  const generation = digest(['local-catalog-v2', contextKey(source), snapshot])
   const id = (kind, original) => 'local-' + digest([generation, kind, original]).slice(0, 32)
   const setupId = original => digest([generation, 'setup', original]).slice(0, 24)
   const groups = new Map(snapshot.groups.map(g => [g.id, id('group', g.id)]))

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { planLocalCatalog } from './local-catalog.js'
-import { BUILTIN_TEMPLATES } from '../shared/policy-templates.js'
+import { BUILTIN_TEMPLATES, composeTemplate, toggleAccessTemplate } from '../shared/policy-templates.js'
+import { createTemplateStore } from './policy-template-store.js'
+import { validateTemplate, templateToPolicy } from './policy.js'
 import { DEFAULT_ADVANCED } from './egress.js'
 
 const source = { gateway: 'local', workspace: 'default' }
@@ -56,4 +61,31 @@ test('local access-template edits are materialized instead of resolving against 
   const copied = planLocalCatalog(original, source, 'x64').templates[1]
   assert.equal(copied.rules[0].endpoints[0].host, 'git.example.com')
   assert.deepEqual(copied.accessTemplates, [])
+})
+
+test('imported access presets remain selectable and saved combinations survive a store restart', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'imported-access-'))
+  t.after(() => fs.rm(directory, { recursive: true, force: true }))
+  const original = structuredClone(snapshot())
+  original.templates.find(template => template.id === 'github-read').rules[0].endpoints[0].host = 'git.example.com'
+  const plan = planLocalCatalog(original, source, 'x64')
+  // Exercise the same legacy-file storage path used by syncLocalCatalog.
+  for (const template of plan.templates) await fs.writeFile(path.join(directory, template.id + '.json'), JSON.stringify(template))
+  const reopen = () => createTemplateStore({ directory, builtins: BUILTIN_TEMPLATES, validate: validateTemplate })
+  const store = reopen(), catalog = await store.list()
+  const github = catalog.find(template => template.name === 'GitHub - Read' && template.id.startsWith('local-'))
+  const npm = catalog.find(template => template.name === 'Node.js - Packages' && template.id.startsWith('local-'))
+  assert.equal(github.kind, 'access')
+  assert.equal(npm.kind, 'access')
+  const selected = toggleAccessTemplate(toggleAccessTemplate([], github.id, catalog), npm.id, catalog)
+  await store.save({ ...BUILTIN_TEMPLATES[0], id: 'remote-project', accessTemplates: selected })
+  const restarted = reopen()
+  const saved = await restarted.find('remote-project')
+  assert.deepEqual(saved.accessTemplates, selected)
+  const policy = templateToPolicy(composeTemplate(saved, [], await restarted.list()))
+  assert.equal(policy.networkPolicies['github-access'].endpoints[0].host, 'git.example.com')
+  assert.equal(policy.networkPolicies.npm.endpoints[0].host, 'registry.npmjs.org')
+  await assert.rejects(store.save({ ...saved, accessTemplates: ['missing-access'] }), /valid additional access/)
+  await assert.rejects(store.save({ ...saved, accessTemplates: [plan.templates[0].id] }), /valid additional access/)
+  await assert.rejects(store.save({ ...github, accessTemplates: [npm.id] }), /cannot include other access policies/)
 })
