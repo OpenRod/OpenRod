@@ -190,3 +190,16 @@ test('launch rejects unprepared packages instead of silently omitting them', asy
  assert.throws(()=>assertPackagesPrepared([{items:[item]}]),/shadcn.*No sandbox was created/)
  assert.doesNotThrow(()=>assertPackagesPrepared([{items:[{...item,artifact:{digest:'pinned'},issues:[]}]}]))
 })
+
+
+test('build updates expose initial, growing, and failed logs before rejecting launch', async () => {
+  let name, polls = 0
+  const updates = []
+  const api = {
+    imageTemplates: async () => name ? [{ name, status: ++polls === 1 ? 'building' : 'failed', logs: polls === 1 ? 'Step 1\nStep 2' : 'Step 1\nStep 2\nInstall failed', error: polls > 1 ? 'Install failed' : null }] : [],
+    buildImageTemplate: async (recipe) => { name = recipe.name; return { status: 'building', logs: 'Step 1' } },
+  }
+  await assert.rejects(prepareQuickTemplate(api, 'terminal', { wait: async () => {}, onBuildUpdate: (value) => updates.push(value) }), /Install failed/)
+  assert.deepEqual(updates.map((value) => value.logs), ['Step 1', 'Step 1\nStep 2', 'Step 1\nStep 2\nInstall failed'])
+  assert.ok(updates.every((value) => value.name === name))
+})

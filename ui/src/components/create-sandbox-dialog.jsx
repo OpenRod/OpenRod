@@ -5,7 +5,7 @@ import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
-import { Check, ChevronDown, ChevronRight, Terminal } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Terminal, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -135,6 +135,21 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [openIn, setOpenIn] = React.useState("shell")
   const [quickProviders, setQuickProviders] = React.useState({})
   const [progress, setProgress] = React.useState("")
+  const [showBuild, setShowBuild] = React.useState(false)
+  const [build, setBuild] = React.useState(null)
+  const [buildProgress, setBuildProgress] = React.useState("")
+  const buildLogs = React.useRef(null)
+  const followLogs = React.useRef(true)
+  const showBuildButton = React.useRef(null)
+  const closeBuildButton = React.useRef(null)
+  React.useEffect(() => {
+    if (showBuild) closeBuildButton.current?.focus()
+  }, [showBuild])
+  React.useEffect(() => {
+    if (showBuild && followLogs.current && buildLogs.current) buildLogs.current.scrollTop = buildLogs.current.scrollHeight
+  }, [showBuild, build?.logs, buildProgress])
+  function reportProgress(message) { setProgress(message); setBuildProgress(message) }
+  function closeBuild() { setShowBuild(false); showBuildButton.current?.focus() }
   const [preparing, setPreparing] = React.useState(false)
   const preparation = React.useRef(null)
   const buildName = React.useRef(null)
@@ -156,6 +171,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     setMode(initialImageTemplate ? "template" : "quick")
     setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setProgress("")
     setSetupIds([])
+    setShowBuild(false); setBuild(null); setBuildProgress(""); followLogs.current = true
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
@@ -212,7 +228,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   async function submit(event) {
     event.preventDefault()
     if (busy || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
-    setBusy(true); setError(null); setProgress("")
+    setBusy(true); setError(null); setProgress(""); setBuild(null); setBuildProgress(""); followLogs.current = true
     const controller = new AbortController()
     preparation.current = controller
     buildName.current = null
@@ -222,11 +238,12 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       let launchSetupIds = [], launchAccessReview = null
       setPreparing(true)
       if (mode === "quick") {
-        const prepared = await prepareQuickSetups(api, setupIds, setupAccessReview, { signal: controller.signal, onProgress: setProgress })
+        const prepared = await prepareQuickSetups(api, setupIds, setupAccessReview, { signal: controller.signal, onProgress: reportProgress })
         launchSetupIds = prepared.setups.map(s => s.id)
         launchAccessReview = prepared.accessReview
         environment = await prepareQuickTemplate(api, agentIds, {
-          withSetups: setupIds.length > 0, setups: prepared.setups, signal: controller.signal, onProgress: setProgress,
+          withSetups: setupIds.length > 0, setups: prepared.setups, signal: controller.signal, onProgress: reportProgress,
+          onBuildUpdate: (value) => setBuild((previous) => ({ ...value, logs: value.logs ?? previous?.logs })),
           onBuild: (value) => {
             buildName.current = value
             if (controller.signal.aborted) void api.cancelImageBuild(value).catch(() => {})
@@ -234,7 +251,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
         })
       }
       if (controller.signal.aborted) return
-      setPreparing(false); setProgress("Creating sandbox…")
+      setPreparing(false); reportProgress("Creating sandbox…")
       const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, groups: group, ...files })
       toast.success(`Creating ${created.name}`)
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
@@ -251,8 +268,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   return (
     <>
     <Dialog open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value) }}>
-      <DialogContent showCloseButton={!busy} className="max-h-[90svh] overflow-hidden sm:max-w-md">
-        <form onSubmit={submit} className="flex max-h-[calc(90svh-2rem)] min-h-0 flex-col gap-4">
+      <DialogContent showCloseButton={!busy && !showBuild} className={`max-h-[90svh] gap-4 bg-transparent p-0 ring-0 ${showBuild ? "sm:max-w-md lg:max-w-[960px] lg:grid-cols-[28rem_minmax(0,1fr)]" : "sm:max-w-md"}`}>
+        <form onSubmit={submit} className={`flex min-h-0 min-w-0 flex-col gap-4 rounded-xl bg-popover p-4 ring-1 ring-foreground/10 ${showBuild ? "max-h-[52svh] lg:max-h-[90svh]" : "max-h-[90svh]"}`}>
           <DialogHeader className="shrink-0">
             <DialogTitle>New sandbox</DialogTitle>
           </DialogHeader>
@@ -448,11 +465,22 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 if (buildName.current) void api.cancelImageBuild(buildName.current).catch((e) => toast.error(e.message))
               } else onOpenChange(false)
             }}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
+            {mode === "quick" && (preparing || build) && <Button ref={showBuildButton} type="button" variant="outline" aria-expanded={showBuild} aria-controls="quick-build-logs" onClick={() => setShowBuild(true)}>Show build</Button>}
             <Button type="submit" disabled={busy || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
               {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
             </Button>
           </DialogFooter>
         </form>
+        {showBuild && <section id="quick-build-logs" aria-label="Build logs" className="flex h-[32svh] min-h-0 min-w-0 flex-col gap-3 rounded-xl bg-popover p-4 ring-1 ring-foreground/10 lg:h-[min(36rem,90svh)]">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-medium">Build logs</h2>
+            <Button ref={closeBuildButton} type="button" variant="ghost" size="icon-sm" aria-label="Close build logs" onClick={closeBuild}><X /></Button>
+          </div>
+          <p role="status" className="text-xs text-muted-foreground">{build?.status === "failed" ? "Build failed" : build?.status === "ready" ? "Build complete" : buildProgress || "Preparing environment…"}</p>
+          {build?.name && <p className="truncate font-mono text-[11px] text-muted-foreground">{build.name}</p>}
+          <pre ref={buildLogs} tabIndex={0} aria-label="Build output" onScroll={(event) => { const el = event.currentTarget; followLogs.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40 }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/30 p-3 font-mono text-[10px] leading-relaxed">{build?.logs || (build?.status === "ready" ? "Using a ready image template. No build was needed." : "Waiting for build output…")}</pre>
+          {(build?.error || error) && <p role="alert" className="text-xs text-destructive">{build?.error || error}</p>}
+        </section>}
       </DialogContent>
     </Dialog>
     <PolicyDialog open={Boolean(policyDraft)} initial={policyDraft} onOpenChange={(value) => { if (!value) setPolicyDraft(null) }}
