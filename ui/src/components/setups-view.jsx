@@ -170,6 +170,14 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const preparing = preparation?.status === 'running' || (busy && Boolean(preparation))
   const choose = (id, update) => { setPreparedReview(false); setChoices(old => ({ ...old, [id]: { ...old[id], ...update } })) }
+  async function removeItem(id) {
+    const next = await api.removeSetupReviewItem(review.token, id)
+    setReview(next)
+    setIds(current => current.filter(itemId => itemId !== id))
+    setChoices(current => Object.fromEntries(Object.entries(current).filter(([itemId]) => itemId !== id)))
+    setPreparation(null)
+    if (jobId.current) setupImports.updateReview(jobId.current, next, preparedReview)
+  }
   async function importSelection(saveOnly = false) {
     setFinalImport(true)
     const task = setupImports.start({ id: jobId.current, review, name, choices, saveOnly,
@@ -183,7 +191,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
       const result = await task.promise
       if (!mounted.current) return
       if (result.status === 'saved') onSaved()
-      else if (result.status === 'needs-attention') setError('Some items need attention. Update them and retry, or import this setup with those items inactive.')
+      else if (result.status === 'needs-attention') setError('Some items need attention. Remove them, update them and retry, or import this setup with those items inactive.')
       else { setPreparedReview(false); setError('Import cancelled. Completed preparation is kept here for retry.') }
     } finally { if (mounted.current) setFinalImport(false) }
   }
@@ -232,12 +240,15 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
           <span>{readyCount(review)} compatible · {issueCount(review)} need attention</span>
         </div>
         <SetupItemTabs items={review.items}>{(items) => <Accordion className="overflow-hidden rounded-lg border">{items.map((item) => <AccordionItem key={item.id} value={item.id}>
+          <div className="flex items-center [&>h3]:min-w-0 [&>h3]:flex-1">
           <AccordionTrigger className="items-center gap-3 rounded-none px-3 py-3 text-xs hover:bg-muted/30 hover:no-underline">
             <span className="min-w-0 flex-1 break-words">{item.name}</span>
             <span className={`shrink-0 text-[11px] font-normal ${item.issues.length ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
               {item.disabled ? 'Inactive' : item.issues.length ? 'Needs attention' : item.kind === 'skill' ? `${item.files?.length ?? 0} files` : item.auth?.mode === 'agent-session' ? 'Sign-in needed' : item.verification?.status === 'connected' ? 'Connection checked' : item.artifact ? 'Prepared' : 'Not checked'}
             </span>
           </AccordionTrigger>
+          <Button variant="ghost" size="icon" className="mr-2 size-7 shrink-0 text-muted-foreground hover:text-destructive" disabled={busy || preparing} aria-label={`Remove ${item.name} from import`} title="Remove from this import" onClick={() => run(() => removeItem(item.id))}><Trash2 className="size-3.5" /></Button>
+          </div>
           <AccordionContent className="space-y-3 border-t bg-muted/10 px-4 py-4 text-xs leading-relaxed [&_p:not(:last-child)]:mb-0">
             {item.issues.length > 0 && <div className="space-y-1 text-amber-700 dark:text-amber-400">{item.issues.map(issue => <p key={issue}>{issue}</p>)}</div>}
             {item.requirements.map((r, i) => <p key={i}><span className="font-medium">{r.phase === 'build' ? 'Build' : r.phase === 'auth' ? 'Sign-in' : 'Runtime'}:</span> {r.host}:{r.port} · {r.reason}</p>)}
@@ -276,8 +287,8 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
         {review && <p className="text-[11px] leading-relaxed text-muted-foreground">Import downloads dependencies and checks MCP connections in an isolated sandbox using the listed destinations and credentials you select. Skill scripts are not run.</p>}
       <div className="flex items-center justify-end gap-2">{scan && <Button variant="ghost" disabled={busy || preparing} onClick={() => { if (review) { setReview(null); setPreparedReview(false); setPreparation(null); setChoices({}) } else { setScan(null); setIds([]) } setError('') }}>Back</Button>}<Button variant="ghost" disabled={!jobId.current && !finalImport && (busy || preparing)} onClick={onClose}>{finalImport ? 'Continue in background' : jobId.current ? 'Close' : 'Cancel'}</Button>
         {review ? <>
-          {preparedReview && <Button variant="outline" disabled={busy || !name.trim()} onClick={() => run(importSelection)}>Retry import</Button>}
-          <Button disabled={busy || !name.trim()} onClick={() => run(() => importSelection(preparedReview))}>{busy && <Spinner />}{busy ? 'Importing…' : preparedReview && importNeedsAttention(review) ? 'Import with inactive items' : preparing ? 'Resume import' : 'Import'}</Button>
+          {preparedReview && <Button variant="outline" disabled={busy || !name.trim() || !review.items.length} onClick={() => run(importSelection)}>Retry import</Button>}
+          <Button disabled={busy || !name.trim() || !review.items.length} onClick={() => run(() => importSelection(preparedReview))}>{busy && <Spinner />}{busy ? 'Importing…' : preparedReview && importNeedsAttention(review) ? 'Import with inactive items' : preparing ? 'Resume import' : 'Import'}</Button>
         </> : scan ? <Button disabled={busy || !ids.length} onClick={() => run(async () => setReview(await api.reviewSetup(scan.token, ids)))}>{busy && <Spinner />}Review selection</Button> : <Button disabled={busy || !sources.length} onClick={() => run(async () => setScan(await api.discoverSetups(sources)))}>{busy && <Spinner />}Discover tools</Button>}
       </div>
       </div>

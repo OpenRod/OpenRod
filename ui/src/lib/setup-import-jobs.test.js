@@ -60,6 +60,27 @@ test('retrying an active job shares the same operation instead of duplicating im
   const second = store.start({ id: 'same', review, name: 'Tools' })
   assert.equal(first.promise, second.promise)
   assert.equal(runs, 1)
+  assert.throws(() => store.updateReview(first.id, prepared, true), /Wait for the import/)
   finish({ status: 'cancelled' })
   await first.promise
+})
+
+test('removing an import item survives reopening and saves the updated review', async () => {
+  const updated = { token: 'without-failed-item', items: [{ id: 'working' }] }
+  const store = createSetupImportJobs({ saveSetup: async token => {
+    assert.equal(token, updated.token)
+    return { id: 'saved' }
+  } }, async (_, r, name, choices, callbacks) => {
+    callbacks.onReview(prepared)
+    return { status: 'needs-attention', review: prepared }
+  })
+  const task = store.start({ review, name: 'Tools' })
+  await task.promise
+  store.updateReview(task.id, updated, true)
+  const reopened = store.getSnapshot()[0]
+  assert.deepEqual(reopened.review, updated)
+  assert.equal(reopened.preparation, null)
+  assert.equal(reopened.prepared, true)
+  await store.start({ id: reopened.id, review: reopened.review, name: reopened.name, saveOnly: reopened.prepared }).promise
+  assert.equal(store.getSnapshot()[0].status, 'saved')
 })
