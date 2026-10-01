@@ -1,6 +1,6 @@
 import * as React from "react"
 import { activityKey as eventKey } from "@/lib/activity-inventory"
-import { api } from "@/lib/api"
+import { useApi, useLocation } from "@/lib/location-context"
 
 // One live picture of the gateway for every page: sandboxes and the audit
 // trail arrive over one event stream; gateway facts are
@@ -10,6 +10,8 @@ const MAX_EVENTS = 2000
 
 
 export function LiveProvider({ children }) {
+  const api = useApi()
+  const location = useLocation()
   const [sandboxes, setSandboxes] = React.useState(null)
   const [overview, setOverview] = React.useState(null)
   const [events, setEvents] = React.useState([])
@@ -38,32 +40,44 @@ export function LiveProvider({ children }) {
 
   const loadOverview = React.useCallback(async () => {
     try { setOverview(await api.overview()) } catch (error) { setOverview((current) => current ?? { error: error.message }) }
-  }, [])
+  }, [api])
 
   const loadHistory = React.useCallback(async () => {
     const epoch = cacheEpoch.current
     try { const result = await api.activity({ limit: 500 }); if (epoch !== cacheEpoch.current) return; addEvents(result.events); setCollection(result.coverage); setHistoryError(null) } catch (error) { setHistoryError(error.message) }
-  }, [addEvents])
+  }, [addEvents, api])
 
   React.useEffect(() => {
-    loadOverview(); loadHistory()
-    const source = new EventSource("/api/os/stream")
+    let source, slow, cancelled = false
     const resetHistory = () => {
       cacheEpoch.current++
       seen.current.clear(); setEvents([]); setActivityRevision((n) => n + 1)
       loadHistory()
     }
-    source.onopen = () => { setConnection("live"); resetHistory() }
-    source.addEventListener("activity-deleted", (e) => { setCollection(JSON.parse(e.data).coverage); resetHistory() })
-    source.onerror = () => setConnection("reconnecting")
-    source.addEventListener("sandboxes", (e) => { setConnection("live"); setSandboxes(JSON.parse(e.data)) })
-    source.addEventListener("log", (e) => addEvents([JSON.parse(e.data)]))
-    source.addEventListener("collection", (e) => setCollection(JSON.parse(e.data)))
-    source.addEventListener("gateway-health", () => setConnection("live"))
-    source.addEventListener("gateway-error", () => setConnection("gateway-down"))
-    const slow = setInterval(() => { loadOverview() }, 15000)
-    return () => { source.close(); clearInterval(slow) }
-  }, [addEvents, loadHistory, loadOverview])
+    api.context().then(async (selection) => {
+      if (cancelled) return
+      if (!location && !selection.configured) {
+        setConnection("setup-required")
+        setSandboxes([])
+        return
+      }
+      loadOverview(); loadHistory()
+      slow = setInterval(loadOverview, 15000)
+      const context = await api.contextKey()
+      if (cancelled) return
+      source = new EventSource(`/api/os/stream?context=${encodeURIComponent(context)}${location ? "&location=1" : ""}`)
+      source.onopen = () => { setConnection("live"); resetHistory() }
+      source.addEventListener("context-changed", () => window.location.reload())
+      source.addEventListener("activity-deleted", (e) => { setCollection(JSON.parse(e.data).coverage); resetHistory() })
+      source.onerror = () => setConnection("reconnecting")
+      source.addEventListener("sandboxes", (e) => { setConnection("live"); setSandboxes(JSON.parse(e.data)) })
+      source.addEventListener("log", (e) => addEvents([JSON.parse(e.data)]))
+      source.addEventListener("collection", (e) => setCollection(JSON.parse(e.data)))
+      source.addEventListener("gateway-health", () => setConnection("live"))
+      source.addEventListener("gateway-error", () => setConnection("gateway-down"))
+    }).catch(() => { if (!cancelled) setConnection("gateway-down") })
+    return () => { cancelled = true; source?.close(); clearInterval(slow) }
+  }, [addEvents, loadHistory, loadOverview, api, location?.context])
 
   const value = React.useMemo(() => ({
     sandboxes: sandboxes ?? overview?.sandboxes ?? null,

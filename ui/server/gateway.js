@@ -1,46 +1,215 @@
 import { createHash } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { OpenShellClient } from '@nvidia/openshell-sdk'
 
-// The same gateway the `openshell` CLI talks to: its active selection, its
-// endpoint, and its mTLS client bundle. The bundle is the operator's full
-// authority over the gateway, so it is read here and never leaves this process.
-export const CONFIG_DIR = process.env.OPENSHELL_CONFIG_DIR ?? path.join(os.homedir(), '.config/openshell')
+// Gateway credentials stay in the server process. Browser clients may select
+// only registrations that already exist in the OpenShell CLI config.
+export const CONFIG_DIR = path.join(process.env.XDG_CONFIG_HOME ?? (process.platform === 'win32' && process.env.APPDATA ? process.env.APPDATA : path.join(process.env.HOME || os.homedir(), '.config')), 'openshell')
+const CONTEXT_FILE = path.join(CONFIG_DIR, 'console-context.json')
+const GATEWAY_NAME = /^(?!\.{1,2}$)[\w.-]{1,64}$/
+const WORKSPACE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
-export function resolveGateway() {
-  let name = process.env.OPENSHELL_GATEWAY
-  if (!name) {
-    try { name = fs.readFileSync(path.join(CONFIG_DIR, 'active_gateway'), 'utf8').trim() } catch { name = 'openshell' }
+function activeGateway() {
+  try { return fs.readFileSync(path.join(CONFIG_DIR, 'active_gateway'), 'utf8').trim() || null } catch { return null }
+}
+
+function savedContext() {
+  try {
+    const value = JSON.parse(fs.readFileSync(CONTEXT_FILE, 'utf8'))
+    return GATEWAY_NAME.test(value.gateway ?? '') && WORKSPACE_NAME.test(value.workspace ?? '') ? value : {}
+  } catch { return {} }
+}
+
+const saved = savedContext()
+const cliGateway = activeGateway()
+let selected = {
+  gateway: process.env.OPENSHELL_GATEWAY || saved.gateway || cliGateway || 'openshell',
+  workspace: process.env.OPENSHELL_WORKSPACE || saved.workspace || 'default',
+}
+let configured = Boolean(process.env.OPENSHELL_GATEWAY || saved.gateway)
+let selectionSource = process.env.OPENSHELL_GATEWAY ? 'environment' : saved.gateway ? 'saved' : cliGateway ? 'cli' : 'default'
+export const contextConfigured = () => configured
+
+const requestContext = new AsyncLocalStorage()
+export const contextSelection = () => ({ ...(requestContext.getStore() ?? selected) })
+export const defaultContextSelection = () => ({ ...selected })
+export const contextKey = (context = contextSelection()) => JSON.stringify([context.gateway ?? context.target?.name, context.workspace])
+export const runWithContext = (context, task) => requestContext.run(Object.freeze({ gateway: context.gateway ?? context.target?.name, workspace: context.workspace }), task)
+
+function readGatewayMetadata(name, configDir = CONFIG_DIR) {
+  if (!GATEWAY_NAME.test(name)) throw new Error('INVALID_GATEWAY_NAME')
+  const metadata = JSON.parse(fs.readFileSync(path.join(configDir, 'gateways', name, 'metadata.json'), 'utf8'))
+  const endpoint = new URL(metadata.gateway_endpoint)
+  if (!['https:', 'http:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || typeof metadata.auth_mode !== 'string') {
+    throw new Error('Invalid gateway registration. Use an endpoint without embedded credentials.')
   }
-  if (!/^[\w.-]{1,64}$/.test(name)) throw new Error('INVALID_GATEWAY_NAME')
-  const dir = path.join(CONFIG_DIR, 'gateways', name)
-  const metadata = JSON.parse(fs.readFileSync(path.join(dir, 'metadata.json'), 'utf8'))
-  const mtls = path.join(dir, 'mtls')
-  const read = (file) => fs.readFileSync(path.join(mtls, file))
   return {
     name,
     endpoint: metadata.gateway_endpoint,
     authMode: metadata.auth_mode,
     remote: Boolean(metadata.is_remote),
-    tls: metadata.auth_mode === 'mtls'
+  }
+}
+
+export function resolveGateway(name = contextSelection().gateway, { configDir = CONFIG_DIR } = {}) {
+  const target = readGatewayMetadata(name, configDir)
+  const mtls = path.join(configDir, 'gateways', name, 'mtls')
+  const read = (file) => fs.readFileSync(path.join(mtls, file))
+  return {
+    ...target,
+    tls: target.authMode === 'mtls'
       ? { caCert: read('ca.crt'), clientCert: read('tls.crt'), clientKey: read('tls.key') }
       : {},
   }
 }
 
-let cached
-export async function gateway() {
-  if (!cached) {
-    const target = resolveGateway()
-    const client = await OpenShellClient.connect({ gateway: target.endpoint, ...target.tls })
-    cached = { target, client }
+// Unary requests must release policy queues when the gateway stalls. A finite
+// command also bounds its transport; watches and interactive terminals retain
+// their caller-controlled lifetime. Explicit RPC timeouts are preserved.
+export async function connectGateway(target, { unaryTimeoutMs = 15000, execGraceMs = 5000 } = {}) {
+  const client = await OpenShellClient.connect({ gateway: target.endpoint, ...target.tls })
+  const transport = client.transport
+  const unary = transport.unary.bind(transport), stream = transport.stream.bind(transport)
+  transport.unary = (method, signal, timeoutMs, ...rest) => unary(method, signal, timeoutMs === undefined ? unaryTimeoutMs : timeoutMs, ...rest)
+  transport.stream = async (method, signal, timeoutMs, header, input, contextValues) => {
+    if (timeoutMs !== undefined || method.name !== 'ExecSandbox') return stream(method, signal, timeoutMs, header, input, contextValues)
+    // ExecSandbox is server-streaming: its first (only) request carries the
+    // execution timeout. Replay it intact before delegating to the transport.
+    const iterator = input[Symbol.asyncIterator](), first = await iterator.next()
+    const duration = first.value?.executionTimeout
+    const executionMs = Number(duration?.seconds ?? 0) * 1000 + Number(duration?.nanos ?? 0) / 1e6
+    const bounded = Number.isFinite(executionMs) && executionMs > 0 ? executionMs + execGraceMs : undefined
+    const replay = {
+      async *[Symbol.asyncIterator]() {
+        if (!first.done) { yield first.value; yield* { [Symbol.asyncIterator]: () => iterator } }
+      },
+    }
+    return stream(method, signal, bounded, header, replay, contextValues)
   }
-  return cached
+  return client
 }
 
-export const WORKSPACE = { selection: { case: 'workspace', value: 'default' } }
+export function listGateways({ configDir = CONFIG_DIR } = {}) {
+  let entries
+  try { entries = fs.readdirSync(path.join(configDir, 'gateways'), { withFileTypes: true }) } catch { return [] }
+  return entries
+    .filter((entry) => entry.isDirectory() && GATEWAY_NAME.test(entry.name))
+    .flatMap((entry) => {
+      try {
+        const target = readGatewayMetadata(entry.name, configDir)
+        return [{ ...target, supported: target.authMode === 'mtls' }]
+      } catch {
+        return [{ name: entry.name, endpoint: null, authMode: null, remote: false, supported: false, error: 'Registration could not be read. Check its metadata.json file.' }]
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export const workspaceScope = (workspace = workspaceName()) => ({ selection: { case: 'workspace', value: workspace } })
+export const workspaceName = () => contextSelection().workspace
+
+const connections = new Map()
+async function connectRegisteredGateway(name) {
+  const target = resolveGateway(name)
+  if (target.authMode !== 'mtls') throw new Error(`Gateway authentication mode "${target.authMode}" is not supported yet.`)
+  if (new URL(target.endpoint).protocol !== 'https:') throw new Error('mTLS requires an HTTPS gateway endpoint.')
+  // Registration and certificate changes take effect without a restart.
+  const fingerprint = createHash('sha256').update(target.endpoint)
+    .update(target.tls.caCert).update(target.tls.clientCert).update(target.tls.clientKey).digest('hex')
+  if (connections.get(name)?.fingerprint !== fingerprint) {
+    const ready = (async () => {
+      const client = await connectGateway(target)
+      return { target, client }
+    })()
+    connections.set(name, { fingerprint, ready })
+  }
+  const entry = connections.get(name)
+  try { return await entry.ready } catch (error) {
+    if (connections.get(name) === entry) connections.delete(name)
+    throw error
+  }
+}
+
+async function listWorkspaces(client) {
+  const workspaces = []
+  let pageToken = ''
+  do {
+    const page = await client.raw.listWorkspaces({ pageSize: 1000, pageToken }, { timeoutMs: 10_000 })
+    for (const workspace of page.workspaces ?? []) {
+      const name = workspace.metadata?.name
+      if (name && WORKSPACE_NAME.test(name)) workspaces.push({ name })
+    }
+    pageToken = page.nextPageToken
+  } while (pageToken)
+  return workspaces
+}
+
+// Explicit read-only probe: does not select a context or start collectors.
+export async function gatewayWorkspaces(name) {
+  return listWorkspaces((await connectRegisteredGateway(name)).client)
+}
+
+function persistContext(context) {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 })
+  const temporary = `${CONTEXT_FILE}.${process.pid}.tmp`
+  fs.writeFileSync(temporary, `${JSON.stringify(context, null, 2)}\n`, { mode: 0o600 })
+  fs.renameSync(temporary, CONTEXT_FILE)
+}
+
+export async function gateway(context = contextSelection()) {
+  const current = { gateway: context.gateway ?? contextSelection().gateway, workspace: context.workspace ?? workspaceName() }
+  const connection = await connectRegisteredGateway(current.gateway)
+  return { ...connection, workspace: current.workspace, workspaceScope: workspaceScope(current.workspace) }
+}
+
+export async function consoleContext({ probe = true } = {}) {
+  const current = contextSelection()
+  const gateways = listGateways()
+  let workspaces = []
+  let workspaceError = null
+  if (configured && probe) {
+    try { workspaces = await gatewayWorkspaces(current.gateway) } catch (error) { workspaceError = error.message }
+  }
+  return {
+    ...current, configured, selectionSource, gateways, workspaces, workspaceError,
+    gatewayFixed: Boolean(process.env.OPENSHELL_GATEWAY), workspaceFixed: Boolean(process.env.OPENSHELL_WORKSPACE),
+  }
+}
+
+export async function selectConsoleContext(input = {}) {
+  const previous = selected
+  const gatewayName = String(input.gateway ?? previous.gateway)
+  if (process.env.OPENSHELL_GATEWAY && gatewayName !== process.env.OPENSHELL_GATEWAY) throw new Error('Gateway selection is fixed by OPENSHELL_GATEWAY.')
+  const target = listGateways().find((candidate) => candidate.name === gatewayName)
+  if (!target) throw new Error('Unknown gateway registration.')
+  if (!target.supported) throw new Error(`Gateway authentication mode "${target.authMode}" is not supported yet.`)
+  const client = (await connectRegisteredGateway(gatewayName)).client
+  const workspaces = await listWorkspaces(client)
+  const requestedWorkspace = String(input.workspace ?? process.env.OPENSHELL_WORKSPACE ?? (gatewayName === previous.gateway ? previous.workspace : 'default'))
+  if (process.env.OPENSHELL_WORKSPACE && requestedWorkspace !== process.env.OPENSHELL_WORKSPACE) throw new Error('Workspace selection is fixed by OPENSHELL_WORKSPACE.')
+  if (!WORKSPACE_NAME.test(requestedWorkspace) || !workspaces.some((workspace) => workspace.name === requestedWorkspace)) throw new Error('Unknown workspace.')
+  if (previous !== selected) throw Object.assign(new Error('The connection changed in another request. Refresh and try again.'), { status: 409 })
+  const next = { gateway: gatewayName, workspace: requestedWorkspace }
+  persistContext(next)
+  selected = next
+  configured = true
+  selectionSource = process.env.OPENSHELL_GATEWAY ? 'environment' : 'saved'
+  return {
+    ...selected, configured, selectionSource, gateways: listGateways(), workspaces, workspaceError: null,
+    gatewayFixed: Boolean(process.env.OPENSHELL_GATEWAY), workspaceFixed: Boolean(process.env.OPENSHELL_WORKSPACE),
+  }
+}
+
+export function clearConsoleContext() {
+  if (process.env.OPENSHELL_GATEWAY) throw new Error('Gateway selection is fixed by OPENSHELL_GATEWAY.')
+  persistContext({})
+  selected = { gateway: cliGateway || 'openshell', workspace: process.env.OPENSHELL_WORKSPACE || 'default' }
+  configured = false
+  selectionSource = cliGateway ? 'cli' : 'default'
+}
 
 // ---- normalization: protobuf wire shapes → small, browser-safe JSON ---------
 
@@ -72,7 +241,7 @@ export function sandboxView(sandbox) {
     policyVersion: status.currentPolicyVersion ?? null,
     conditions,
     // The one sentence worth showing when something is wrong.
-    problem: conditions.find((c) => c.status === 'False' && c.message)?.message ?? null,
+    problem: conditions.find((c) => ['Ready', 'ConfigurationReady', 'PodScheduled'].includes(c.type) && c.status === 'False' && c.message)?.message ?? null,
   }
 }
 

@@ -4,9 +4,11 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { createSetupStore } from './setups.js'
-import { normalizeMcp, readSkill } from './setup-discovery.js'
+import { createSetupStore, getSetupStore, setupRoute, MAX_SELECTION } from './setups.js'
+import { normalizeMcp, readSkill, publicItem } from './setup-discovery.js'
+import { PACKAGE_PENDING, isPackagePending, cannotRun, canPrepareAtLaunch } from '../shared/setup-launch.js'
 import { assessNetwork } from './setup-deployment.js'
+import { runWithContext } from './gateway.js'
 
 async function fixture(t) {
   const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'setup-test-')))
@@ -180,9 +182,10 @@ test('bulk review retains the bundle-size limit', async (t) => {
     await put(`.cursor/skills/large-${i}/SKILL.md`, '# Safe fixture')
     for (let j = 0; j < 6; j++) await put(`.cursor/skills/large-${i}/file-${j}.txt`, 'a'.repeat(300 * 1024))
   }
-  const store = createSetupStore({ home, dir: path.join(home, 'catalog') })
-  const scan = await store.scan(['cursor'])
-  await assert.rejects(store.review(scan.token, scan.items.map((item) => item.id)), /exceeds 8 MB/)
+  assert.equal(MAX_SELECTION, 64 * 1024 * 1024)
+  const review = async (options) => { const store = createSetupStore({ home, dir: path.join(home, 'catalog'), ...options }); const scan = await store.scan(['cursor']); return store.review(scan.token, scan.items.map((item) => item.id)) }
+  assert.equal((await review()).items.length, 5)
+  await assert.rejects(review({ maxSelection: 2 * 1024 * 1024 }), { message: 'This selection exceeds 2 MB. Select fewer skills and import the rest as a second setup.' })
 })
 
 test('deleting setup rows persists a new revision and rejects stale edits', async (t) => {
@@ -235,22 +238,37 @@ test('deleting an entire setup persists and preserves other setups and source fi
   assert.equal(await fs.readFile(path.join(home, '.cursor/mcp.json'), 'utf8'), source)
 })
 
-test('module reload refreshes store methods instead of reusing the legacy singleton', async () => {
-  const legacyKey = Symbol.for('openshell.console.setup-store.v1')
-  const previous = globalThis[legacyKey]
-  globalThis[legacyKey] = { list: async () => [] }
-  try {
-    const first = await import('./setups.js?reload-test=first')
-    const second = await import('./setups.js?reload-test=second')
-    assert.notEqual(first.setupStore, second.setupStore)
-    assert.equal(typeof second.setupStore.delete, 'function')
-    assert.equal(typeof second.setupStore.deleteItem, 'function')
-    await assert.rejects(second.setupRoute('POST', ['setups', 'invalid', 'delete'], { revision: 'test' }), /Setup not found/)
-    await assert.rejects(second.setupRoute('POST', ['setups', 'invalid', 'delete-item'], { item: 'test', revision: 'test' }), /Setup not found/)
-  } finally {
-    if (previous === undefined) delete globalThis[legacyKey]
-    else globalThis[legacyKey] = previous
+test('setup previews and saved snapshots stay with their gateway and workspace across reloads', async (t) => {
+  const { home } = await fixture(t)
+  const previous = process.env.OPENSHELL_CONSOLE_DATA_DIR
+  process.env.OPENSHELL_CONSOLE_DATA_DIR = path.join(home, 'state')
+  t.after(() => {
+    if (previous === undefined) delete process.env.OPENSHELL_CONSOLE_DATA_DIR
+    else process.env.OPENSHELL_CONSOLE_DATA_DIR = previous
+  })
+  const origin = { gateway: 'setup-origin', workspace: 'alpha' }
+  const others = [{ ...origin, workspace: 'beta' }, { ...origin, gateway: 'setup-other' }]
+  const item = normalizeMcp('docs', { command: 'docs-mcp' }, 'codex')
+  const preview = runWithContext(origin, () => getSetupStore().stage([item]))
+  for (const context of others) {
+    await runWithContext(context, async () => {
+      await assert.rejects(setupRoute('POST', ['setups', 'save'], { token: preview.token, name: 'Wrong context', acknowledged: true }), /expired/)
+      assert.deepEqual(await getSetupStore().list(), [])
+    })
   }
+  const reloaded = await import('./setups.js?context-reload')
+  const saved = await runWithContext(origin, () => reloaded.getSetupStore().save(preview.token, 'Origin tools', true))
+  for (const context of others) {
+    await runWithContext(context, async () => {
+      await assert.rejects(getSetupStore().get(saved.id), { status: 404 })
+      await assert.rejects(getSetupStore().delete(saved.id, saved.revision), { status: 404 })
+    })
+  }
+  await runWithContext(origin, async () => {
+    assert.deepEqual((await getSetupStore().list()).map(setup => setup.id), [saved.id])
+    assert.equal((await getSetupStore().get(saved.id)).revision, saved.revision)
+    await assert.rejects(getSetupStore().save(preview.token, 'Reused token', true), /expired/)
+  })
 })
 
 test('automatic preparation preserves source snapshots and reuses the first pinned build', async t => {
@@ -428,7 +446,7 @@ test('imports a local npm executable as a pinned portable package without execut
   const item = (await store.scan(['claude'])).items[0]
   assert.equal(item.package.name, '@magicuidesign/mcp')
   assert.equal(item.package.requested, '2.0.0')
-  assert.deepEqual(item.issues, ['Prepare package dependencies in the next step.'])
+  assert.deepEqual(item.issues, [PACKAGE_PENDING])
   assert.ok(item.requirements.some(r => r.host === 'magicui.design'))
   await put(`${directory}/package.json`, JSON.stringify({ name: '@magicuidesign/mcp', version: '2.0.0', bin: { mcp: './other.js' } }))
   assert.equal((await store.scan(['claude'])).items[0].package, undefined)
@@ -519,4 +537,64 @@ test('Cursor display names with spaces and scoped package names survive scan, re
     assert.equal(item.name,'Unrecognized item')
     assert.equal(item.config,null)
   }
+})
+
+test('unsupported launchers explain the specific fix and echo only safe command basenames', () => {
+  const issue = raw => { const item = normalizeMcp('tool', raw, 'claude'); assert.equal(item.config, null); assert.equal(item.package, undefined); assert.equal(item.issues.length, 1); return item.issues[0] }
+  assert.match(issue({command:'/Users/x/.claude/mcp/shadcn-mcp.sh'}), /^“shadcn-mcp\.sh” is a script on this computer\. Sandboxes can’t run local scripts\./)
+  assert.match(issue({command:'/opt/homebrew/bin/npx',args:['-y','/Users/x/local-package']}), /^This “npx” command can’t be imported: it points to a local path/)
+  assert.match(issue({command:'npm',args:['run','start']}), /^This “npm” command/)
+  assert.match(issue({command:'bash',args:['-c','start']}), /^This MCP starts through “bash”, which runs a script on this computer\./)
+  assert.match(issue({command:'/Applications/Tool.app/Contents/MacOS/tool-mcp'}), /^“tool-mcp” belongs to a desktop app on this computer\. Sandboxes run Linux/)
+  assert.match(issue({command:'uvx',args:['mcp-server']}), /^Python launchers like “uvx” aren’t supported yet\./)
+  assert.match(issue({command:'node',args:['/Users/x/server.js']}), /^This MCP runs a file from this computer with “node”\./)
+  assert.match(issue({command:'docker',args:['run','image']}), /^“docker” isn’t available inside sandboxes\./)
+  assert.match(issue({command:'curl'}), /^This MCP downloads code with “curl”/)
+  assert.match(issue({command:'/usr/local/bin/some-tool'}), /^“some-tool” is a program on this computer, not an npm package/)
+  assert.equal(issue({args:[]}), 'No command or URL is set for this MCP, so there’s nothing to import.')
+  const hidden = issue({command:'/Users/x/bin/sk-' + 'a'.repeat(24)})
+  assert.match(hidden, /^This command is a program on this computer/); assert.ok(!hidden.includes('sk-'))
+  assert.match(issue({command:'/Users/x/bin/{weird}name.sh'}), /^This command is a script on this computer\./)
+  assert.equal(issue({command:'safe-tool',args:['--path=/x']}), 'Some arguments for “safe-tool” can’t be copied. Arguments may only contain letters, numbers and . _ = - (no paths, quotes or secrets).')
+})
+
+test('local path settings are summarized once and only for MCPs that can start', () => {
+  const runnable = normalizeMcp('tool', {command:'safe-mcp',env:{DATA_DIR:'/Users/x/data',CONFIG_PATH:'~/config',LOG_LEVEL:'info'}}, 'claude')
+  assert.deepEqual(runnable.issues, ['Local settings DATA_DIR, CONFIG_PATH point to folders on this computer and weren’t copied. Set sandbox paths for them if the MCP needs them.'])
+  assert.deepEqual(normalizeMcp('tool', {command:'npx',args:['-y','@magicuidesign/mcp@2.0.0'],env:{HOME:'/Users/x'}}, 'claude').issues, [PACKAGE_PENDING, 'Local setting HOME points to a folder on this computer and wasn’t copied. Set a sandbox path for it if the MCP needs it.'])
+  const blocked = normalizeMcp('tool', {command:'bash',env:{HOME:'/Users/x'}}, 'claude')
+  assert.equal(blocked.issues.length, 1); assert.match(blocked.issues[0], /“bash”/)
+})
+
+test('discovery warnings name the agent and the config file it looked for', async (t) => {
+  const { home, put } = await fixture(t)
+  const store = createSetupStore({ home, dir: path.join(home, 'catalog') })
+  const empty = await store.scan(['codex', 'claude', 'cursor'])
+  assert.deepEqual(empty.warnings.slice(0, 3), ['Codex: no MCP config found at ~/.codex/config.toml.', 'Claude Code: no MCP config found at ~/.claude.json.', 'Cursor: no MCP config found at ~/.cursor/mcp.json.'])
+  assert.equal(empty.warnings.at(-1), 'Only your personal MCPs and skills are listed. Project-level MCPs and plugin skills aren’t included.')
+  await put('.cursor/mcp.json', '{"mcpServers": private-broken-content')
+  await put('.codex/config.toml', 'not = [toml')
+  await put('.claude.json', JSON.stringify({ history: 'x'.repeat(900 * 1024), mcpServers: { docs: { url: 'https://docs.example.com/mcp' } } }))
+  const scan = await store.scan(['codex', 'claude', 'cursor'])
+  assert.deepEqual(scan.warnings.slice(0, 2), ['Codex: couldn’t read ~/.codex/config.toml. Check that it’s valid TOML.', 'Cursor: couldn’t read ~/.cursor/mcp.json. Check that it’s valid JSON.'])
+  assert.ok(!JSON.stringify(scan).includes('private-broken-content'))
+  assert.deepEqual(scan.items.map(i => i.name), ['docs'])
+  await put('.cursor/mcp.json', JSON.stringify({ mcpServers: Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`s${i}`, { url: 'https://example.com/mcp' }])) }))
+  assert.equal((await store.scan(['cursor'])).warnings[0], 'Cursor: More than 200 MCP configurations; narrow the source first.')
+})
+
+test('package pending issues, legacy Setups and unrunnable MCPs share one rule set', () => {
+  const legacy = 'Prepare package dependencies in the next step.'
+  assert.ok(isPackagePending(PACKAGE_PENDING)); assert.ok(isPackagePending(legacy)); assert.ok(!isPackagePending('Connect credentials (API_TOKEN) to use this MCP.'))
+  const pending = normalizeMcp('magicui', {command:'npx',args:['-y','@magicuidesign/mcp@2.0.0']}, 'claude')
+  assert.deepEqual(pending.issues, [PACKAGE_PENDING])
+  assert.ok(canPrepareAtLaunch(pending)); assert.ok(canPrepareAtLaunch({ ...pending, issues: [legacy] }))
+  assert.ok(!canPrepareAtLaunch({ ...pending, issues: [PACKAGE_PENDING, 'Unsupported HTTP header.'] }))
+  assert.ok(!canPrepareAtLaunch({ ...pending, disabled: true }))
+  const script = normalizeMcp('shadcn', {command:'/Users/x/.claude/mcp/shadcn-mcp.sh'}, 'claude')
+  assert.ok(cannotRun(script)); assert.ok(cannotRun(publicItem(script)))
+  for (const item of [pending, normalizeMcp('docs', {url:'https://docs.example.com/mcp'}, 'claude'), normalizeMcp('tool', {command:'safe-mcp'}, 'claude'), normalizeMcp('off', {command:'bash',disabled:true}, 'claude')]) {
+    assert.ok(!cannotRun(item)); assert.ok(!cannotRun(publicItem(item)))
+  }
+  assert.ok(!cannotRun({ kind: 'skill', issues: [] }))
 })

@@ -1,6 +1,7 @@
 import { PolicyDialog, newPolicy } from "@/components/egress-policies"
 import { groupNetworkPolicies } from "../../shared/group-network.js"
 import { motion, useReducedMotion } from "motion/react"
+import { useCloudMode } from "./auth-gate"
 import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
@@ -16,9 +17,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
-import { api } from "@/lib/api"
+import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
+import { locationLabel } from "@/lib/locations"
+import { LocationBadge } from "@/components/location-badge"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
-import { useLive } from "@/lib/live"
 import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -92,9 +94,11 @@ function FolderSummary({ plan, sandbox }) {
 }
 
 // Which group the sandbox joins, and what network access that brings.
-function GroupField({ org, value, onChange, onCreated, onAddPolicy }) {
+function GroupField({ org, value, onChange, onCreated, onAddPolicy, setups = [] }) {
   const reducedMotion = useReducedMotion()
   const reach = groupNetworkPolicies(org.policies, value)
+  // Setup egress policies come with the selected MCPs & Skills, not the groups.
+  const fromSetups = (org.policies ?? []).filter((p) => (p.appliesTo.setups ?? []).some((id) => setups.includes(id)))
   const counts = Object.fromEntries(org.groups.map((g) => [g.id, org.members?.[g.id]?.length ?? 0]))
   const chosen = org.groups.filter((g) => value.includes(g.id))
   return (
@@ -108,6 +112,7 @@ function GroupField({ org, value, onChange, onCreated, onAddPolicy }) {
           : org.groups.length ? "Groups let network rules follow sandboxes. Choose one or more. You can change memberships later on the Groups page."
           : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
       </motion.p>
+      {fromSetups.length > 0 && <p className="text-[11px] leading-relaxed text-muted-foreground">Its MCPs &amp; Skills add <span className="text-foreground">{fromSetups.map((p) => p.name).join(", ")}</span>.</p>}
       {chosen.length > 0 && !reach.length && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={onAddPolicy}>Add network rule</Button>}
     </fieldset>
   )
@@ -121,9 +126,34 @@ function nextName(taken, prefix = "sandbox") {
   return ""
 }
 
-export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImageTemplate = null }) {
-  const { sandboxes, overview } = useLive()
-  const providers = overview?.providers ?? []
+export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, ...props }) {
+  const inheritedLocation = useLocation()
+  const [selectedContext, setSelectedContext] = React.useState(null)
+  const templateLocation = props.initialImageTemplate?.location
+  const available = locations ?? []
+  const owner = templateLocation ?? requestedLocation
+  const location = owner
+    ? available.find((item) => item.context === owner.context) ?? (inheritedLocation?.context === owner.context ? inheritedLocation : owner)
+    : available.find((item) => item.context === selectedContext) ?? inheritedLocation ?? available.find((item) => item.connected) ?? null
+  React.useEffect(() => {
+    if (!props.open) setSelectedContext(null)
+  }, [props.open])
+  const changeLocation = (context) => {
+    const next = available.find((item) => item.context === context && item.connected)
+    if (!next) return
+    setSelectedContext(context)
+    onLocationChange?.(next)
+  }
+  return <LocationProvider location={location}>
+    <CreateSandboxForm key={location?.context ?? "default"} {...props} locations={available} onLocationChange={changeLocation} />
+  </LocationProvider>
+}
+
+function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate = null, locations, onLocationChange }) {
+  const api = useApi()
+  const location = useLocation()
+  const [sandboxes, setSandboxes] = React.useState([])
+  const [providers, setProviders] = React.useState([])
   const [name, setName] = React.useState("")
   const [images, setImages] = React.useState([])
   const [setupIds, setSetupIds] = React.useState([])
@@ -157,30 +187,44 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
   const [start, setStart] = React.useState("empty")
+  const cloud = useCloudMode()
   const [folder, setFolder] = React.useState("")
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
   const [org, setOrg] = React.useState(null)
+  // A prepared Quick-setup snapshot gets the egress policy of the setup it was prepared from.
+  const [setupSources, setSetupSources] = React.useState({})
   const [group, setGroup] = React.useState([])
 
   // A fresh sandbox starts in Quick setup; launching a saved template opens its tab.
   React.useEffect(() => {
-    if (!open) return
-    const list = sandboxes ?? []
-    setName(nextName(new Set(list.map((s) => s.name))))
+    if (!open || location?.connected === false) return
+    let current = true
+    setSandboxes([]); setProviders([])
+    api.overview().then((overview) => {
+      if (!current) return
+      const list = overview.sandboxes ?? []
+      const savedProviders = overview.providers ?? []
+      setSandboxes(list); setProviders(savedProviders)
+      setName(nextName(new Set(list.map((sandbox) => sandbox.name))))
+      setChosen(savedProviders.map((provider) => provider.name))
+    }).catch((e) => { if (current) setError(e.message) })
+    setName("")
     setMode(initialImageTemplate ? "template" : "quick")
     setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setProgress("")
     setSetupIds([])
     setShowBuild(false); setBuild(null); setBuildProgress(""); followLogs.current = true
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
-    api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
-    setChosen(providers.map((p) => p.name))
+    api.imageTemplates().then((items) => { if (current) setImages(items.filter((t) => t.status === "ready" || t.exists)) }).catch((e) => { if (current) setError(e.message) })
+    setChosen([])
     setError(null); setPolicyDraft(null); setOrg(null)
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
     setGroup([])
-    api.org().then(setOrg).catch((e) => { setOrg(null); setError(`Could not load groups: ${e.message}`) })
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+    api.org().then((value) => { if (current) setOrg(value) }).catch((e) => { if (current) { setOrg(null); setError(`Could not load groups: ${e.message}`) } })
+    api.setups().then((list) => { if (current) setSetupSources(Object.fromEntries(list.filter((s) => s.preparedFrom).map((s) => [s.id, s.preparedFrom.id]))) }).catch(() => { if (current) setSetupSources({}) })
+    return () => { current = false }
+  }, [open, api, location?.connected, initialImageTemplate])
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
   const selectedAgents = QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id))
@@ -217,7 +261,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
         .catch((e) => { if (!cancelled) setPreview({ error: e.message }) })
     }, 400)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [start, folder])
+  }, [start, folder, api])
 
   const groupReady = group.length > 0 && group.every((id) => org?.groups.some((g) => g.id === id)) && groupNetworkPolicies(org?.policies, group).length > 0
   const cloneDest = start === "repo" ? repoDest(repository) : null
@@ -227,7 +271,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
 
   async function submit(event) {
     event.preventDefault()
-    if (busy || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
+    if (busy || location?.connected === false || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
     setBusy(true); setError(null); setProgress(""); setBuild(null); setBuildProgress(""); followLogs.current = true
     const controller = new AbortController()
     preparation.current = controller
@@ -257,7 +301,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
       onOpenChange(false)
-      onCreated?.(created.name, { ...created, image: environment.image, providers: attachedProviders, createdAt: new Date().toISOString() })
+      onCreated?.(created.name, { ...created, image: environment.image, providers: attachedProviders, createdAt: new Date().toISOString(), ...(location ? { location } : {}) })
     } catch (e) {
       if (e.name !== "AbortError") setError(e.message)
     } finally {
@@ -273,6 +317,14 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
           <DialogHeader className="shrink-0">
             <DialogTitle>New sandbox</DialogTitle>
           </DialogHeader>
+          {locations.length > 0 && !initialImageTemplate ? <div className="grid shrink-0 gap-1.5">
+            <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
+            <Select value={location?.context ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: item.context, label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
+              <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
+              <SelectContent>{locations.map((item) => <SelectItem key={item.context} value={item.context} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
+            </Select>
+          </div> : <LocationBadge location={location} />}
+          {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to create a sandbox.</p>}
 
           <Tabs value={mode} onValueChange={(value) => { if (!busy) { setMode(value); setError(null) } }} className="contents">
             <TabsList className="w-full shrink-0" aria-label="Sandbox creation method">
@@ -280,7 +332,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               <TabsTrigger value="template" disabled={busy}>From template</TabsTrigger>
             </TabsList>
           <div className="-mx-1 min-h-0 flex-1 overflow-y-auto overscroll-contain px-1">
-          <fieldset disabled={busy} className="grid min-w-0 gap-4 pb-3">
+          <fieldset disabled={busy || location?.connected === false} className="grid min-w-0 gap-4 pb-3">
 
             <div className="grid gap-1.5">
               <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
@@ -288,7 +340,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
 
-            {org ? <GroupField org={org} value={group} onChange={setGroup}
+            {org ? <GroupField org={org} value={group} onChange={setGroup} setups={(mode === "quick" ? setupIds : chosenImage?.recipe?.setups ?? []).flatMap((id) => [id, setupSources[id]].filter(Boolean))}
               onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
               onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
               : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}
@@ -405,7 +457,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 <div className="grid min-w-0 gap-1.5">
                   <span className="text-xs font-medium">Start with</span>
                   <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-                    {FILE_STARTS.map((s) => (
+                    {FILE_STARTS.filter((s) => !cloud || s.id !== "folder").map((s) => (
                       <button key={s.id} type="button" onClick={() => setStart(s.id)} aria-pressed={start === s.id}
                         className={`flex-1 rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${start === s.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                         {s.label}
@@ -466,7 +518,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               } else onOpenChange(false)
             }}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
             {mode === "quick" && (preparing || build) && <Button ref={showBuildButton} type="button" variant="outline" aria-expanded={showBuild} aria-controls="quick-build-logs" onClick={() => setShowBuild(true)}>Show build</Button>}
-            <Button type="submit" disabled={busy || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+            <Button type="submit" disabled={busy || location?.connected === false || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
               {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
             </Button>
           </DialogFooter>

@@ -20,7 +20,7 @@ import {
 import { RuleEditor } from "@/components/rule-editor"
 import { BlockedHostsDialog, PolicyDialog, appliesTo, appliesToText, blockPatterns, newPolicy } from "@/components/egress-policies"
 import { HostTile } from "@/components/perimeter"
-import { api } from "@/lib/api"
+import { useApi, useLocation } from "@/lib/location-context"
 import { deleteNetworkPolicies } from "@/lib/delete-network-policies"
 import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
@@ -228,7 +228,7 @@ function RuleSelection({ label, checked, mixed = false, disabled, onChange }) {
     className="block size-4 cursor-pointer rounded border-border accent-[var(--action)] focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed" />
 }
 
-function PolicyRows({ policies, org, sandboxes, groups, assignments, onEdit, onEditBlocked, selected, onSelect, onSelectAll, onDelete, deleting }) {
+function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, selected, onSelect, onSelectAll, onDelete, deleting }) {
   const blocked = org?.org?.blocked ?? []
   const matchingSelected = policies.filter((p) => selected.has(p.id)).length
   const allSelected = policies.length > 0 && matchingSelected === policies.length
@@ -249,7 +249,7 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, onEdit, onE
           </li>
         )}
         {policies.map((p) => {
-          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, groups: groupFor({ assignments }, s.name) }))
+          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, groups: groupFor({ assignments }, s.name), setups: setupMembers?.[s.name] ?? [] }))
           const enforced = targets.filter((s) => s.status === "loaded" && s.rules.some((r) => r.key === `egress_${p.id}`)).length
           return (
             <li key={p.id} className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", POLICY_COLS, selected.has(p.id) && "bg-accent/40")}>
@@ -270,7 +270,8 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, onEdit, onE
   )
 }
 
-function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
+function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
+  const api = useApi()
   const [selected, setSelected] = React.useState(() => new Set())
   const [deleteTargets, setDeleteTargets] = React.useState(null)
   const [deleting, setDeleting] = React.useState(false)
@@ -358,7 +359,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
   // Opened for one sandbox: only the policies that reach it.
-  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, groups: groupFor(org, forSandbox) })
+  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, groups: groupFor(org, forSandbox), setups: org?.setupMembers?.[forSandbox] ?? [] })
   const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, groups)].join(" ").toLowerCase().includes(needle))
   const selectedPolicies = policies.filter((p) => selected.has(p.id))
   const matchingSelected = filteredPolicies.filter((p) => selected.has(p.id)).length
@@ -439,6 +440,10 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
         <Button variant="ghost" size="sm" disabled={deleting} onClick={() => setSelected(new Set())}>Clear selection</Button>
         <Button variant="destructive" size="sm" disabled={deleting} onClick={() => setDeleteTargets([...selectedPolicies])}><Trash2 className="size-3.5" />{deleting ? "Deleting…" : "Delete selected"}</Button>
       </div>}
+      {sandboxes.some((s) => s.source === "global") && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-50/60 px-6 py-2 text-xs text-amber-800">
+        <AlertTriangle className="size-3.5" /><span className="mr-auto">A global policy overrides every sandbox's network rules.</span>
+        <Button variant="outline" size="sm" onClick={onOpenGlobal}>Review</Button>
+      </div>}
       {deleteErrors.length > 0 && <div role="alert" className="border-b border-border px-6 py-2 text-xs text-destructive">
         <div className="flex items-center justify-between gap-2"><p>Some rules could not be deleted. Failed rules remain selected for retry.</p><Button variant="ghost" size="icon-sm" aria-label="Dismiss deletion errors" onClick={() => setDeleteErrors([])}><X className="size-3.5" /></Button></div>
         <ul className="max-h-28 overflow-auto">{deleteErrors.map((error) => <li key={error.id}><strong>{error.name}</strong>: {error.message}</li>)}</ul>
@@ -446,7 +451,7 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {count === 0 && !(view === "rules" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
-            {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
+            {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} setupMembers={org?.setupMembers} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
             {view === "destinations" && <>
               <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
               <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
@@ -639,12 +644,13 @@ function RevisionDots({ revisions, onOpen }) {
 }
 
 function RevisionSheet({ sandbox, version, latest, onClose, onRestore }) {
+  const api = useApi()
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
     setData(null)
     if (version == null) return
     api.revision(sandbox, version).then(setData).catch((e) => setData({ error: e.message }))
-  }, [sandbox, version])
+  }, [sandbox, version, api])
   return (
     <Sheet open={version != null} onOpenChange={(open) => { if (!open) onClose() }}>
       <SheetContent className="w-full! overflow-y-auto sm:max-w-[460px]!">
@@ -674,9 +680,60 @@ function BackLink({ onClick }) {
   )
 }
 
+function GlobalPanel({ onBack }) {
+  const api = useApi()
+  const [data, setData] = React.useState(null)
+  const [confirm, setConfirm] = React.useState(false)
+  const load = React.useCallback(() => api.globalPolicy().then(setData).catch((e) => setData({ error: e.message })), [api])
+  React.useEffect(() => { load() }, [load])
+  return (
+    <div className="space-y-6 px-4 py-5 sm:px-6">
+      <BackLink onClick={onBack} />
+      {!data ? <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p> : data.error ? <p className="py-16 text-center text-sm text-muted-foreground">{data.error}</p> : (
+        <>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">{data.active ? `Global policy · v${data.current?.revision.version}` : "No global policy"}</h2>
+            <p className="mt-3 text-[13px] text-muted-foreground">{data.active ? "Overrides every sandbox's own rules." : "Each sandbox follows its own rules."}</p>
+            {data.active && <Button variant="outline" className="mt-5 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5" onClick={() => setConfirm(true)}><ShieldOff />Remove</Button>}
+          </div>
+          {data.current?.policy?.rules.length > 0 && <Card className="divide-y divide-border/70 overflow-hidden">{data.current.policy.rules.map((rule) => <RuleRow key={rule.key} rule={rule} locked onOp={() => {}} />)}</Card>}
+          {data.revisions.length > 0 && (
+            <Section title="History">
+              <Card className="divide-y divide-border/60">
+                {data.revisions.map((r) => (
+                  <div key={r.version} className="flex h-11 items-center gap-3 px-5 text-[12.5px]">
+                    <span className={cn("size-1.5 rounded-full", REVISION[r.status]?.dot)} aria-hidden="true" />
+                    <span className="font-mono">v{r.version}</span><span className="text-muted-foreground">{REVISION[r.status]?.label}</span><span className="ml-auto text-muted-foreground">{relativeTime(r.createdAt)}</span>
+                  </div>
+                ))}
+              </Card>
+            </Section>
+          )}
+        </>
+      )}
+      <AlertDialog open={confirm} onOpenChange={setConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove the global policy?</AlertDialogTitle>
+            <AlertDialogDescription>Every sandbox reverts to its own rules.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={async () => {
+              try { await api.removeGlobal(); toast.success("Global policy removed"); load() } catch (e) { toast.error(e.message) } finally { setConfirm(false) }
+            }}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
 const FILTERS = [{ id: "all", label: "All" }, ...SOURCE_ORDER.map((s) => ({ id: s, label: SOURCE[s].label }))]
 
-function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, reloadSignal }) {
+function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, onOpenGlobal, reloadSignal }) {
+  const api = useApi()
+  const location = useLocation()
   const [policy, setPolicy] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [deleting, setDeleting] = React.useState(null)
@@ -685,7 +742,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onE
 
   const load = React.useCallback(async () => {
     try { const p = await api.policy(name); setPolicy(p); return p } catch (e) { setPolicy({ error: e.message }) }
-  }, [name])
+  }, [name, api])
   React.useEffect(() => { setPolicy(null); load() }, [load])
   React.useEffect(() => { if (reloadSignal) load() }, [reloadSignal]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -761,7 +818,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onE
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" className="rounded-lg" onClick={() => { try { sessionStorage.setItem("gateway-box", name) } catch { /* optional */ } onNavigate("sandboxes") }}>
+              <Button variant="outline" className="rounded-lg" onClick={() => { try { sessionStorage.setItem("gateway-box", location ? JSON.stringify({ name, location }) : name) } catch { /* optional */ } onNavigate("sandboxes") }}>
                 <Network />View sandbox
               </Button>
               <Button className="rounded-lg bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" disabled={busy || globalActive} onClick={() => onDraft(null, follow)}>
@@ -774,7 +831,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onE
 
       {policy && !policy.error && (
         <>
-          {globalActive && <p className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-[12.5px] text-amber-800"><AlertTriangle className="size-3.5" />Global policy in force · editing disabled</p>}
+          {globalActive && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-50/60 px-4 py-2 text-[12.5px] text-amber-800"><AlertTriangle className="size-3.5" /><span className="mr-auto">Global policy in force · editing disabled</span><Button variant="outline" size="sm" onClick={onOpenGlobal}>Review</Button></div>}
           {policy.configurationError && <p className="rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 font-mono text-[11.5px] text-red-700">{policy.configurationError}</p>}
 
           {denied.length > 0 && !globalActive && (
@@ -855,11 +912,24 @@ export const ALLOW_HANDOFF = "egress-allow"
 // Other pages open the network rules that reach one sandbox: its name.
 export const SANDBOX_HANDOFF = "egress-sandbox"
 // Other pages open the rule editor here: { new: { appliesTo } } or { edit: id }.
+// A page shown while Egress stays open also dispatches a window event of this name.
 export const POLICY_HANDOFF = "egress-policy"
+const takePolicyHandoff = () => {
+  try { const d = JSON.parse(sessionStorage.getItem(POLICY_HANDOFF) ?? "null"); sessionStorage.removeItem(POLICY_HANDOFF); return d } catch { return null }
+}
 
-export function EgressView({ onNavigate }) {
+export function EgressView(props) {
+  const location = useLocation()
+  return <ScopedEgressView key={location?.context ?? "default"} {...props} />
+}
+
+function ScopedEgressView({ onNavigate: navigate }) {
+  const api = useApi()
+  const location = useLocation()
+  const onNavigate = (view) => navigate(view, location)
   const live = useLive()
   const [scope, setScope] = React.useState(null)
+  const [showGlobal, setShowGlobal] = React.useState(false)
   // Other pages hand over one sandbox to show the rules that reach it.
   const [forSandbox, setForSandbox] = React.useState(() => {
     try { const s = sessionStorage.getItem(SANDBOX_HANDOFF); sessionStorage.removeItem(SANDBOX_HANDOFF); return s } catch { return null }
@@ -876,22 +946,25 @@ export function EgressView({ onNavigate }) {
   const loadFleet = React.useCallback(async () => {
     try { setFleet(await api.fleetPolicy()) } catch (e) { setFleet({ error: e.message, sandboxes: [] }) }
     try { setOrg(await api.org()) } catch { setOrg(null) }
-  }, [])
+  }, [api])
   React.useEffect(() => { loadFleet() }, [loadFleet])
 
   // The Groups page hands over a rule to add for a group, or one to edit.
-  const [policyHandoff] = React.useState(() => {
-    try { const d = JSON.parse(sessionStorage.getItem(POLICY_HANDOFF) ?? "null"); sessionStorage.removeItem(POLICY_HANDOFF); return d } catch { return null }
-  })
+  const [policyHandoff, setPolicyHandoff] = React.useState(takePolicyHandoff)
+  React.useEffect(() => {
+    // A rule handed over while this page is open may be new: reload to find it.
+    const take = () => { const d = takePolicyHandoff(); if (d) { setPolicyHandoff(d); loadFleet() } }
+    window.addEventListener(POLICY_HANDOFF, take)
+    return () => window.removeEventListener(POLICY_HANDOFF, take)
+  }, [loadFleet])
   React.useEffect(() => {
     if (policyHandoff?.new) setPolicyEditor({ initial: newPolicy({ appliesTo: { everyone: false, groups: [], sandboxes: [], ...policyHandoff.new.appliesTo } }) })
   }, [policyHandoff])
-  const handedOff = React.useRef(false)
+  const handedOff = React.useRef(null)
   React.useEffect(() => {
-    if (!policyHandoff?.edit || !org || handedOff.current) return
-    handedOff.current = true
+    if (!policyHandoff?.edit || !org || handedOff.current === policyHandoff) return
     const policy = org.policies.find((p) => p.id === policyHandoff.edit)
-    if (policy) setPolicyEditor({ initial: policy })
+    if (policy) { handedOff.current = policyHandoff; setPolicyEditor({ initial: policy }) }
   }, [policyHandoff, org])
 
   // The box graph hands over one blocked host to allow: open its rule, pre-filled.
@@ -910,7 +983,8 @@ export function EgressView({ onNavigate }) {
   }, [live.events])
 
   const open = (name) => { setScope(name); scroller.current?.scrollTo({ top: 0 }) }
-  const back = () => { setScope(null); loadFleet(); scroller.current?.scrollTo({ top: 0 }) }
+  const openGlobal = () => { setShowGlobal(true); scroller.current?.scrollTo({ top: 0 }) }
+  const back = () => { setScope(null); setShowGlobal(false); loadFleet(); scroller.current?.scrollTo({ top: 0 }) }
 
   // Allowing a blocked host is a new rule, pre-filled for where it was seen.
   function decide(kind, b) {
@@ -946,19 +1020,20 @@ export function EgressView({ onNavigate }) {
 
   return (
     <div ref={scroller} className="h-full overflow-y-auto">
-      {scope ? (
+      {showGlobal ? <GlobalPanel onBack={back} />
+        : scope ? (
           <SandboxDetail key={scope} name={scope} sandbox={fleet?.sandboxes?.find((s) => s.name === scope) ?? live.sandboxes?.find((s) => s.name === scope)}
-            events={live.events} onBack={back} onNavigate={onNavigate} reloadSignal={signal}
+            events={live.events} onBack={back} onNavigate={onNavigate} onOpenGlobal={openGlobal} reloadSignal={signal}
             onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} onEditPolicy={editPolicy} />
         ) : !fleet ? <p role="status" className="py-24 text-center text-sm text-muted-foreground">Loading…</p>
         : fleet.error ? <p role="alert" className="py-24 text-center text-sm text-muted-foreground">{fleet.error}</p>
-        : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
+        : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onOpenGlobal={openGlobal} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
             onEditPolicy={(p) => setPolicyEditor({ initial: p })} onEditBlocked={() => setEditingBlocked(true)}
             onAddPolicy={() => setPolicyEditor({ initial: newPolicy(forSandbox ? { appliesTo: { everyone: false, groups: groupFor(org, forSandbox), sandboxes: [] } } : {}) })}
             forSandbox={forSandbox} onClearSandbox={() => setForSandbox(null)} />}
 
       <PolicyDialog open={Boolean(policyEditor)} onOpenChange={(o) => { if (!o) setPolicyEditor(null) }} initial={policyEditor?.initial}
-        groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} assignments={org?.assignments ?? {}} knownPrograms={knownPrograms}
+        groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} assignments={org?.assignments ?? {}} setupMembers={org?.setupMembers ?? {}} knownPrograms={knownPrograms}
         onGroupCreated={() => api.org().then(setOrg).catch(() => {})}
         onSaved={(result, policy) => reportSync(result, `${result.deleted ? "Deleted" : "Saved"} ${policy.name}`)} />
       <BlockedHostsDialog open={editingBlocked} onOpenChange={setEditingBlocked} org={org?.org} onSaved={(result) => reportSync(result, "Saved blocked hosts")} />

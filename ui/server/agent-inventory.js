@@ -1,3 +1,4 @@
+import { contextKey, workspaceName } from './gateway.js'
 import { setupPython } from './setup-python.js'
 import { AGENTS } from '../src/lib/agents.js'
 
@@ -32,7 +33,8 @@ fi`).join('\n') + `\npython3 - <<'OPENSHELL_RESOURCES' 2>/dev/null\n${resourcePr
 export function createAgentInventory({ now = Date.now, ttl = 20_000 } = {}) {
   const cache = new Map()
   return async function inventory(client, sandbox, gatewayKey = '', revision = '') {
-    const key = `${gatewayKey}|${sandbox.workspace}|${sandbox.id || sandbox.name}|${sandbox.createdAt}|${revision}`
+    const workspace = sandbox.workspace || workspaceName()
+    const key = JSON.stringify([contextKey(), gatewayKey, workspace, sandbox.id || sandbox.name, sandbox.createdAt, revision])
     let entry = cache.get(key)
     if (sandbox.phase !== 'ready') {
       if (entry) entry.expires = 0
@@ -49,7 +51,7 @@ export function createAgentInventory({ now = Date.now, ttl = 20_000 } = {}) {
     entry.pending = (async () => {
       try {
         const result = await client.sandbox.exec(sandbox.name, ['/bin/sh', '-c', agentProbe], {
-          workspace: sandbox.workspace || 'default', timeoutSecs: 8,
+          workspace, timeoutSecs: 8,
           noLoginShell: true, signal: AbortSignal.timeout(10_000),
         })
         const lines = result.stdout.toString().trim().split('\n')

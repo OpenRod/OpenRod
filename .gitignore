@@ -7,6 +7,7 @@ dist/
 .claude/settings.local.json
 .state/
 *.log
+openshell-console-*.tgz
 
 # Local environment and authentication material
 .env
@@ -17,3 +18,10 @@ dist/
 *.key
 *.p12
 *.pfx
+
+# Infrastructure state and local configuration
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan

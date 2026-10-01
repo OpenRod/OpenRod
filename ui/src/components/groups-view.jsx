@@ -412,7 +412,7 @@ export function GroupsView({ onNavigate }) {
               <ul className="divide-y divide-border/60 bg-card">
                 {visible.map((s) => {
                   const current = groupFor(org, s.name)
-                  const reach = policiesFor(org.policies, { name: s.name, groups: current })
+                  const reach = policiesFor(org.policies, { name: s.name, groups: current, setups: org.setupMembers?.[s.name] ?? [] })
                   const on = selected.includes(s.name)
                   return (
                     <li key={s.name} className={cn("grid min-h-11 grid-cols-[28px_minmax(0,1.4fr)_minmax(180px,1fr)_minmax(0,1.2fr)] items-center gap-4 px-4 py-1.5 sm:px-6", on && "bg-accent/40")}>

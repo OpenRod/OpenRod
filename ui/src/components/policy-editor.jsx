@@ -11,7 +11,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { RuleEditor, describeRule } from '@/components/rule-editor'
 import { composeTemplate } from '../../shared/policy-templates.js'
 import { COMMON_FOLDERS, DESTINATION_PROGRAMS, filesystemPreset, folderAccess, setFolderAccess, availablePolicyId, destinationRule } from '@/lib/policy-editor'
-import { api } from '@/lib/api'
+import { useApi, useLocation } from '@/lib/location-context'
 
 const selectClass = 'h-8 max-w-full rounded-md border border-input bg-background px-2 text-xs'
 
@@ -106,7 +106,13 @@ function DestinationDialog({ open, onClose, onAdd, onAdvanced, rules }) {
   </Dialog>
 }
 
-export function PolicyEditor({ open, initial, onClose, onSaved, onDelete, knownPrograms, templates }) {
+export function PolicyEditor(props) {
+  const location = useLocation()
+  return <ScopedPolicyEditor key={location?.context ?? 'default'} {...props} />
+}
+
+function ScopedPolicyEditor({ open, initial, onClose, onSaved, onDelete, knownPrograms, templates }) {
+  const api = useApi()
   const [t, setT] = React.useState(null)
   const [source, setSource] = React.useState('')
   const [rule, setRule] = React.useState(null)

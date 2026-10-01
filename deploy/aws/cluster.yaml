@@ -1,0 +1,43 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: openshell-remote
+  region: eu-central-1
+  version: "1.35"
+
+availabilityZones:
+  - eu-central-1a
+  - eu-central-1b
+
+iam:
+  withOIDC: true
+
+vpc:
+  nat:
+    gateway: Disable
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+
+addons:
+  - name: vpc-cni
+    configurationValues: '{"enableNetworkPolicy":"true"}'
+  - name: aws-ebs-csi-driver
+    wellKnownPolicies:
+      ebsCSIController: true
+
+managedNodeGroups:
+  - name: sandbox-workers
+    instanceType: t3.large
+    amiFamily: AmazonLinux2023
+    minSize: 1
+    desiredCapacity: 1
+    maxSize: 2
+    volumeSize: 40
+    privateNetworking: false
+    labels:
+      workload: openshell
+    tags:
+      project: openshell-console
+      environment: development

@@ -49,10 +49,10 @@ export function newRecipe(values = {}) {
   return recipe
 }
 export const splitPackages = (text) => text.split(/[\s,]+/).filter(Boolean)
-export const PENDING_RECIPE_KEY = 'openshell-image-recipe-v2'
-export function pendingRecipe() {
+export const pendingRecipeKey = (context) => `openshell-image-recipe-v3:${context}`
+export function pendingRecipe(key) {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(PENDING_RECIPE_KEY))
+    const saved = JSON.parse(sessionStorage.getItem(key))
     return saved?.recipe && typeof saved.recipe.name === 'string' ? saved : null
   } catch { return null }
 }
