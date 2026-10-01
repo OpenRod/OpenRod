@@ -10,12 +10,15 @@ import { pathToFileURL } from 'node:url'
 async function fixture(t) {
   const source = path.resolve(import.meta.dirname, '..')
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'setup-import-'))
-  t.after(() => fs.rm(root, { recursive: true, force: true }))
-  const previousData = process.env.OPENSHELL_CONSOLE_DATA_DIR
-  process.env.OPENSHELL_CONSOLE_DATA_DIR = path.join(root, 'state')
-  t.after(() => {
-    if (previousData === undefined) delete process.env.OPENSHELL_CONSOLE_DATA_DIR
-    else process.env.OPENSHELL_CONSOLE_DATA_DIR = previousData
+  const keys = ['OPENSHELL_CONSOLE_DATA_DIR', 'OPENSHELL_GATEWAY', 'OPENSHELL_WORKSPACE']
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]))
+  Object.assign(process.env, { OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: 'setup-import-fixture', OPENSHELL_WORKSPACE: 'default' })
+  t.after(async () => {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key]
+      else process.env[key] = previous[key]
+    }
+    await fs.rm(root, { recursive: true, force: true })
   })
   for (const dir of ['server', 'shared', 'src']) await fs.cp(path.join(source, dir), path.join(root, dir), { recursive: true })
   await fs.copyFile(path.join(source, 'package.json'), path.join(root, 'package.json'))
@@ -38,14 +41,14 @@ export async function oauthFetch(input) {
 `)
   const load = file => import(pathToFileURL(path.join(root, file)))
   const { createSetupStore, usableSetup } = await load('server/setups.js')
+  const { scopedStateDirectory, policyDirectory } = await load('server/paths.js')
   const { normalizeMcp } = await load('server/setup-discovery.js')
   const { prepareImport, preparationStatus } = await load('server/setup-preparation.js')
   const { importSetup } = await load('src/lib/import-setup.js')
-  const { policyDirectory } = await load('server/paths.js')
   const policyDir = await policyDirectory()
   const remote = await load('server/setup-remote-check.js')
   const metadata = await load('server/setup-http.js')
-  const store = createSetupStore({ home: path.join(root, 'home'), dir: path.join(root, 'saved') })
+  const store = createSetupStore({ home: path.join(root, 'home'), dir: path.join(scopedStateDirectory(), 'setups') })
   const api = {
     prepareSetup: (token, items) => prepareImport(store, { token, items, approved: true }),
     setupPreparation: preparationStatus,

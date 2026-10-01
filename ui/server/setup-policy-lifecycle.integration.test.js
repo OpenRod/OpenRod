@@ -10,12 +10,15 @@ import { pathToFileURL } from 'node:url'
 async function fixture(t) {
   const source = path.resolve(import.meta.dirname, '..')
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'setup-policy-lifecycle-')))
-  t.after(() => fs.rm(root, { recursive: true, force: true }))
-  const previousData = process.env.OPENSHELL_CONSOLE_DATA_DIR
-  process.env.OPENSHELL_CONSOLE_DATA_DIR = path.join(root, 'state')
-  t.after(() => {
-    if (previousData === undefined) delete process.env.OPENSHELL_CONSOLE_DATA_DIR
-    else process.env.OPENSHELL_CONSOLE_DATA_DIR = previousData
+  const keys = ['OPENSHELL_CONSOLE_DATA_DIR', 'OPENSHELL_GATEWAY', 'OPENSHELL_WORKSPACE']
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]))
+  Object.assign(process.env, { OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: 'setup-lifecycle-fixture', OPENSHELL_WORKSPACE: 'default' })
+  t.after(async () => {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key]
+      else process.env[key] = previous[key]
+    }
+    await fs.rm(root, { recursive: true, force: true })
   })
   for (const part of ['server', 'shared', 'src/lib']) await fs.cp(path.join(source, part), path.join(root, part), { recursive: true })
   await fs.copyFile(path.join(source, 'package.json'), path.join(root, 'package.json'))
@@ -24,6 +27,7 @@ async function fixture(t) {
   await fs.rename(file, path.join(root, 'server/gateway-original.js'))
   await fs.writeFile(file, `
 export * from './gateway-original.js'
+import { contextSelection, workspaceScope } from './gateway-original.js'
 import { create } from '@bufbuild/protobuf'
 import { NetworkPolicyRuleSchema } from '@nvidia/openshell-sdk/raw'
 export const state = { rules: {}, attempts: 0, down: false }
@@ -44,7 +48,7 @@ const raw = {
   async getGatewayConfig() { return { settings: { proposal_approval_mode: {value: {value: 'manual'}}, agent_policy_proposals_enabled: {value: {value: false}} } } },
   async getDraftPolicy() { state.afterSweep?.(); return { chunks: [] } },
 }
-export async function gateway() { return { client: { raw }, target: { endpoint: 'fixture://gateway' } } }
+export async function gateway(context = contextSelection()) { return { client: { raw }, target: { name: context.gateway, endpoint: 'fixture://gateway' }, workspace: context.workspace, workspaceScope: workspaceScope(context.workspace) } }
 `)
   const module = name => import(pathToFileURL(path.join(root, 'server', name)))
   const { getSetupStore, setupRoute } = await module('setups.js')

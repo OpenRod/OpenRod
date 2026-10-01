@@ -14,6 +14,8 @@ import { Toaster } from "@/components/ui/sonner"
 import { CloudAccount, useCloudMode } from "@/components/auth-gate"
 import { LiveProvider, useLive } from "@/lib/live"
 import { Button } from "@/components/ui/button"
+import { LocationProvider } from "@/lib/location-context"
+import { LocationBadge } from "@/components/location-badge"
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -46,16 +48,30 @@ class PageBoundary extends React.Component {
   }
 }
 
+function locationFromHash() {
+  const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "")
+  const gateway = params.get("gateway"), workspace = params.get("workspace")
+  if (!gateway || !workspace) return null
+  const remote = params.get("remote") === "1"
+  return { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, remote, label: params.get("label") || (remote ? `SSH · ${gateway}` : "Local") }
+}
+
+function ScopedPage({ location, children }) {
+  return location ? <LocationProvider location={location}><LiveProvider>{children}</LiveProvider></LocationProvider> : children
+}
+
 // A browser terminal is its own tab: `#terminal/<sandbox>?session=<program>`.
 function terminalFromLocation() {
   const match = /^#terminal\/([a-z0-9-]{1,63})(?:\?(.*))?$/.exec(window.location.hash)
   if (!match) return null
   const params = new URLSearchParams(match[2] ?? "")
-  return { name: match[1], session: params.get("session") || undefined, setupLogin: params.get("setupLogin") || undefined, mcp: params.get("mcp") || undefined }
+  const gateway = params.get("gateway"), workspace = params.get("workspace")
+  const location = gateway && workspace ? { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true } : null
+  return { name: match[1], session: params.get("session") || undefined, setupLogin: params.get("setupLogin") || undefined, mcp: params.get("mcp") || undefined, location }
 }
 
 function viewFromLocation() {
-  const view = window.location.hash.slice(1)
+  const view = window.location.hash.slice(1).split("?")[0]
   if (view === "policies") {
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#egress`)
     return "egress"
@@ -98,28 +114,36 @@ export function App() {
   const [view, setView] = React.useState(viewFromLocation)
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
   const [setupOpen, setSetupOpen] = React.useState(false)
+  const [pageLocation, setPageLocation] = React.useState(locationFromHash)
   const connectMachine = cloud ? undefined : () => setSetupOpen(true)
   React.useEffect(() => {
-    const sync = () => { setView(viewFromLocation()); setTerminal(terminalFromLocation()) }
+    const sync = () => { setView(viewFromLocation()); setTerminal(terminalFromLocation()); setPageLocation(locationFromHash()) }
     window.addEventListener("popstate", sync)
     window.addEventListener("hashchange", sync)
+    const scopedNavigate = (event) => navigate(event.detail.view, event.detail.location)
+    window.addEventListener("openrod-navigate", scopedNavigate)
     return () => {
       window.removeEventListener("popstate", sync)
       window.removeEventListener("hashchange", sync)
+      window.removeEventListener("openrod-navigate", scopedNavigate)
     }
   }, [])
 
-  function navigate(next) {
+  function navigate(next, location = null) {
     if (!TITLES[next]) return
     setView(next)
-    window.history.pushState(null, "", next === "sandboxes" ? window.location.pathname : `#${next}`)
+    setPageLocation(location)
+    const params = location ? `?${new URLSearchParams({ gateway: location.gateway, workspace: location.workspace, label: location.label, remote: location.remote ? "1" : "0" })}` : ""
+    window.history.pushState(null, "", next === "sandboxes" && !location ? window.location.pathname : `#${next}${params}`)
   }
 
   if (terminal) {
     return (
       <>
         <React.Suspense fallback={null}>
-          <TerminalView key={`${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} setupLogin={terminal.setupLogin} mcp={terminal.mcp} />
+          <LocationProvider location={terminal.location}>
+            <TerminalView key={`${terminal.location?.context ?? ""} ${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} setupLogin={terminal.setupLogin} mcp={terminal.mcp} />
+          </LocationProvider>
         </React.Suspense>
         <Toaster position="bottom-right" />
       </>
@@ -134,11 +158,13 @@ export function App() {
           <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-8">
             <SidebarTrigger className="mr-2 md:hidden" />
             <h1 className="text-[18px] font-semibold tracking-tight">{TITLES[view]}</h1>
+            {pageLocation && <span className="ml-3"><LocationBadge location={pageLocation} /></span>}
             <CloudAccount />
           </header>
           <SetupImportNotifications />
-          <PageBoundary view={view}>
-          <ConnectionGate onSetup={connectMachine}>
+          <PageBoundary key={`${view}:${pageLocation?.context ?? ""}`} view={view}>
+          <ScopedPage location={pageLocation}>
+          <ConnectionGate onSetup={view === "sandboxes" || view === "templates" ? undefined : connectMachine}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} onConnect={connectMachine} />}
           {view === "activity" && <ActivityView />}
           {view === "groups" && <GroupsView onNavigate={navigate} />}
@@ -147,6 +173,7 @@ export function App() {
           {view === "templates" && <TemplatesView />}
           {view === "setups" && <SetupsView />}
           </ConnectionGate>
+          </ScopedPage>
           </PageBoundary>
         </SidebarInset>
         {!cloud && <GatewaySetup open={setupOpen} onOpenChange={setSetupOpen} initialMode="ssh" />}

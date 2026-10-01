@@ -25,19 +25,19 @@ export function createSetupImportJobs(api, workflow = importSetup) {
       if (!run) return
       run.cancelled = true
       const job = snapshot.find(job => job.id === id)
-      if (job?.preparation?.status === 'running') await api.cancelSetupPreparation(job.preparation.id)
+      if (job?.preparation?.status === 'running') await run.api.cancelSetupPreparation(job.preparation.id)
     },
-    start({ id = crypto.randomUUID(), review, name, choices = {}, resumeJob, saveOnly = false }, callbacks = {}) {
+    start({ id = crypto.randomUUID(), review, name, choices = {}, resumeJob, saveOnly = false, api: ownerApi = api, location = null }, callbacks = {}) {
       if (active.has(id)) return { id, promise: active.get(id).promise }
-      const run = { cancelled: false }
+      const run = { cancelled: false, api: ownerApi }
       active.set(id, run)
-      snapshot = [...snapshot.filter(job => job.id !== id), { id, name, review, prepared: saveOnly, status: 'importing', message: saveOnly ? 'Saving your setup…' : 'Preparing your tools…' }]
+      snapshot = [...snapshot.filter(job => job.id !== id), { id, name, review, location, prepared: saveOnly, status: 'importing', message: saveOnly ? 'Saving your setup…' : 'Preparing your tools…' }]
       listeners.forEach(listener => listener())
       run.promise = (async () => {
         try {
           const result = saveOnly
-            ? { status: 'saved', setup: await api.saveSetup(review.token, name, true), inactive: review.items.filter(item => !item.disabled && item.issues?.length).map(item => item.name) }
-            : await workflow(api, review, name, choices, {
+            ? { status: 'saved', setup: await ownerApi.saveSetup(review.token, name, true), inactive: review.items.filter(item => !item.disabled && item.issues?.length).map(item => item.name) }
+            : await workflow(ownerApi, review, name, choices, {
               resumeJob,
               isCancelled: () => run.cancelled,
               onProgress: preparation => {
