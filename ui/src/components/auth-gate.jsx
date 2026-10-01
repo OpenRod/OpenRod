@@ -1,8 +1,6 @@
 import { LocalReturn } from './local-return'
 import { CloudMachine } from './cloud-machine'
 import * as React from 'react'
-import { Cloud } from 'lucide-react'
-import { buttonVariants } from '@/components/ui/button'
 
 async function authRequest(path, body) {
   const response = await fetch(`/api/auth/${path}`, {
@@ -18,13 +16,7 @@ const AuthContext = React.createContext(null)
 export const useCloudMode = () => Boolean(React.useContext(AuthContext)?.user)
 export function CloudAccount() {
   const account = React.useContext(AuthContext)
-  if (!account?.user) return <a
-    href="https://cloud.example.com"
-    target="_blank"
-    rel="noopener noreferrer"
-    aria-label="Build in cloud (opens in a new tab)"
-    className={buttonVariants({ size: 'sm', className: 'ml-auto gap-2' })}
-  ><Cloud aria-hidden="true" />Build in cloud</a>
+  if (!account?.user) return null
   return <div className="ml-auto flex items-center gap-3 text-xs"><span className="max-w-40 truncate text-muted-foreground">{account.user.email}</span><button className="underline underline-offset-4" onClick={account.logout}>Sign out</button></div>
 }
 export function AuthGate({ children }) {
