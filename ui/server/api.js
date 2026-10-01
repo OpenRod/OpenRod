@@ -21,6 +21,7 @@ import { terminalRoute, terminalUpgrade } from './terminal.js'
 import { assertPackagesPrepared } from '../shared/setup-launch.js'
 import { setupRoute, resolveSetups } from './setups.js'
 import { deploymentRoute, startSetupInstall, launchSetupAccess, setupJobsForSandbox } from './setup-deployment.js'
+import { setSandboxSetups, forgetSandbox } from './setup-members.js'
 import { sshRoute } from './ssh.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
@@ -124,7 +125,7 @@ async function sandboxDetail(name) {
 // ---- writes -----------------------------------------------------------------
 
 export async function createSandbox(input, { sessionOverride = false } = {}) {
-  const { client } = await gateway()
+  const { client, target } = await gateway()
   // An image template is an OpenShell sandbox template: the gateway supplies
   // its image and environment; the console adds how the sandbox starts.
   const saved = input.imageTemplate ? await imageTemplateForLaunch(String(input.imageTemplate)) : null
@@ -143,6 +144,8 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
   const setupTargets = input.setupTargets ?? setupTargetsFor(saved?.recipe?.agents ?? [])
   const selectedSetups = await resolveSetups(setupIds)
   assertPackagesPrepared(selectedSetups)
+  // A Setup's egress policy reaches sandboxes that use it, or a Quick-setup snapshot of it.
+  const setupMembers = [...new Set(selectedSetups.flatMap((s) => [s.id, s.preparedFrom?.id].filter(Boolean)))]
   const approvedSetupRevisions = launchSetupAccess(selectedSetups, saved?.recipe, input.setupAccessReview, input.includeTemplateAccess === true)
   if (setupIds.length) { try { validateSetupTargets(setupTargets) } catch (error) { throw fail(error.message) } }
   if (setupIds.length) input = { ...input, session: 'shell', command: [] }
@@ -164,7 +167,7 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
   // group label. The whole policy (template + organization + group rules) is
   // resolved here from stored policy, never accepted raw from the browser.
   let labels
-  const { plan, ref } = await createInGroups({ name: String(input.name ?? ''), groups: input.groups ?? input.group, template: input.template ? String(input.template) : null, accessTemplates: input.accessTemplates, agentRules, requireGroup: true }, async (plan) => {
+  const { plan, ref } = await createInGroups({ name: String(input.name ?? ''), groups: input.groups ?? input.group, template: input.template ? String(input.template) : null, accessTemplates: input.accessTemplates, agentRules, requireGroup: true, setups: setupMembers }, async (plan) => {
     labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels(), ...(seed?.project ? { [PROJECT_LABEL]: seed.project } : {}) }
     await enforcePolicyOnly(client)
     const spec = {
@@ -176,9 +179,13 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
       // Interactive sessions run through exec, independently of the main process.
       tty: launch.tty,
     }
-    return saved
-      ? client.sandbox.createFromTemplate({ ...spec, workloadTemplate: saved.name })
-      : client.sandbox.create({ ...spec, ...(image ? { image } : {}) })
+    const created = saved
+      ? await client.sandbox.createFromTemplate({ ...spec, workloadTemplate: saved.name })
+      : await client.sandbox.create({ ...spec, ...(image ? { image } : {}) })
+    // Labels are fixed at creation, so Setup membership is bound to the
+    // gateway and immutable id returned for this new sandbox.
+    await setSandboxSetups({ name: created.name, id: created.id, gateway: target.endpoint }, setupMembers)
+    return created
   })
   const template = plan.template
   // Services a template opens at start go through the same path as opening
@@ -190,18 +197,20 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
   // Files arrive once the sandbox is ready, as with `sandbox create --upload`.
   // Console sessions start through exec, so an agent opened later finds them.
   if (seed) startSeed(ref.name, seed)
-  if (setupIds.length) await startSetupInstall(ref.name, setupIds, setupTargets, ref.id, approvedSetupRevisions)
+  if (setupIds.length) await startSetupInstall(ref.name, setupIds, setupTargets, ref.id, approvedSetupRevisions, target.endpoint)
   return { name: ref.name, phase: ref.phase, opened, labels, setups: setupIds, seed: seed ? { kind: seed.kind, source: seed.source, dest: seed.dest } : null }
 }
 
 async function lifecycle(name, action) {
-  const { client } = await gateway()
+  const { client, target } = await gateway()
   if (action === 'stop') await client.raw.stopSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
   else if (action === 'start') await client.raw.startSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
   else if (action === 'delete') {
+    const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
     const result = await client.sandbox.delete(name)
     // A later sandbox with this name must not inherit its group.
     await assignGroup([name], null, { forget: true })
+    try { await forgetSandbox({ ...sandbox, gateway: target.endpoint }) } catch { /* the sandbox is deleted either way */ }
     return result
   }
   return { ok: true }

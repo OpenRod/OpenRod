@@ -228,7 +228,7 @@ function RuleSelection({ label, checked, mixed = false, disabled, onChange }) {
     className="block size-4 cursor-pointer rounded border-border accent-[var(--action)] focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed" />
 }
 
-function PolicyRows({ policies, org, sandboxes, groups, assignments, onEdit, onEditBlocked, selected, onSelect, onSelectAll, onDelete, deleting }) {
+function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, selected, onSelect, onSelectAll, onDelete, deleting }) {
   const blocked = org?.org?.blocked ?? []
   const matchingSelected = policies.filter((p) => selected.has(p.id)).length
   const allSelected = policies.length > 0 && matchingSelected === policies.length
@@ -249,7 +249,7 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, onEdit, onE
           </li>
         )}
         {policies.map((p) => {
-          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, groups: groupFor({ assignments }, s.name) }))
+          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, groups: groupFor({ assignments }, s.name), setups: setupMembers?.[s.name] ?? [] }))
           const enforced = targets.filter((s) => s.status === "loaded" && s.rules.some((r) => r.key === `egress_${p.id}`)).length
           return (
             <li key={p.id} className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", POLICY_COLS, selected.has(p.id) && "bg-accent/40")}>
@@ -358,7 +358,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
   // Opened for one sandbox: only the policies that reach it.
-  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, groups: groupFor(org, forSandbox) })
+  const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, groups: groupFor(org, forSandbox), setups: org?.setupMembers?.[forSandbox] ?? [] })
   const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, groups)].join(" ").toLowerCase().includes(needle))
   const selectedPolicies = policies.filter((p) => selected.has(p.id))
   const matchingSelected = filteredPolicies.filter((p) => selected.has(p.id)).length
@@ -450,7 +450,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {count === 0 && !(view === "rules" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
-            {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
+            {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} setupMembers={org?.setupMembers} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
             {view === "destinations" && <>
               <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
               <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
@@ -907,7 +907,11 @@ export const ALLOW_HANDOFF = "egress-allow"
 // Other pages open the network rules that reach one sandbox: its name.
 export const SANDBOX_HANDOFF = "egress-sandbox"
 // Other pages open the rule editor here: { new: { appliesTo } } or { edit: id }.
+// A page shown while Egress stays open also dispatches a window event of this name.
 export const POLICY_HANDOFF = "egress-policy"
+const takePolicyHandoff = () => {
+  try { const d = JSON.parse(sessionStorage.getItem(POLICY_HANDOFF) ?? "null"); sessionStorage.removeItem(POLICY_HANDOFF); return d } catch { return null }
+}
 
 export function EgressView({ onNavigate }) {
   const live = useLive()
@@ -933,18 +937,21 @@ export function EgressView({ onNavigate }) {
   React.useEffect(() => { loadFleet() }, [loadFleet])
 
   // The Groups page hands over a rule to add for a group, or one to edit.
-  const [policyHandoff] = React.useState(() => {
-    try { const d = JSON.parse(sessionStorage.getItem(POLICY_HANDOFF) ?? "null"); sessionStorage.removeItem(POLICY_HANDOFF); return d } catch { return null }
-  })
+  const [policyHandoff, setPolicyHandoff] = React.useState(takePolicyHandoff)
+  React.useEffect(() => {
+    // A rule handed over while this page is open may be new: reload to find it.
+    const take = () => { const d = takePolicyHandoff(); if (d) { setPolicyHandoff(d); loadFleet() } }
+    window.addEventListener(POLICY_HANDOFF, take)
+    return () => window.removeEventListener(POLICY_HANDOFF, take)
+  }, [loadFleet])
   React.useEffect(() => {
     if (policyHandoff?.new) setPolicyEditor({ initial: newPolicy({ appliesTo: { everyone: false, groups: [], sandboxes: [], ...policyHandoff.new.appliesTo } }) })
   }, [policyHandoff])
-  const handedOff = React.useRef(false)
+  const handedOff = React.useRef(null)
   React.useEffect(() => {
-    if (!policyHandoff?.edit || !org || handedOff.current) return
-    handedOff.current = true
+    if (!policyHandoff?.edit || !org || handedOff.current === policyHandoff) return
     const policy = org.policies.find((p) => p.id === policyHandoff.edit)
-    if (policy) setPolicyEditor({ initial: policy })
+    if (policy) { handedOff.current = policyHandoff; setPolicyEditor({ initial: policy }) }
   }, [policyHandoff, org])
 
   // The box graph hands over one blocked host to allow: open its rule, pre-filled.
@@ -1013,7 +1020,7 @@ export function EgressView({ onNavigate }) {
             forSandbox={forSandbox} onClearSandbox={() => setForSandbox(null)} />}
 
       <PolicyDialog open={Boolean(policyEditor)} onOpenChange={(o) => { if (!o) setPolicyEditor(null) }} initial={policyEditor?.initial}
-        groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} assignments={org?.assignments ?? {}} knownPrograms={knownPrograms}
+        groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} assignments={org?.assignments ?? {}} setupMembers={org?.setupMembers ?? {}} knownPrograms={knownPrograms}
         onGroupCreated={() => api.org().then(setOrg).catch(() => {})}
         onSaved={(result, policy) => reportSync(result, `${result.deleted ? "Deleted" : "Saved"} ${policy.name}`)} />
       <BlockedHostsDialog open={editingBlocked} onOpenChange={setEditingBlocked} org={org?.org} onSaved={(result) => reportSync(result, "Saved blocked hosts")} />

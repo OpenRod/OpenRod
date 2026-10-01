@@ -93,9 +93,11 @@ function FolderSummary({ plan, sandbox }) {
 }
 
 // Which group the sandbox joins, and what network access that brings.
-function GroupField({ org, value, onChange, onCreated, onAddPolicy }) {
+function GroupField({ org, value, onChange, onCreated, onAddPolicy, setups = [] }) {
   const reducedMotion = useReducedMotion()
   const reach = groupNetworkPolicies(org.policies, value)
+  // Setup egress policies come with the selected MCPs & Skills, not the groups.
+  const fromSetups = (org.policies ?? []).filter((p) => (p.appliesTo.setups ?? []).some((id) => setups.includes(id)))
   const counts = Object.fromEntries(org.groups.map((g) => [g.id, org.members?.[g.id]?.length ?? 0]))
   const chosen = org.groups.filter((g) => value.includes(g.id))
   return (
@@ -109,6 +111,7 @@ function GroupField({ org, value, onChange, onCreated, onAddPolicy }) {
           : org.groups.length ? "Groups let network rules follow sandboxes. Choose one or more. You can change memberships later on the Groups page."
           : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
       </motion.p>
+      {fromSetups.length > 0 && <p className="text-[11px] leading-relaxed text-muted-foreground">Its MCPs &amp; Skills add <span className="text-foreground">{fromSetups.map((p) => p.name).join(", ")}</span>.</p>}
       {chosen.length > 0 && !reach.length && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={onAddPolicy}>Add network rule</Button>}
     </fieldset>
   )
@@ -163,6 +166,8 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
   const [org, setOrg] = React.useState(null)
+  // A prepared Quick-setup snapshot gets the egress policy of the setup it was prepared from.
+  const [setupSources, setSetupSources] = React.useState({})
   const [group, setGroup] = React.useState([])
 
   // A fresh sandbox starts in Quick setup; launching a saved template opens its tab.
@@ -182,6 +187,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
     setGroup([])
     api.org().then(setOrg).catch((e) => { setOrg(null); setError(`Could not load groups: ${e.message}`) })
+    api.setups().then((list) => setSetupSources(Object.fromEntries(list.filter((s) => s.preparedFrom).map((s) => [s.id, s.preparedFrom.id])))).catch(() => setSetupSources({}))
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
@@ -290,7 +296,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
 
-            {org ? <GroupField org={org} value={group} onChange={setGroup}
+            {org ? <GroupField org={org} value={group} onChange={setGroup} setups={(mode === "quick" ? setupIds : chosenImage?.recipe?.setups ?? []).flatMap((id) => [id, setupSources[id]].filter(Boolean))}
               onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
               onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
               : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}

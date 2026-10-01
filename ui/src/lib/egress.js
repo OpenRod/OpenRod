@@ -4,10 +4,12 @@ import { groupIds } from "../../shared/group-membership.js"
 // and the Network page, so coverage shown in the browser matches what the
 // server writes into each sandbox.
 
-// A policy reaches every sandbox, the sandboxes in its groups, or named ones.
+// A policy reaches every sandbox, the sandboxes in its groups, named ones, or
+// the sandboxes that use one of its MCPs & Skills setups.
 export const appliesTo = (policy, sandbox) => policy.appliesTo.everyone
   || groupIds(sandbox.groups ?? sandbox.group).some((id) => policy.appliesTo.groups.includes(id))
   || policy.appliesTo.sandboxes.includes(sandbox.name)
+  || (policy.appliesTo.setups ?? []).some((id) => (sandbox.setups ?? []).includes(id))
 
 // Blocking example.com also blocks its subdomains. OpenShell rejects `**.com`,
 // so a bare top-level name stays exact.

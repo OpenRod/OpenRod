@@ -6,7 +6,7 @@ export async function connectCredentials(item, input = {}, source = {}) {
   if (!item.credentialFields?.length) return item
   const { client } = await gateway()
   const hosts = item.requirements.filter((r) => r.phase === 'runtime')
-  if (!hosts.length) throw fail('Add the exact runtime destinations before connecting credentials.')
+  if (!hosts.length) throw fail('Enter where this MCP sends its credentials (for example api.github.com), then try the import again.')
   let provider, aliases = {}
   if (input.provider) {
     if (!/^[a-z0-9][a-z0-9-]{0,61}$/.test(input.provider)) throw fail('Choose an existing OpenShell secret.')

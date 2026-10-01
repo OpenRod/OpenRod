@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { WORKSPACE, gateway, iso, policyView, providerView, sandboxView } from './gateway.js'
-import { blockedBy, isManaged, managedOpsFor, readOrg } from './org.js'
+import { blockedBy, isManaged, managedOpsFor, readOrg, serializeOrgWrite } from './org.js'
 
 const exec = promisify(execFile)
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
@@ -189,7 +189,11 @@ function mergeOp(op) {
   }
 }
 
-async function applyOps(sandbox, ops) {
+function applyOps(sandbox, ops) {
+  return serializeOrgWrite(() => applyOpsWhileLocked(sandbox, ops))
+}
+
+async function applyOpsWhileLocked(sandbox, ops) {
   if (!Array.isArray(ops) || !ops.length || ops.length > 20) throw fail('Nothing to apply.')
   const org = await readOrg()
   for (const op of ops) {
@@ -197,11 +201,11 @@ async function applyOps(sandbox, ops) {
     const hit = blockedBy(org, hosts)
     if (hit) throw fail(`${hit.host} is blocked by organization policy (${hit.pattern}).`, 403)
   }
-  const { client } = await gateway()
+  const { client, target } = await gateway()
   // A block covers every port the sandbox opens, so a rule that opens a new
   // port takes the recomputed blocks along in the same revision.
   const opened = ops.flatMap((op) => (op.kind === 'addRule' ? (op.rule?.endpoints ?? []).flatMap((e) => e.ports ?? []) : ['addAllow', 'addDeny'].includes(op.kind) ? op.ports ?? [] : [])).map(Number)
-  const managed = opened.some((p) => ![443, 80].includes(p)) ? await managedOpsFor(client, sandbox, opened) : []
+  const managed = opened.some((p) => ![443, 80].includes(p)) ? await managedOpsFor(client, sandbox, opened, target.endpoint) : []
   const response = await client.raw.updateConfig({
     sandbox, workspaceScope: WORKSPACE, global: false,
     mergeOperations: [...ops.map(mergeOp), ...managed],

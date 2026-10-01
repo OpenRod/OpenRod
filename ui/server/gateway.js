@@ -30,11 +30,37 @@ export function resolveGateway() {
   }
 }
 
+// Unary requests must release policy queues when the gateway stalls. A finite
+// command also bounds its transport; watches and interactive terminals retain
+// their caller-controlled lifetime. Explicit RPC timeouts are preserved.
+export async function connectGateway(target, { unaryTimeoutMs = 15000, execGraceMs = 5000 } = {}) {
+  const client = await OpenShellClient.connect({ gateway: target.endpoint, ...target.tls })
+  const transport = client.transport
+  const unary = transport.unary.bind(transport), stream = transport.stream.bind(transport)
+  transport.unary = (method, signal, timeoutMs, ...rest) => unary(method, signal, timeoutMs === undefined ? unaryTimeoutMs : timeoutMs, ...rest)
+  transport.stream = async (method, signal, timeoutMs, header, input, contextValues) => {
+    if (timeoutMs !== undefined || method.name !== 'ExecSandbox') return stream(method, signal, timeoutMs, header, input, contextValues)
+    // ExecSandbox is server-streaming: its first (only) request carries the
+    // execution timeout. Replay it intact before delegating to the transport.
+    const iterator = input[Symbol.asyncIterator](), first = await iterator.next()
+    const duration = first.value?.executionTimeout
+    const executionMs = Number(duration?.seconds ?? 0) * 1000 + Number(duration?.nanos ?? 0) / 1e6
+    const bounded = Number.isFinite(executionMs) && executionMs > 0 ? executionMs + execGraceMs : undefined
+    const replay = {
+      async *[Symbol.asyncIterator]() {
+        if (!first.done) { yield first.value; yield* { [Symbol.asyncIterator]: () => iterator } }
+      },
+    }
+    return stream(method, signal, bounded, header, replay, contextValues)
+  }
+  return client
+}
+
 let cached
 export async function gateway() {
   if (!cached) {
     const target = resolveGateway()
-    const client = await OpenShellClient.connect({ gateway: target.endpoint, ...target.tls })
+    const client = await connectGateway(target)
     cached = { target, client }
   }
   return cached

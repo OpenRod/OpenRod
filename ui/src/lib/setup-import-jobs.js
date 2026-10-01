@@ -1,5 +1,7 @@
 import { importSetup } from './import-setup.js'
 
+const savedPolicy = (setup) => setup?.egressPolicy ? ` ${setup.egressPolicy.created ? 'Created' : 'Updated'} the egress policy “${setup.egressPolicy.name}”.` : setup?.egressPolicyError ? ' Its egress policy wasn’t saved.' : ''
+
 // Owned by the app session, not a dialog or route. Closing either cannot stop
 // polling, saving, or delivery of the result. Credentials are not stored here.
 export function createSetupImportJobs(api, workflow = importSetup) {
@@ -34,7 +36,7 @@ export function createSetupImportJobs(api, workflow = importSetup) {
       run.promise = (async () => {
         try {
           const result = saveOnly
-            ? { status: 'saved', setup: await api.saveSetup(review.token, name, true) }
+            ? { status: 'saved', setup: await api.saveSetup(review.token, name, true), inactive: review.items.filter(item => !item.disabled && item.issues?.length).map(item => item.name) }
             : await workflow(api, review, name, choices, {
               resumeJob,
               isCancelled: () => run.cancelled,
@@ -47,7 +49,7 @@ export function createSetupImportJobs(api, workflow = importSetup) {
                 callbacks.onReview?.(next)
               },
             })
-          update(id, { status: result.status, setup: result.setup, ...(result.status === 'cancelled' ? { prepared: false } : {}), message: result.status === 'saved' ? 'Available in templates and sandboxes.' : result.status === 'needs-attention' ? 'Some items need attention. Review them to finish importing.' : 'Import cancelled. You can resume from the completed preparation.' })
+          update(id, { status: result.status, setup: result.setup, ...(result.status === 'cancelled' ? { prepared: false } : {}), message: result.status === 'saved' ? `Available in templates and sandboxes.${result.inactive?.length ? ` Inactive: ${result.inactive.join(', ')}.` : ''}${savedPolicy(result.setup)}` : result.status === 'needs-attention' ? 'Some items need attention. Open the import to remove or fix them.' :'Import cancelled. You can resume from the completed preparation.' })
           return result
         } catch (error) {
           update(id, { status: 'failed', message: error.message })
