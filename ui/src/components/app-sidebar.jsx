@@ -46,14 +46,14 @@ export function AppSidebar({ view, onNavigate }) {
 
   return (
     <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
-      <SidebarHeader className="p-6">
+      <SidebarHeader className="h-14 shrink-0 justify-center px-6 py-0">
         <div className="flex items-center gap-2">
-          <img src="/openrod.svg" alt="" aria-hidden="true" className="h-7 w-auto shrink-0 dark:invert" />
-          <span className="sidebar-wordmark text-lg font-normal tracking-tight">OpenShell</span>
+          <img src="/openegg.png" alt="" aria-hidden="true" className="size-9 shrink-0 object-contain" />
+          <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">OpenEgg Shell</span>
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="px-3">
+      <SidebarContent className="px-3 pt-4">
         <SidebarGroup className="p-0">
           <SidebarGroupContent>
             <SidebarMenu>
