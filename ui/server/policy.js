@@ -480,6 +480,7 @@ export function validateTemplate(input) {
   const id = String(input.id ?? '').trim()
   if (!TEMPLATE_ID.test(id)) throw fail('Template ids use lowercase letters, digits and dashes.')
   const builtin = [...BUILTIN_TEMPLATES, ...LEGACY_TEMPLATES].find((t) => t.id === id)
+  const kind = builtin?.kind ?? (['access', 'baseline'].includes(input.kind) ? input.kind : undefined)
   const list = (v) => (Array.isArray(v) ? v.map(String).map((s) => s.trim()).filter(Boolean) : [])
   const readOnly = list(input.filesystem?.readOnly)
   const readWrite = list(input.filesystem?.readWrite)
@@ -488,9 +489,14 @@ export function validateTemplate(input) {
   if (readOnly.length + readWrite.length > 256) throw fail('Too many paths.')
   const landlock = input.landlock === 'hard_requirement' ? 'hard_requirement' : 'best_effort'
   let accessTemplates
-  try { accessTemplates = normalizeAccessTemplates(input.accessTemplates) } catch (error) { throw fail(error.message) }
+  // Validate persisted reference shapes here. The store and launch composition
+  // resolve their existence and access type against the destination catalog,
+  // which also contains imported presets with remapped ids.
+  const references = input.accessTemplates ?? []
+  if (!Array.isArray(references) || references.some(reference => typeof reference !== 'string' || !TEMPLATE_ID.test(reference))) throw fail('Choose valid additional access templates.')
+  try { accessTemplates = normalizeAccessTemplates(references, references.map(reference => ({ id: reference, kind: 'access' }))) } catch (error) { throw fail(error.message) }
   const rules = (input.rules ?? []).map((r) => { ruleToProto(r); return r })
-  if (builtin?.kind === 'access' && accessTemplates.length) throw fail('An access policy cannot include other access policies.')
+  if (kind === 'access' && accessTemplates.length) throw fail('An access policy cannot include other access policies.')
   if (new Set(rules.map((r) => r.name)).size !== rules.length) throw fail('Rule names must be unique.')
   // Services to open when the sandbox starts, each with an optional auto-close.
   const ingress = (input.ingress ?? []).map((d) => {
@@ -506,7 +512,7 @@ export function validateTemplate(input) {
   return {
     id,
     builtin: Boolean(builtin),
-    ...(builtin?.kind ? { kind: builtin.kind } : {}),
+    ...(kind ? { kind } : {}),
     name: String(input.name ?? id).slice(0, 80),
     description: String(input.description ?? '').slice(0, 400),
     filesystem: { workdir: input.filesystem?.workdir !== false, readOnly, readWrite },
