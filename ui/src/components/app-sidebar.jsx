@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar"
 import { useLive } from "@/lib/live"
 
-const NAV = [
+const ENVIRONMENT = [
   { label: "Sandboxes", icon: Box, view: "sandboxes" },
   { label: "Templates", icon: Layers3, view: "templates" },
   { label: "MCPs & Skills", icon: Package, view: "setups" },
@@ -65,9 +65,12 @@ export function AppSidebar({ view, onNavigate }) {
 
       <SidebarContent className="px-3 pt-4">
         <SidebarGroup className="p-0">
+          <SidebarGroupLabel className="px-3 text-[10px] font-bold tracking-widest text-faint uppercase">
+            Environment
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map(({ label, icon: Icon, view: target }) => (
+              {ENVIRONMENT.map(({ label, icon: Icon, view: target }) => (
                 <SidebarMenuItem key={target}>
                   <SidebarMenuButton isActive={view === target} onClick={() => onNavigate(target)}>
                     <Icon />
