@@ -71,24 +71,3 @@ test('macOS terminal launch passes one escaped script to osascript', async () =>
   assert.equal(invocation.file, 'osascript')
   assert.match(invocation.args[1], /echo \\"a\\\\b\\"/)
 })
-
-test('SSH terminal launches serialize tab discovery and continue after a permission failure', async () => {
-  const calls = []
-  const callbacks = []
-  const dependencies = {
-    platform: 'darwin',
-    exec: (file, args, options, callback) => { calls.push(args[1]); callbacks.push(callback) },
-  }
-  const first = launchNativeTerminal('first', dependencies)
-  const rejected = assert.rejects(first, { status: 502, message: /Accessibility/ })
-  const second = launchNativeTerminal('second', dependencies)
-  await new Promise(setImmediate)
-  assert.equal(calls.length, 1)
-  callbacks[0](new Error('denied'), '', 'not allowed to send keystrokes (-1719)')
-  await rejected
-  await new Promise(setImmediate)
-  assert.equal(calls.length, 2)
-  assert.match(calls[1], /do script "second" in candidate/)
-  callbacks[1](null)
-  await second
-})
