@@ -10,7 +10,8 @@ import { TemplatesView } from "@/components/image-templates-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { CloudAccount } from "@/components/auth-gate"
-import { LiveProvider } from "@/lib/live"
+import { LiveProvider, useLive } from "@/lib/live"
+import { Button } from "@/components/ui/button"
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -64,9 +65,32 @@ function viewFromLocation() {
   return TITLES[view] ? view : "sandboxes"
 }
 
+function ConnectionGate({ onSetup, children }) {
+  const { connection, overview } = useLive()
+  if (connection === "connecting" && !overview) return <p role="status" className="p-8 text-sm text-muted-foreground">Reading connection settings…</p>
+  if (connection !== "setup-required") return children
+  return (
+    <section aria-labelledby="setup-heading" className="mx-auto my-12 w-full max-w-2xl space-y-6 px-6">
+      <div className="space-y-2">
+        <h2 id="setup-heading" className="text-2xl font-semibold">Connect to your OpenShell sandbox</h2>
+        <p className="text-sm text-muted-foreground">This console connects to an existing OpenShell gateway. It does not create a cloud cluster, install OpenShell, or expose a sandbox to the Internet.</p>
+      </div>
+      <ol className="list-decimal space-y-3 pl-5 text-sm">
+        <li>Get the gateway address, client certificate bundle, and workspace access from its administrator.</li>
+        <li>Review and run the registration commands on this machine. For a private Kubernetes gateway, keep your tunnel running.</li>
+        <li>Check the connection, choose a workspace, and review what will be saved before selecting <strong>Use gateway</strong>.</li>
+        <li>Choose a ready sandbox, then <strong>Open SSH in terminal</strong>.</li>
+      </ol>
+      <Button onClick={onSetup}>Set up connection</Button>
+      <p className="text-xs text-muted-foreground">No gateway is active and activity collection has not started. Check connection explicitly contacts a gateway without activating it. An existing CLI registration is only a suggestion until you use it here.</p>
+    </section>
+  )
+}
+
 export function App() {
   const [view, setView] = React.useState(viewFromLocation)
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
+  const [setupOpen, setSetupOpen] = React.useState(false)
   React.useEffect(() => {
     const sync = () => { setView(viewFromLocation()); setTerminal(terminalFromLocation()) }
     window.addEventListener("popstate", sync)
@@ -97,7 +121,7 @@ export function App() {
   return (
     <LiveProvider>
       <SidebarProvider>
-        <AppSidebar view={view} onNavigate={navigate} />
+        <AppSidebar view={view} onNavigate={navigate} setupOpen={setupOpen} onSetupOpenChange={setSetupOpen} />
         <SidebarInset className="min-w-0 bg-background">
           <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-8">
             <SidebarTrigger className="mr-2 md:hidden" />
@@ -106,6 +130,7 @@ export function App() {
           </header>
           <SetupImportNotifications />
           <PageBoundary view={view}>
+          <ConnectionGate onSetup={() => setSetupOpen(true)}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} />}
           {view === "activity" && <ActivityView />}
           {view === "groups" && <GroupsView onNavigate={navigate} />}
@@ -113,6 +138,7 @@ export function App() {
           {view === "secrets" && <SecretsView />}
           {view === "templates" && <TemplatesView />}
           {view === "setups" && <SetupsView />}
+          </ConnectionGate>
           </PageBoundary>
         </SidebarInset>
         <Toaster position="bottom-right" />

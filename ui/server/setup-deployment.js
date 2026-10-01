@@ -3,7 +3,7 @@ import { setupPython } from './setup-python.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { gateway, WORKSPACE, sandboxView } from './gateway.js'
+import { gateway, sandboxView, contextKey, contextSelection, runWithContext, workspaceName } from './gateway.js'
 import { setupStore, resolveSetups, usableSetup, SETUP_ID } from './setups.js'
 import { fail, hash } from './setup-discovery.js'
 import { hostMatches } from '../src/lib/egress.js'
@@ -17,10 +17,15 @@ import { installArtifacts } from './setup-artifacts.js'
 const verifier = await fs.readFile(path.join(import.meta.dirname, 'setup-verifier.cjs'), 'utf8')
 const installer = setupPython('./setup-installer.py')
 const COMMAND = Object.fromEntries(SETUP_TARGETS.map(agent => [agent.id, agent.command]))
-const stateKey = Symbol.for('openshell.console.setup-deployments.v1')
-const state = globalThis[stateKey] ??= { previews: new Map(), jobs: new Map(), locks: new Set() }
+const stateKey = Symbol.for('openshell.console.setup-deployments.v2')
+const contexts = globalThis[stateKey] ??= new Map()
+function deploymentState() {
+  const key = contextKey()
+  if (!contexts.has(key)) contexts.set(key, { previews: new Map(), jobs: new Map(), locks: new Set() })
+  return contexts.get(key)
+}
 const keyFor = (sandbox, id) => `${sandbox.name}:${id}`
-export const setupJobsForSandbox = (name, createdAt) => [...state.jobs.values()].filter(job => job.sandbox === name && (!createdAt || job.at >= createdAt))
+export const setupJobsForSandbox = (name, createdAt) => [...deploymentState().jobs.values()].filter(job => job.sandbox === name && (!createdAt || job.at >= createdAt))
 // Protobuf maps have no ordering guarantee. Preserve array order and every
 // value, but never treat a different object-key order as a permission change.
 export function setupAccessIdentity(value) {
@@ -66,9 +71,10 @@ export function setupPolicyCoverage(requirement, setup, policies, callers = ['/*
 }
 
 export async function executeInstaller(client, sandbox, setup, targets, operation) {
+  sandbox = { ...sandbox, workspace: sandbox.workspace || workspaceName() }
   // A probe reads only names and launchers, so skill files (up to 64 MB) stay behind.
   const data = Buffer.from(JSON.stringify({ setup: operation === 'probe' ? { ...setup, items: setup.items.map(({ files, ...item }) => item) } : setup, targets, operation }))
-  const result = await withSandboxInput(client, sandbox, data, file => client.sandbox.exec(sandbox.name, ['python3', '-c', `import sys;sys.stdin=open(sys.argv[1], 'r');\n${installer}`, file], { workspace: sandbox.workspace || 'default', noLoginShell: true, timeoutSecs: 60, signal: AbortSignal.timeout(65_000) }))
+  const result = await withSandboxInput(client, sandbox, data, file => client.sandbox.exec(sandbox.name, ['python3', '-c', `import sys;sys.stdin=open(sys.argv[1], 'r');\n${installer}`, file], { workspace: sandbox.workspace, noLoginShell: true, timeoutSecs: 60, signal: AbortSignal.timeout(65_000) }))
   let output
   try { output = JSON.parse(result.stdout.toString()) } catch { throw fail('The sandbox needs Python 3.11 or later and writable agent configuration folders.', 409) }
   if (result.exitCode !== 0 || output.error) throw fail(output.error || 'Setup operation failed.', 409)
@@ -87,7 +93,7 @@ async function assertCurrentSandbox(plan) {
   const expected = { id: plan.sandbox.id, gateway: plan.gateway }
   const { target } = await gateway()
   assertSandboxIdentity(plan.sandbox, target.endpoint, expected)
-  const current = sandboxView((await plan.client.raw.getSandbox({ name: plan.sandbox.name, workspaceScope: WORKSPACE })).sandbox)
+  const current = sandboxView((await plan.client.raw.getSandbox({ name: plan.sandbox.name, workspaceScope: plan.workspaceScope })).sandbox)
   assertSandboxIdentity(current, target.endpoint, expected)
 }
 async function inspectTarget(name, id, targets, expected) {
@@ -95,11 +101,11 @@ async function inspectTarget(name, id, targets, expected) {
   const snapshot = await setupStore.get(id)
   const setup = usableSetup(snapshot)
   const inactive = snapshot.items.filter(i => !setup.items.some(a => a.id === i.id)).map(i => ({ name: i.name, issues: i.issues }))
-  const { client, target } = await gateway()
-  const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
+  const { client, target, workspace, workspaceScope } = await gateway()
+  const sandbox = { ...sandboxView((await client.raw.getSandbox({ name, workspaceScope })).sandbox), workspace }
   assertSandboxIdentity(sandbox, target.endpoint, expected)
   if (sandbox.phase !== 'ready') throw fail('Start the sandbox before enabling or removing a Setup.', 409)
-  const [config, org, scoped, fleet, status] = await Promise.all([client.raw.getSandboxConfig({ name, workspaceScope: WORKSPACE }), readOrg(), listPolicies(), orgRoute('GET', ['org']), client.raw.getSandboxPolicyStatus({ sandbox: name, workspaceScope: WORKSPACE })])
+  const [config, org, scoped, fleet, status] = await Promise.all([client.raw.getSandboxConfig({ name, workspaceScope }), readOrg(), listPolicies(), orgRoute('GET', ['org']), client.raw.getSandboxPolicyStatus({ sandbox: name, workspaceScope })])
   const problems = setup.items.length ? [] : ['This Setup has no prepared items. Open Prepare setup to resolve requirements.']
   if (config.configurationAdmitted === false || (!status.revision || status.revision.status !== 2 || status.activeVersion !== status.revision.version)) problems.push('The effective sandbox policy has not loaded successfully. Resolve it before enabling a Setup.')
   let probe = null
@@ -137,8 +143,8 @@ async function inspectTarget(name, id, targets, expected) {
     if (!callers.length) assessment = { status: 'review', reason: 'The actual network executable could not be established for this tool.' }
     return { ...requirement, item: item.name, binaries: callers, credentialProvider: provider, ...assessment }
   }))
-  const identity = setupAccessIdentity({ gateway: target.endpoint, id: sandbox.id, createdAt: sandbox.createdAt, policy: accessPolicyIdentity(config.policy), org, scoped, group: member.group, revision: setup.revision, targets, executables: probe?.networkExecutables, grants })
-  return { client, gateway: target.endpoint, sandbox, setup, targets, problems, network, grants, inactive, identity, installed: probe?.installed ?? false }
+  const identity = setupAccessIdentity({ gateway: target.endpoint, workspace, id: sandbox.id, createdAt: sandbox.createdAt, policy: accessPolicyIdentity(config.policy), org, scoped, group: member.group, revision: setup.revision, targets, executables: probe?.networkExecutables, grants })
+  return { client, gateway: target.endpoint, workspaceScope, sandbox, setup, targets, problems, network, grants, inactive, identity, installed: probe?.installed ?? false }
 }
 const ENABLEABLE = ['allowed', 'proposed', 'policy']
 function planView(plan) {
@@ -149,7 +155,11 @@ function planView(plan) {
   ]
   return { name: plan.setup.name, sandbox: plan.sandbox.name, revision: plan.setup.revision, targets: plan.targets, problems: plan.problems, network: plan.network, inactive: plan.inactive, requiresApproval: plan.grants.length > 0, installed: plan.installed, canEnable: !plan.problems.length && plan.network.every((r) => ENABLEABLE.includes(r.status)), notes }
 }
-export async function deploymentRoute(method, parts, input, { expectedSandbox } = {}) {
+export async function deploymentRoute(method, parts, input, options = {}) {
+  return runWithContext(contextSelection(), () => runDeploymentRoute(method, parts, input, options))
+}
+async function runDeploymentRoute(method, parts, input, { expectedSandbox } = {}) {
+  const state = deploymentState()
   if (parts[0] !== 'setups' || parts.length !== 3 || !SETUP_ID.test(parts[1])) return undefined
   const [, id, action] = parts
   if (method === 'GET' && action === 'jobs') return [...new Map([...state.jobs.values()].filter((j) => j.setup === id).map((j) => [j.sandbox, j])).values()]
@@ -202,15 +212,19 @@ export async function deploymentRoute(method, parts, input, { expectedSandbox } 
 // Start with a shell for Setup-bearing templates. Imported code is not invoked
 // until after the operator opens/restarts the agent following reconciliation.
 export async function startSetupInstall(name, ids, targets, expectedId, approvedRevisions = {}, expectedGateway) {
+  return runWithContext(contextSelection(), () => startInstall(name, ids, targets, expectedId, approvedRevisions, expectedGateway))
+}
+async function startInstall(name, ids, targets, expectedId, approvedRevisions, expectedGateway) {
+  const state = deploymentState()
   const expectedSandbox = { id: expectedId, gateway: expectedGateway ?? (await gateway()).target.endpoint }
   const setups = await resolveSetups(ids)
   validateTargets(targets)
   for (const setup of setups) state.jobs.set(`${name}:${setup.id}`, { setup: setup.id, sandbox: name, targets, status: 'waiting', at: new Date().toISOString() })
   void (async () => {
-    const { client } = await gateway()
+    const { client, workspaceScope } = await gateway()
     let ready = false
     for (let i = 0; i < 60; i++) {
-      const box = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
+      const box = sandboxView((await client.raw.getSandbox({ name, workspaceScope })).sandbox)
       assertSandboxIdentity(box, (await gateway()).target.endpoint, expectedSandbox)
       if (box.phase === 'ready') { ready = true; break }
       if (['error', 'deleting', 'stopped'].includes(box.phase)) break
@@ -236,7 +250,7 @@ async function leaveSetup({ sandbox, gateway: endpoint }, ids) {
   try { await syncAll({ only: (s) => s.id === sandbox.id, force: false }) } catch { /* stored revocation is applied by the next policy sync */ }
 }
 async function activateAccess(plan) {
-  const { client, sandbox, setup } = plan
+  const { client, workspaceScope, sandbox, setup } = plan
   const expected = { id: sandbox.id, gateway: plan.gateway }
   // Policy snapshots and their gateway effects share the mutation queue, so
   // a concurrent revocation cannot be overwritten by this enable.
@@ -244,23 +258,23 @@ async function activateAccess(plan) {
     await assertCurrentSandbox(plan)
     for (const provider of new Set(setup.items.map(i => i.credentialRef?.provider).filter(Boolean))) {
       // Recheck the profile: attaching a changed profile must not introduce grants.
-      const found = (await client.raw.getProvider({ name: provider, workspaceScope: WORKSPACE })).provider
-      const profile = (await client.raw.getProviderProfile({ id: found.type, workspaceScope: WORKSPACE })).profile
+      const found = (await client.raw.getProvider({ name: provider, workspaceScope })).provider
+      const profile = (await client.raw.getProviderProfile({ id: found.type, workspaceScope })).profile
       if (!profile || profile.endpoints?.length) throw fail('The credential profile changed. Reconnect a dedicated MCP secret.', 409)
-      await client.raw.attachSandboxProvider({ sandbox: sandbox.name, provider, workspaceScope: WORKSPACE, requestId: randomUUID() })
+      await client.raw.attachSandboxProvider({ sandbox: sandbox.name, provider, workspaceScope, requestId: randomUUID() })
     }
-    const resource = (await client.raw.getSandbox({ name: sandbox.name, workspaceScope: WORKSPACE })).sandbox
+    const resource = (await client.raw.getSandbox({ name: sandbox.name, workspaceScope })).sandbox
     const fresh = await inspectTarget(sandbox.name, setup.id, plan.targets, expected)
     if (fresh.identity !== plan.identity) throw fail('Sandbox access changed while preparing. Review a fresh preview before enabling.',409)
     // Joined only after that check: the 15-second policy sync would otherwise apply the Setup's policy mid-review.
     await addSandboxSetups({ ...sandbox, gateway: plan.gateway }, memberIds(setup))
     if (plan.grants.length || plan.network.some((r) => r.status === 'policy')) {
-      const managed = await managedOpsFor(client, sandbox.name, plan.grants.flatMap(g => g.rule.endpoints.map(e => e.port)), plan.gateway)
-      await client.raw.updateConfig({ sandbox: sandbox.name, workspaceScope: WORKSPACE, global: false, expectedResourceVersion: resource.metadata?.resourceVersion, mergeOperations: [...plan.grants.map(g => ({ operation: { case: 'addRule', value: g } })), ...managed], annotations: { 'openshell.console/setup-revision': setup.revision }, requestId: randomUUID() })
+      const managed = await managedOpsFor(client, workspaceScope, sandbox.name, plan.grants.flatMap(g => g.rule.endpoints.map(e => e.port)), plan.gateway)
+      await client.raw.updateConfig({ sandbox: sandbox.name, workspaceScope, global: false, expectedResourceVersion: resource.metadata?.resourceVersion, mergeOperations: [...plan.grants.map(g => ({ operation: { case: 'addRule', value: g } })), ...managed], annotations: { 'openshell.console/setup-revision': setup.revision }, requestId: randomUUID() })
     }
   })
   for (let i = 0; i < 20; i++) {
-    const status = await client.raw.getSandboxPolicyStatus({ sandbox: sandbox.name, workspaceScope: WORKSPACE })
+    const status = await client.raw.getSandboxPolicyStatus({ sandbox: sandbox.name, workspaceScope })
     if (status.revision?.status === 2 && status.activeVersion === status.revision.version) {
       const applied = await inspectTarget(sandbox.name, setup.id, plan.targets, expected)
       if (applied.problems.length || applied.network.some(r => r.status !== 'allowed')) throw fail('Effective access no longer matches the reviewed Setup. Check requirements again.',409)
@@ -276,7 +290,7 @@ async function verifySetup({ client, sandbox, setup }) {
     if (item.kind === 'skill') { checks.push({ item: item.name, status: 'files-verified', reason: 'Scripts were not executed.' }); continue }
     if (item.auth?.mode === 'agent-session') { checks.push({item:item.name,status:'sign-in-in-agent',reason:'Configuration installed. Authenticate and check tool availability in the selected agent; the console does not read its OAuth session.'}); continue }
     try {
-      const result = await client.sandbox.exec(sandbox.name, ['node', '-e', verifier], { noLoginShell: true, stdin: Buffer.from(JSON.stringify({ config: item.config })), timeoutSecs: 35 })
+      const result = await client.sandbox.exec(sandbox.name, ['node', '-e', verifier], { workspace: sandbox.workspace, noLoginShell: true, stdin: Buffer.from(JSON.stringify({ config: item.config })), timeoutSecs: 35 })
       const check = JSON.parse(result.stdout.toString())
       checks.push({ item: item.name, ...check })
     } catch { checks.push({ item: item.name, status: 'unverified', reason: 'Check needs Node.js 22 or later and compatible runtime access. Files are installed.' }) }

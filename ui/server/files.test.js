@@ -4,11 +4,13 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { Readable } from 'node:stream'
 
 // The folder rules are relative to the home folder, so give the module its own.
 const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-files-test-')))
 process.env.HOME = home
-const { localFolder, parseListing, planSeed, sandboxPath } = await import('./files.js')
+const { localFolder, parseListing, planSeed, sandboxPath, filesRoute, receiveUpload } = await import('./files.js')
+const { runWithContext } = await import('./gateway.js')
 after(() => fs.rm(home, { recursive: true, force: true }))
 
 const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd, stdio: 'pipe' })
@@ -93,4 +95,28 @@ test('repositories: public https only, cloned into a folder named after the repo
   await assert.rejects(planSeed({ repository: 'https://user:token@github.com/o/r' }), /credentials/)
   await assert.rejects(planSeed({ folder: '~/notes', repository: 'https://github.com/o/r' }), /not both/)
   assert.equal(await planSeed({}), null)
+})
+
+test('a staged upload cannot be received, committed, or cancelled in another context', async () => {
+  const origin = { gateway: 'upload-one', workspace: 'alpha' }
+  const others = [
+    { gateway: 'upload-one', workspace: 'beta' },
+    { gateway: 'upload-two', workspace: 'alpha' },
+  ]
+  const { id } = await runWithContext(origin, () => filesRoute('POST', ['files', 'same-name', 'uploads'], {}))
+  const request = () => Object.assign(Readable.from([Buffer.from('hello')]), { headers: { 'content-length': '5' } })
+  try {
+    await runWithContext(origin, () => receiveUpload(request(), 'same-name', id, 'hello.txt'))
+    for (const context of others) {
+      await runWithContext(context, async () => {
+        await assert.rejects(receiveUpload(request(), 'same-name', id, 'other.txt'), { status: 404 })
+        for (const action of ['commit', 'cancel']) {
+          await assert.rejects(filesRoute('POST', ['files', 'same-name', 'uploads', id, action], { dir: '/sandbox' }), { status: 404 })
+        }
+      })
+    }
+    await runWithContext(origin, () => receiveUpload(request(), 'same-name', id, 'still-owned.txt'))
+  } finally {
+    await runWithContext(origin, () => filesRoute('POST', ['files', 'same-name', 'uploads', id, 'cancel'], {}))
+  }
 })

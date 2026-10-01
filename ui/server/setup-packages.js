@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { gateway, WORKSPACE, sandboxView } from './gateway.js'
+import { gateway, workspaceName, workspaceScope, contextSelection, runWithContext, sandboxView } from './gateway.js'
 import { listPolicies, blockedByPolicy } from './egress.js'
 import { hostMatches } from '../src/lib/egress.js'
 import { planSandbox, readOrg, blockedBy } from './org.js'
@@ -53,28 +53,29 @@ export async function resolvePackage(plan, fetcher = fetch, signal) {
   return { ...plan, version: value.version, integrity: value.dist.integrity, bin }
 }
 
-export async function waitReady(client, name, signal, { attempts = 90, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+export async function waitReady(client, name, signal, { workspace = workspaceName(), attempts = 90, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  const scope = workspaceScope(workspace)
   let sandbox
   for (let i = 0; i < attempts; i++) {
     signal?.throwIfAborted()
-    sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
+    sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: scope })).sandbox)
     if (sandbox.phase === 'ready') return sandbox
     if (['error', 'deleting', 'stopped', 'completed'].includes(sandbox.phase)) break
     await wait(1500)
   }
   signal?.throwIfAborted()
-  const config = await client.raw.getSandboxConfig({ name, workspaceScope: WORKSPACE }).catch(() => null)
+  const config = await client.raw.getSandboxConfig({ name, workspaceScope: scope }).catch(() => null)
   const reason = config?.configurationAdmitted
     ? 'The gateway admitted its policy, but the VM did not start. Check the gateway image registry and VM startup logs.'
     : config?.configurationError || sandbox?.problem || 'Check gateway and image registry availability.'
   throw Object.assign(fail(`Preparation sandbox could not start. ${reason}`, 503), { preparationUnavailable: true })
 }
 
-export async function checkPreparationRegistry(client, name, signal) {
+export async function checkPreparationRegistry(client, name, signal, { workspace = workspaceName() } = {}) {
   const script = "fetch('https://registry.npmjs.org/', {signal:AbortSignal.timeout(10000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
   let result
   try {
-    result = await client.sandbox.exec(name, ['/usr/local/bin/node', '-e', script], { noLoginShell: true, timeoutSecs: 15, signal })
+    result = await client.sandbox.exec(name, ['/usr/local/bin/node', '-e', script], { workspace, noLoginShell: true, timeoutSecs: 15, signal })
   } catch {
     signal?.throwIfAborted()
     throw unavailable('The preparation sandbox registry check could not finish. Check gateway availability before retrying.')
@@ -98,13 +99,13 @@ console.log(JSON.stringify({bin:bin.slice(root.length+1),bytes:size,node:process
 
 // npm already retries each download once. Re-running the entire installation
 // multiplies an outage across every selected MCP and discards useful diagnostics.
-export async function installPackage(client, name, pinned, signal) {
+export async function installPackage(client, name, pinned, signal, { workspace = workspaceName() } = {}) {
   const deadline = AbortSignal.timeout(250000)
   const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline
   let result
   try {
     result = await client.sandbox.exec(name, ['/usr/local/bin/node', '-e', INSTALL], {
-      noLoginShell: true, stdin: Buffer.from(JSON.stringify(pinned)), timeoutSecs: 250, signal: bounded,
+      workspace, noLoginShell: true, stdin: Buffer.from(JSON.stringify(pinned)), timeoutSecs: 250, signal: bounded,
     })
   } catch (error) {
     signal?.throwIfAborted()
@@ -128,9 +129,9 @@ export async function installPackage(client, name, pinned, signal) {
 // endpoint. Probe this builder before reusing anything; npm and MCP checks are
 // skipped only for an identical pinned image and actual runtime.
 const cacheIndex = (pinned, runtime, dir) => path.join(dir, 'index', createHash('sha256').update(JSON.stringify({ v: 2, name: pinned.name, version: pinned.version, integrity: pinned.integrity, args: pinned.args, image: BUILDER_IMAGE, runtime })).digest('hex') + '.json')
-async function builderRuntime(client, name, signal) {
+async function builderRuntime(client, name, signal, workspace) {
   const script = "console.log(JSON.stringify({node:process.versions.node,arch:process.arch,platform:process.platform,libc:process.report.getReport().header.glibcVersionRuntime?'glibc':null}))"
-  const result = await client.sandbox.exec(name, ['/usr/local/bin/node', '-e', script], { noLoginShell: true, timeoutSecs: 10, signal })
+  const result = await client.sandbox.exec(name, ['/usr/local/bin/node', '-e', script], { workspace, noLoginShell: true, timeoutSecs: 10, signal })
   let runtime
   try { runtime = JSON.parse(result.stdout.toString()) } catch {}
   if (result.exitCode !== 0 || !/^22\.\d+\.\d+$/.test(runtime?.node || '') || !/^[a-z0-9_]+$/.test(runtime?.arch || '') || runtime?.platform !== 'linux' || runtime?.libc !== 'glibc') throw fail('Could not establish the preparation builder runtime. Retry preparation.', 409)
@@ -149,12 +150,16 @@ async function saveCached(index, artifact) {
   try { await fs.mkdir(path.dirname(index), { recursive: true, mode: 0o700 }); await fs.writeFile(tmp, JSON.stringify(artifact), { mode: 0o600, flag: 'wx' }); await fs.rename(tmp, index) } catch { await fs.rm(tmp, { force: true }).catch(() => {}) }
 }
 
-export async function buildPackage(plan, { signal, progress = async () => {}, dir = ARTIFACT_DIR, connect = gateway, fetcher = fetch, settle = 12000 } = {}) {
+export function buildPackage(plan, options = {}) {
+  return runWithContext(contextSelection(), () => buildInContext(plan, options))
+}
+
+async function buildInContext(plan, { signal, progress = async () => {}, dir = ARTIFACT_DIR, connect = gateway, fetcher = fetch, settle = 12000 } = {}) {
   const org = await readOrg()
   if (blockedBy(org, ['registry.npmjs.org']) || blockedByPolicy(await listPolicies(), {name:'',group:null}, ['registry.npmjs.org'], hostMatches)) throw fail('Organization policy blocks the npm registry.', 403)
   await progress('Looking up the package on npm')
   const pinned = await resolvePackage(plan, fetcher, signal)
-  const { client } = await connect()
+  const { client, workspace, workspaceScope } = await connect()
   const name = 'sp-' + randomUUID().slice(0, 12)
   const base = await planSandbox({ name, systemBaseline: true })
   base.policy.networkPolicies = {}
@@ -162,12 +167,12 @@ export async function buildPackage(plan, { signal, progress = async () => {}, di
   let created = false, temporary
   try {
     await progress('Starting a temporary sandbox')
-    await client.sandbox.create({ name, image:BUILDER_IMAGE, command:['/bin/sleep','infinity'],providers:[],policy:base.policy,labels:{'openshell.console/setup-builder':'true'} });created=true
-    await waitReady(client,name,signal)
-    const effective=await client.raw.getSandboxConfig({name,workspaceScope:WORKSPACE})
+    await client.sandbox.create({ name, workspace, image:BUILDER_IMAGE, command:['/bin/sleep','infinity'],providers:[],policy:base.policy,labels:{'openshell.console/setup-builder':'true'} });created=true
+    await waitReady(client,name,signal,{workspace})
+    const effective=await client.raw.getSandboxConfig({name,workspaceScope})
     if(effective.policySource===2)throw fail('Gateway global policy overrides isolated preparation. Ask the administrator for a dedicated preparation gateway.',403)
     await progress('Checking the package runtime')
-    const runtime = await builderRuntime(client, name, signal)
+    const runtime = await builderRuntime(client, name, signal, workspace)
     const index = cacheIndex(pinned, runtime, dir), cached = await cachedArtifact(index, pinned, runtime, dir)
     signal?.throwIfAborted()
     if (cached) { await progress('Using the package prepared earlier'); signal?.throwIfAborted(); return cached }
@@ -176,14 +181,14 @@ export async function buildPackage(plan, { signal, progress = async () => {}, di
     await progress('Waiting for the sandbox network to be ready')
     await new Promise((resolve,reject)=>{const done=()=>{signal?.removeEventListener('abort',stop);resolve()};const timer=setTimeout(done,settle);const stop=()=>{clearTimeout(timer);reject(signal.reason)};if(signal?.aborted)stop();else signal?.addEventListener('abort',stop,{once:true})})
     await progress('Checking access to the npm registry')
-    await checkPreparationRegistry(client, name, signal)
+    await checkPreparationRegistry(client, name, signal, { workspace })
     await progress(`Downloading ${pinned.name}@${pinned.version} (install scripts off)`)
-    const metadata = await installPackage(client, name, pinned, signal)
+    const metadata = await installPackage(client, name, pinned, signal, { workspace })
     await progress('Saving the package')
     await fs.mkdir(dir,{recursive:true,mode:0o700})
     temporary=path.join(dir,randomUUID()+'.tmp')
     const handle=await fs.open(temporary,'wx',0o600);const digest=createHash('sha256');let bytes=0,exit=null
-    try{for await(const event of client.sandbox.execStream(name,['tar','-czf','-','-C','/sandbox/package','.'],{noLoginShell:true,timeoutSecs:120,signal})){
+    try{for await(const event of client.sandbox.execStream(name,['tar','-czf','-','-C','/sandbox/package','.'],{workspace,noLoginShell:true,timeoutSecs:120,signal})){
       if(event.stream==='stdout'){bytes+=event.data.length;if(bytes>100*1024*1024)throw fail('Compressed package exceeds 100 MB.');digest.update(event.data);await handle.write(event.data)}
       if(event.type==='exit')exit=event.exitCode
     }}finally{await handle.close()}
@@ -191,13 +196,13 @@ export async function buildPackage(plan, { signal, progress = async () => {}, di
     const id=digest.digest('hex');await fs.rename(temporary,path.join(dir,id+'.tar.gz'));temporary=null
     await progress('Checking that the MCP starts')
     const verifier=await fs.readFile(path.join(import.meta.dirname,'setup-verifier.cjs'),'utf8')
-    const check=await client.sandbox.exec(name,['/usr/local/bin/node','-e',verifier],{noLoginShell:true,stdin:Buffer.from(JSON.stringify({config:{command:'/usr/local/bin/node',args:['/sandbox/package/'+metadata.bin,...pinned.args]}})),timeoutSecs:35,signal})
+    const check=await client.sandbox.exec(name,['/usr/local/bin/node','-e',verifier],{workspace,noLoginShell:true,stdin:Buffer.from(JSON.stringify({config:{command:'/usr/local/bin/node',args:['/sandbox/package/'+metadata.bin,...pinned.args]}})),timeoutSecs:35,signal})
     let verification={status:'unverified',reason:'Initialization check did not finish.'}
     try{verification=JSON.parse(check.stdout.toString())}catch{}
     const artifact={ ...pinned,...metadata,digest:id,compressedBytes:bytes,verification,preparedAt:new Date().toISOString() }
     if(verification?.status==='connected')await saveCached(index,artifact)
     return artifact
-  }finally{if(temporary)await fs.rm(temporary,{force:true});if(created)await client.sandbox.delete(name).catch(()=>{})}
+  }finally{if(temporary)await fs.rm(temporary,{force:true});if(created)await client.sandbox.delete(name,{workspace}).catch(()=>{})}
 }
 
 export async function artifactFile(artifact, dir = ARTIFACT_DIR) {

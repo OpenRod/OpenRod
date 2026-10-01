@@ -1,11 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { scopedStateDirectory } from './paths.js'
 
 // Gateway endpoint + immutable sandbox id → the MCPs & Skills setups it uses.
 // Names can be reused, including on another gateway, and cannot identify grants.
 // A Quick-setup snapshot also records the setup it was prepared from.
-const FILE = path.resolve(import.meta.dirname, '../.state/setup-members.json')
+const membersFile = () => path.join(scopedStateDirectory(), 'setup-members.json')
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const ID = /^[a-f0-9]{24}$/
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
@@ -24,7 +25,7 @@ export function sandboxSetups(members, sandbox, endpoint) {
   return key ? ids(members[key]) : []
 }
 
-export function createSetupMembers(file = FILE) {
+export function createSetupMembers(file = membersFile()) {
   let edits = Promise.resolve()
   async function read() {
     let raw
@@ -62,4 +63,15 @@ export function createSetupMembers(file = FILE) {
   }
 }
 
-export const { readSetupMembers, setSandboxSetups, addSandboxSetups, removeSandboxSetups, forgetSandbox } = createSetupMembers()
+const stores = new Map()
+function setupMembers() {
+  const file = membersFile()
+  if (!stores.has(file)) stores.set(file, createSetupMembers(file))
+  return stores.get(file)
+}
+
+export const readSetupMembers = () => setupMembers().readSetupMembers()
+export const setSandboxSetups = (identity, list) => setupMembers().setSandboxSetups(identity, list)
+export const addSandboxSetups = (identity, list) => setupMembers().addSandboxSetups(identity, list)
+export const removeSandboxSetups = (identity, list) => setupMembers().removeSandboxSetups(identity, list)
+export const forgetSandbox = (identity) => setupMembers().forgetSandbox(identity)

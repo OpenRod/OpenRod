@@ -1,7 +1,9 @@
+import { useCloudMode } from "@/components/auth-gate"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import { Activity, Package, Box, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ConnectionPicker } from "@/components/connection-picker"
 
 import {
   Sidebar,
@@ -37,9 +39,11 @@ const CONNECTION = {
   connecting: { label: "Connecting", dot: "bg-amber-400" },
   reconnecting: { label: "Reconnecting", dot: "bg-amber-400" },
   "gateway-down": { label: "Unreachable", dot: "bg-red-500" },
+  "setup-required": { label: "Not connected", dot: "bg-muted-foreground" },
 }
 
-export function AppSidebar({ view, onNavigate }) {
+export function AppSidebar({ view, onNavigate, setupOpen, onSetupOpenChange }) {
+  const cloud = useCloudMode()
   const { connection, overview } = useLive()
   const state = CONNECTION[connection] ?? CONNECTION.connecting
   const gateway = overview?.gateway
@@ -98,6 +102,7 @@ export function AppSidebar({ view, onNavigate }) {
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <ThemeSwitcher />
+        {!cloud && <ConnectionPicker setupOpen={setupOpen} onSetupOpenChange={onSetupOpenChange} />}
         {/* The gateway is status, not a destination: its facts live here. */}
         <Popover>
           <PopoverTrigger className="flex w-full items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
@@ -116,12 +121,21 @@ export function AppSidebar({ view, onNavigate }) {
           <PopoverContent side="top" align="start" sideOffset={10} className="w-64 gap-3 p-4">
             <p className="flex items-center gap-1.5 text-xs font-medium">
               <span className={`size-1.5 rounded-full ${gateway?.status === "healthy" ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
-              {gateway ? (gateway.status === "healthy" ? "Healthy" : gateway.status) : overview?.error ? "Unreachable" : "Reading…"}
+              {gateway ? (gateway.status === "healthy" ? "Healthy" : gateway.status) : connection === "setup-required" ? "No connection selected" : overview?.error ? "Unreachable" : "Reading…"}
             </p>
             {gateway ? (
-              <dl>
-                <dt className="text-[10px] text-muted-foreground">Gateway endpoint</dt>
-                <dd className="break-all font-mono text-[11px]">{gateway.endpoint}</dd>
+              <dl className="grid gap-2.5">
+                {[
+                  ["Endpoint", gateway.endpoint, true],
+                  ["Authentication", gateway.authMode === "mtls" ? "mTLS" : gateway.authMode],
+                  ["Runtime", gateway.drivers.map((d) => `${d.driver}${d.version ? ` ${d.version}` : ""}`).join(", ") || "-", true],
+                  ["Registration", gateway.remote ? "Remote" : "Local / tunnel endpoint"],
+                ].map(([label, value, mono]) => (
+                  <div key={label}>
+                    <dt className="text-[10px] text-muted-foreground">{label}</dt>
+                    <dd className={`break-all ${mono ? "font-mono text-[11px]" : "text-xs"}`}>{value}</dd>
+                  </div>
+                ))}
               </dl>
             ) : overview?.error ? <p className="font-mono text-[10px] text-muted-foreground">{overview.error}</p> : null}
           </PopoverContent>

@@ -2,11 +2,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
 import { IMAGE_TEMPLATE_NAME } from '../src/lib/sandbox-images.js'
 import { resolveSetups, usableSetup } from './setups.js'
 import { artifactFile } from './setup-packages.js'
-import { WORKSPACE, gateway, resolveGateway, iso } from './gateway.js'
+import { gateway, resolveGateway, iso, contextKey, contextSelection, runWithContext, workspaceName, workspaceScope, listGateways, gatewayWorkspaces } from './gateway.js'
 
 // Image templates are OpenShell sandbox templates (`openshell sandbox template
 // create`): the gateway stores the name, image and environment, and the recipe
@@ -20,7 +21,9 @@ const processState = globalThis[stateKey] ??= { jobs: new Map(), locks: new Set(
 const { jobs, locks } = processState
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 const running = (job) => job?.status === 'building'
+const jobKey = (name) => JSON.stringify([contextKey(), name])
 async function locked(name, task) {
+  name = jobKey(name)
   if (locks.has(name)) throw fail('An operation is already starting for this template.', 409)
   locks.add(name)
   try { return await task() } finally { locks.delete(name) }
@@ -99,19 +102,19 @@ export function templateView(t) {
 const jobView = (job) => ({ name: job.name, image: null, recipe: job.recipe, status: job.status, logs: job.logs, error: job.error, startedAt: job.startedAt })
 
 export async function listImageTemplates() {
-  const { client } = await gateway()
-  const templates = (await client.sandboxTemplates.listAll()).map(templateView)
+  const { client, workspace } = await gateway()
+  const templates = (await client.sandboxTemplates.listAll({ workspace })).map(templateView)
   const byName = new Map(templates.map((t) => [t.name, t]))
   // A rebuild in progress (or one that failed) shows on the template it replaces.
-  for (const job of jobs.values()) byName.set(job.name, { ...byName.get(job.name), ...jobView(job), exists: byName.has(job.name) })
+  for (const job of jobs.values()) if (job.scope === contextKey()) byName.set(job.name, { ...byName.get(job.name), ...jobView(job), exists: byName.has(job.name) })
   return [...byName.values()].sort((a, b) => (b.startedAt ?? b.createdAt ?? '').localeCompare(a.startedAt ?? a.createdAt ?? ''))
 }
 
 // What New sandbox needs: the template name plus how the sandbox starts.
 export async function imageTemplateForLaunch(name) {
-  const { client } = await gateway()
+  const { client, workspace } = await gateway()
   let template
-  try { template = templateView(await client.sandboxTemplates.get(checkName(name))) } catch (e) { if (missing(e)) throw fail('Image template not found.', 404); throw e }
+  try { template = templateView(await client.sandboxTemplates.get(checkName(name), { workspace })) } catch (e) { if (missing(e)) throw fail('Image template not found.', 404); throw e }
   if (template.image?.startsWith(BUILT_PREFIX)) {
     const engine = await localEngine()
     try { await inspect(template.image, engine) } catch { throw fail('This template’s image is no longer in local Docker. Rebuild the template before launching.') }
@@ -147,17 +150,18 @@ async function start(input) {
   if (Object.keys(pinnedErrors).length) throw fail(Object.values(pinnedErrors)[0])
   if (setups.some((s) => !s.items.length)) throw fail('A selected Setup has unresolved import requirements. Resolve or re-import those items before building.')
   const { name } = recipe
+  const key = jobKey(name)
   const replace = input.replace === true
-  if (running(jobs.get(name))) throw fail('This template is already building.', 409)
+  if (running(jobs.get(key))) throw fail('This template is already building.', 409)
   if ([...jobs.values()].filter(running).length >= 2) throw fail('Two image builds are already running. Wait for one to finish.', 409)
-  const { client } = await gateway()
+  const { client, workspace } = await gateway()
   let previous = null
-  try { previous = await client.sandboxTemplates.get(name) } catch (e) { if (!missing(e)) throw e }
+  try { previous = await client.sandboxTemplates.get(name, { workspace }) } catch (e) { if (!missing(e)) throw e }
   if (previous && !replace) throw fail('A template with this name already exists. Pick another name.', 409)
   if (previous && !templateView(previous).managed) throw fail('This template was created outside the console. Edit it with the openshell CLI.', 409)
   const engine = await localEngine()
-  const job = { name, recipe, status: 'building', logs: '', error: null, cancelled: false, child: null, startedAt: new Date().toISOString() }
-  jobs.set(name, job)
+  const job = { name, scope: contextKey(), recipe, status: 'building', logs: '', error: null, cancelled: false, child: null, startedAt: new Date().toISOString() }
+  jobs.set(key, job)
   void (async () => {
     let temp
     try {
@@ -173,7 +177,7 @@ async function start(input) {
           }
         }
         await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
-        image = `${BUILT_PREFIX}${name}:${Date.now().toString(36)}`
+        image = `${BUILT_PREFIX}${name}:${randomUUID()}`
         await buildImage(image, temp, engine, job, run, { networkNone: recipe.source === 'image' })
       } else {
         // OpenShell resolves the reference itself; check it once so a typo or
@@ -183,14 +187,14 @@ async function start(input) {
       await inspect(image, engine)
       if (job.cancelled) throw fail('Operation cancelled.')
       job.saving = true
-      try { await saveTemplate(client, recipe, image, previous) } catch (e) {
+      try { await saveTemplate(client, workspace, recipe, image, previous) } catch (e) {
         // Nothing points at an image whose template was never saved.
         if (recipe.source === 'build' || setups.length) await run(['image', 'rm', image], { engine }).catch(() => {})
         throw e
       }
-      jobs.delete(name)
-      const old = previous?.spec?.workload?.image
-      if (old?.startsWith(BUILT_PREFIX) && old !== image && !(await imageInUse(client, old))) await run(['image', 'rm', old], { engine }).catch(() => {})
+      jobs.delete(key)
+      // Other workspaces or gateways may still reference the previous Docker image.
+      // Keep published images; only the unpublished failed build above is disposable.
     } catch (e) {
       job.status = 'failed'; job.error = e.message; job.saving = false
     } finally {
@@ -200,40 +204,26 @@ async function start(input) {
   return jobView(job)
 }
 
-// A stopped sandbox resolves its image again when it starts, so an old build
-// stays while any sandbox or template still points at it.
-async function imageInUse(client, image) {
-  try {
-    let pageToken = ''
-    do {
-      const page = await client.raw.listSandboxes({ workspaceScope: WORKSPACE, pageSize: 1000, pageToken })
-      if (page.sandboxes.some((s) => s.spec?.template?.image === image)) return true
-      pageToken = page.nextPageToken
-    } while (pageToken)
-    return (await client.sandboxTemplates.listAll()).some((t) => t.spec?.workload?.image === image)
-  } catch { return true }
-}
-
 // OpenShell has no template update: replace means delete and recreate under
 // the same name. Sandboxes already created keep running unchanged.
-async function saveTemplate(client, recipe, image, previous) {
+async function saveTemplate(client, workspace, recipe, image, previous) {
   const template = {
     metadata: { name: recipe.name, labels: { [LABEL]: 'v1' }, annotations: { [RECIPE_ANNOTATION]: JSON.stringify(storedRecipe(recipe)) } },
     spec: { workload: { image, environment: Object.fromEntries(recipe.environment.map((e) => [e.name, e.value])) } },
   }
-  if (previous) await client.sandboxTemplates.delete(recipe.name, { allowMissing: true })
-  try { await client.sandboxTemplates.create(template) } catch (e) {
-    if (previous) await client.sandboxTemplates.create({ metadata: { name: previous.metadata.name, labels: previous.metadata.labels, annotations: previous.metadata.annotations }, spec: previous.spec }).catch(() => {})
+  if (previous) await client.sandboxTemplates.delete(recipe.name, { workspace, allowMissing: true })
+  try { await client.sandboxTemplates.create(template, { workspace }) } catch (e) {
+    if (previous) await client.sandboxTemplates.create({ metadata: { name: previous.metadata.name, labels: previous.metadata.labels, annotations: previous.metadata.annotations }, spec: previous.spec }, { workspace }).catch(() => {})
     throw e
   }
 }
 
 // Read every page before allowing deletion; unavailable usage must fail closed.
-export async function imageTemplateUsage(client, name, image) {
+export async function imageTemplateUsage(client, name, image, { workspace = workspaceName() } = {}) {
   const sandboxes = []
   let imageInUse = false, pageToken = ''
   do {
-    const page = await client.raw.listSandboxes({ workspaceScope: WORKSPACE, pageSize: 1000, pageToken })
+    const page = await client.raw.listSandboxes({ workspaceScope: workspaceScope(workspace), pageSize: 1000, pageToken })
     for (const sandbox of page.sandboxes) {
       const sameImage = Boolean(image && sandbox.spec?.template?.image === image)
       imageInUse ||= sameImage
@@ -247,24 +237,25 @@ export async function imageTemplateUsage(client, name, image) {
 
 // Remove the exact image reference, never force removal or prune unrelated data.
 // Keep the template on Docker failure so the same action can be retried.
-export async function deleteImageTemplate(client, name, { getEngine = localEngine, docker = run } = {}) {
+export async function deleteImageTemplate(client, name, { workspace = workspaceName(), retainImageReason, getEngine = localEngine, docker = run } = {}) {
   let template
-  try { template = await client.sandboxTemplates.get(name) } catch (e) { if (!missing(e)) throw e }
+  try { template = await client.sandboxTemplates.get(name, { workspace }) } catch (e) { if (!missing(e)) throw e }
   const image = template?.spec?.workload?.image
   const removeRecord = async (cleanup) => {
-    await client.sandboxTemplates.delete(name, { allowMissing: true })
+    await client.sandboxTemplates.delete(name, { workspace, allowMissing: true })
     return { ok: true, imageCleanup: cleanup }
   }
   return locked(`image:${image || name}`, async () => {
-    const usage = await imageTemplateUsage(client, name, image)
+    const usage = await imageTemplateUsage(client, name, image, { workspace })
     if (usage.sandboxes.length) {
       throw Object.assign(fail('This template cannot be deleted while sandboxes use it. Delete the sandboxes first.', 409), {
         code: 'TEMPLATE_IN_USE', sandboxes: usage.sandboxes,
       })
     }
     if (!image) return removeRecord({ status: 'absent' })
+    if (retainImageReason) return removeRecord({ status: 'retained', image, reason: retainImageReason })
     if (usage.imageInUse) return removeRecord({ status: 'retained', image, reason: 'Docker image kept because an existing sandbox still uses it.' })
-    const templates = await client.sandboxTemplates.listAll()
+    const templates = await client.sandboxTemplates.listAll({ workspace })
     if (templates.some((t) => t.metadata?.name !== name && t.spec?.workload?.image === image)) {
       return removeRecord({ status: 'retained', image, reason: 'Docker image kept because another template still uses it.' })
     }
@@ -287,31 +278,39 @@ export async function imageTemplateRoute(method, parts, input) {
     if (name === 'local-images') return inventory()
     if (action === 'usage') {
       checkName(name)
-      const { client } = await gateway()
+      const { client, workspace } = await gateway()
       let template
-      try { template = await client.sandboxTemplates.get(name) } catch (e) { if (!missing(e)) throw e }
-      return imageTemplateUsage(client, name, template?.spec?.workload?.image)
+      try { template = await client.sandboxTemplates.get(name, { workspace }) } catch (e) { if (!missing(e)) throw e }
+      return imageTemplateUsage(client, name, template?.spec?.workload?.image, { workspace })
     }
     return undefined
   }
-  if (!name) return locked(String(input?.recipe?.name ?? ''), () => start(input))
+  if (!name) return runWithContext(contextSelection(), () => locked(String(input?.recipe?.name ?? ''), () => start(input)))
   checkName(name)
+  const key = jobKey(name)
   if (action === 'cancel') {
-    const job = jobs.get(name)
+    const job = jobs.get(key)
     if (job?.saving) throw fail('The build finished and the template is being saved. It can no longer be cancelled.', 409)
     if (running(job)) { job.cancelled = true; job.child?.kill('SIGKILL') }
     return { ok: true }
   }
   if (action === 'dismiss') {
-    if (!running(jobs.get(name))) jobs.delete(name)
+    if (!running(jobs.get(key))) jobs.delete(key)
     return { ok: true }
   }
   if (action === 'delete') {
     return locked(name, async () => {
-      if (running(jobs.get(name))) throw fail('Cancel the build before removing this template.', 409)
-      const { client } = await gateway()
-      const result = await deleteImageTemplate(client, name)
-      jobs.delete(name)
+      if (running(jobs.get(key))) throw fail('Cancel the build before removing this template.', 409)
+      const { client, target, workspace } = await gateway()
+      // A local engine can serve several contexts. Without exclusive ownership,
+      // removing this context's record must not destroy another context's image.
+      const retainImageReason = target.remote
+        ? 'Docker image kept because it belongs to a remote gateway.'
+        : listGateways().some((entry) => entry.name !== target.name) || (await gatewayWorkspaces(target.name)).some((entry) => entry.name !== workspace)
+          ? 'Docker image kept because another gateway or workspace may still use it.'
+          : null
+      const result = await deleteImageTemplate(client, name, { workspace, retainImageReason })
+      jobs.delete(key)
       return result
     })
   }
