@@ -50,7 +50,7 @@ function toForm(p) {
   const a = { ...DEFAULT_ADVANCED, ...(p?.advanced ?? {}) }
   return {
     id: p?.id ?? "", name: p?.name ?? "", action: p?.action ?? "allow", setup: p?.setup ?? null,
-    destinations: (p?.destinations ?? []).join("\n"),
+    destinations: [...(p?.destinations ?? [])],
     appliesTo: { everyone: false, groups: [], sandboxes: [], ...(p?.appliesTo ?? {}) },
     ports: a.ports.join(", "), programs: [...a.programs], requests: a.requests, allow: [...a.allow], deny: [...a.deny], enforcement: a.enforcement, privateIps: a.privateIps.join(", "),
   }
@@ -58,7 +58,7 @@ function toForm(p) {
 
 function toPolicy(f, isNew) {
   return {
-    id: isNew ? slug(f.name) : f.id, name: f.name.trim(), action: f.action, destinations: lines(f.destinations), appliesTo: f.appliesTo,
+    id: isNew ? slug(f.name) : f.id, name: f.name.trim(), action: f.action, destinations: f.destinations, appliesTo: f.appliesTo,
     // An MCPs & Skills setup's own policy keeps its marker, so the setup still finds it.
     ...(f.setup ? { setup: f.setup } : {}),
     ...(f.action === "allow" ? { advanced: {
@@ -100,10 +100,11 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
   const [created, setCreated] = React.useState([])
   const groups = [...savedGroups, ...created.filter((g) => !savedGroups.some((s) => s.id === g.id))].sort((a, b) => a.name.localeCompare(b.name))
   const [program, setProgram] = React.useState("")
+  const [destination, setDestination] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
-  React.useEffect(() => { if (open) { setForm(toForm(initial)); setError(null); setProgram(""); setConfirmDelete(false) } }, [open, initial])
+  React.useEffect(() => { if (open) { setForm(toForm(initial)); setError(null); setProgram(""); setDestination(""); setConfirmDelete(false) } }, [open, initial])
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
   const setTo = (patch) => setForm((f) => ({ ...f, appliesTo: { ...f.appliesTo, ...patch } }))
@@ -111,6 +112,12 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
   const forSetup = form.appliesTo.setups?.length > 0
   const validGroup = !form.appliesTo.everyone && !form.appliesTo.sandboxes.length && (forSetup || form.appliesTo.groups.length > 0) && form.appliesTo.groups.every((id) => groups.some((g) => g.id === id))
   const policy = toPolicy(form, isNew)
+  // Enter, comma, space or a paste turns what is typed into chips, one per host.
+  const addDestinations = (text) => {
+    const added = split(text).filter((h, i, all) => !form.destinations.includes(h) && all.indexOf(h) === i)
+    if (added.length) set({ destinations: [...form.destinations, ...added] })
+    setDestination("")
+  }
   const addProgram = (path) => {
     const value = path.trim()
     if (value && !form.programs.includes(value)) set({ programs: [...form.programs, value] })
@@ -123,7 +130,9 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
     event.preventDefault()
     if (!validGroup) { setError("Choose at least one group for this network rule."); return }
     setBusy(true); setError(null)
-    try { onSaved(await api.savePolicy({ ...policy, isNew }), policy); onOpenChange(false) } catch (e) { setError(e.message) } finally { setBusy(false) }
+    const pending = split(destination).filter((h) => !policy.destinations.includes(h))
+    const saved = { ...policy, destinations: [...policy.destinations, ...pending] }
+    try { onSaved(await api.savePolicy({ ...saved, isNew }), saved); onOpenChange(false) } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
   async function remove() {
     setBusy(true); setError(null)
@@ -174,10 +183,25 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
 
           <div className="grid gap-1.5">
             <Label htmlFor="policy-destinations" className="text-xs">Destinations</Label>
-            <Textarea id="policy-destinations" rows={4} value={form.destinations} onChange={(e) => set({ destinations: e.target.value })} className="font-mono text-[11px]"
-              placeholder={form.action === "block" ? "pastebin.com\n**.ngrok.io" : "github.com\n**.githubusercontent.com"} required />
+            <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 focus-within:ring-2 focus-within:ring-ring">
+              {form.destinations.map((d) => (
+                <span key={d} className="flex items-center gap-1 rounded-md border border-foreground/20 bg-accent py-0.5 pr-0.5 pl-2 font-mono text-[11px]">
+                  {d}
+                  <button type="button" aria-label={`Remove ${d}`} onClick={() => set({ destinations: form.destinations.filter((x) => x !== d) })}
+                    className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
+                </span>
+              ))}
+              <input id="policy-destinations" value={destination} onChange={(e) => (/[\s,]$/.test(e.target.value) ? addDestinations(e.target.value) : setDestination(e.target.value))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); addDestinations(destination) }
+                  else if (e.key === "Backspace" && !destination && form.destinations.length) set({ destinations: form.destinations.slice(0, -1) })
+                }}
+                onBlur={() => addDestinations(destination)}
+                className="min-w-32 flex-1 bg-transparent font-mono text-[11px] outline-none placeholder:text-muted-foreground"
+                placeholder={form.destinations.length ? "" : form.action === "block" ? "pastebin.com" : "github.com"} aria-label="Destinations" />
+            </div>
             <p className="text-[11px] text-muted-foreground">
-              {form.action === "block" ? "One host per line. Blocking a host also blocks its subdomains." : "One host per line. *.example.com matches one level, **.example.com any depth."}
+              {form.action === "block" ? "Press Enter after each host. Blocking a host also blocks its subdomains." : "Press Enter after each host. *.example.com matches one level, **.example.com any depth."}
             </p>
           </div>
 
@@ -247,7 +271,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
             ) : <span />}
             <span className="flex gap-2">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" disabled={busy || !validGroup || !form.name.trim() || !lines(form.destinations).length} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+              <Button type="submit" disabled={busy || !validGroup || !form.name.trim() || !form.destinations.length && !destination.trim()} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
                 {busy && <Spinner aria-hidden="true" />}{isNew ? "Add rule" : "Save rule"}
               </Button>
             </span>
