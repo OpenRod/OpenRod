@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from "motion/react"
 
 // Monotone cubic interpolation (Fritsch–Carlson), as on the Boxes growth
 // chart: a count per minute never dips below zero between two readings.
-function smoothPath(pts) {
+export function smoothPath(pts) {
   if (pts.length < 2) return pts.length ? `M${pts[0][0]} ${pts[0][1]}` : ""
   const n = pts.length
   const dx = [], slope = []

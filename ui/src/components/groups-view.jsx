@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowRight, Check, ChevronRight, Network, Plus, Search, ShieldCheck, ShieldOff, Trash2, Users, X } from "lucide-react"
+import { ArrowRight, Check, ChevronRight, Network, Plus, ShieldCheck, ShieldOff, Trash2, Users, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { Label } from "@/components/ui/label"
 import { GroupPicker } from "@/components/group-picker"
 import { Spinner } from "@/components/ui/spinner"
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils"
 // rules aimed at it reach every sandbox in it, including ones added later.
 
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
+const SHOW_SANDBOXES = "groups-show-sandboxes"
 
 function handOff(value) {
   try { sessionStorage.setItem(POLICY_HANDOFF, JSON.stringify(value)) } catch { /* optional */ }
@@ -324,6 +326,13 @@ export function GroupsView({ onNavigate }) {
   const [selected, setSelected] = React.useState([])
   const [bulkGroups, setBulkGroups] = React.useState([])
   const [busy, setBusy] = React.useState(false)
+  // Memberships are also edited from each group's panel, so the full
+  // sandbox table stays folded until someone asks for it.
+  const [showSandboxes, setShowSandboxes] = React.useState(() => { try { return localStorage.getItem(SHOW_SANDBOXES) === "1" } catch { return false } })
+  const toggleSandboxes = () => setShowSandboxes((open) => {
+    try { localStorage.setItem(SHOW_SANDBOXES, open ? "0" : "1") } catch { /* optional */ }
+    return !open
+  })
 
   const load = React.useCallback(async () => {
     try { setOrg(await api.org()) } catch (e) { setOrg({ error: e.message }) }
@@ -373,7 +382,6 @@ export function GroupsView({ onNavigate }) {
             </div>
           ))}
         </div>
-        <p className="mx-3 hidden max-w-sm text-[11px] leading-relaxed text-muted-foreground lg:block">Network rules aimed at a group reach every sandbox in it. A sandbox can join multiple groups. Their rules combine, and blocks take precedence.</p>
         <Button size="sm" className="ml-auto bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => setCreating(true)}><Plus className="size-3.5" />New group</Button>
       </div>
 
@@ -388,13 +396,18 @@ export function GroupsView({ onNavigate }) {
 
       <section aria-label="Sandboxes and their groups" className="border-t border-border">
         <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 sm:px-6">
-          <h2 className="text-xs font-medium">Sandboxes</h2>
-          <span className="text-[11px] text-muted-foreground">Select all groups each sandbox belongs to. Network access updates right away.</span>
-          <div className="relative ml-auto w-full sm:w-56">
-            <Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search sandbox or group…" aria-label="Search sandboxes" className="h-9 pl-9 text-xs" />
-          </div>
+          <button type="button" onClick={toggleSandboxes} aria-expanded={showSandboxes}
+            className="flex items-center gap-1.5 rounded text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <ChevronRight className={cn("size-3.5 text-muted-foreground transition-transform", showSandboxes && "rotate-90")} aria-hidden="true" />
+            <span className="font-medium">Sandboxes</span>
+            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{sandboxes.length}</span>
+            {sandboxes.length - grouped > 0 && <span className="text-[11px] text-muted-foreground">· {sandboxes.length - grouped} not in a group</span>}
+          </button>
+          {showSandboxes && (
+            <SearchInput value={query} onValueChange={setQuery} placeholder="Search sandbox or group…" aria-label="Search sandboxes" className="ml-auto w-full sm:w-56" />
+          )}
         </div>
+        {showSandboxes && <>
         {selected.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-y border-border bg-accent/50 px-4 py-2 text-xs sm:px-6">
             <Check className="size-3.5" aria-hidden="true" />{plural(selected.length, "sandbox", "sandboxes")} selected
@@ -442,6 +455,7 @@ export function GroupsView({ onNavigate }) {
             </div>
           </div>
         ) : <p className="px-6 py-10 text-center text-xs text-muted-foreground">No sandboxes yet. When you create one, pick a group for it in the New sandbox dialog.</p>}
+        </>}
       </section>
 
       {dialog}

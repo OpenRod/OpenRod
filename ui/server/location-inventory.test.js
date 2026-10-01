@@ -52,7 +52,7 @@ test('one failing source preserves the other inventory and remote cached rows ar
   assert.deepEqual(partial.sandboxes.find(record => record.location.remote), {
     id: 'remote-id', name: 'same-name', phase: 'ready', location: {
       id: contextKey(remote), context: contextKey(remote), gateway: remote.gateway, workspace: remote.workspace,
-      label: 'SSH · target', remote: true, connected: false, error: 'Remote RPC failed',
+      label: 'SSH · target', remote: true, host: 'target', connected: false, error: 'Remote RPC failed',
     },
   })
   await assert.rejects(inventory.resolve(contextKey(remote)), { status: 409 })

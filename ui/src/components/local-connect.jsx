@@ -19,7 +19,6 @@ export function LocalConnect({ children, user, logout }) {
   }, [handoff, valid])
   if (handoff === null) return children
   return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
-    <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10" />
     <h1 className="text-2xl font-semibold">Finishing sign-in…</h1>
     <p className="mt-3 text-sm text-muted-foreground">{valid ? `Returning to local OpenRod as ${user.email}. This window will close automatically.` : 'This sign-in request is invalid or its local OpenRod tab closed. Start again from local OpenRod.'}</p>
     {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}

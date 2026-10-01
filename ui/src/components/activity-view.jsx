@@ -1,6 +1,6 @@
 import { SelectField } from "@/components/ui/select-field"
 import * as React from "react"
-import { ArrowDown, ArrowUp, Check, Copy, Filter, Pause, Play, Search, X, SlidersHorizontal, Download, Webhook, ChevronDown, Trash2 } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, Copy, Filter, Pause, Play, X, SlidersHorizontal, Download, Webhook, ChevronDown, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ActivityDestinations } from "@/components/activity-destinations"
 import { useApi, useLocation } from "@/lib/location-context"
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { useVirtualRows } from "@/hooks/use-virtual-rows"
@@ -19,6 +20,7 @@ import { useDemoFleet } from "@/hooks/use-demo-fleet"
 import { useActivityHistory } from "@/hooks/use-activity-history"
 import { useLive } from "@/lib/live"
 import { activityKey, activityRow, filterActivity } from "@/lib/activity-inventory"
+import { Notice } from "@/components/notice"
 
 const PAGE_SIZE = 50
 const COLUMNS = [{ id: 'time', label: 'Time', width: 150 }, { id: 'severity', label: 'Security severity', width: 150 }, { id: 'logLevel', label: 'Log level', width: 110 }, { id: 'sandbox', label: 'Sandbox', width: 125 }, { id: 'agent', label: 'Observed agent', width: 145 }, { id: 'action', label: 'Activity', width: 200 }, { id: 'verdict', label: 'Decision', width: 125 }, { id: 'destination', label: 'Target', width: 260 }]
@@ -35,7 +37,7 @@ function Choices({ options, selected, onChange, label }) {
   React.useEffect(() => { virtual.scrollToTop() }, [deferred])
   const chosen = new Set(selected)
   return <>
-    <Input aria-label={`Search ${label}`} placeholder={`Search ${label.toLowerCase()}…`} value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 text-xs" />
+    <SearchInput aria-label={`Search ${label}`} placeholder={`Search ${label.toLowerCase()}…`} value={query} onValueChange={setQuery} />
     <div className="flex items-center justify-between text-[11px] text-muted-foreground"><span>{selected.length.toLocaleString()} selected · {matches.length.toLocaleString()} matches</span><button onClick={() => onChange([])} className="underline">Clear</button></div>
     <div ref={virtual.ref} onScroll={virtual.onScroll} className="h-56 overflow-auto" role="group" aria-label={label}>
       <div style={{ height: virtual.totalHeight, position: 'relative' }}><div style={{ transform: `translateY(${virtual.paddingTop}px)` }}>
@@ -196,7 +198,7 @@ function ScopedActivityView() {
   return <>
     <div className="flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
-        <div className="relative min-w-44 flex-1 basis-full sm:basis-44"><Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" /><Input aria-label="Search activity" placeholder="Search activity…" value={query} onChange={(e) => change(setQuery)(e.target.value)} className="h-9 border-transparent bg-muted/50 pl-9 text-xs shadow-none focus-visible:bg-background" /></div>
+        <SearchInput aria-label="Search activity" placeholder="Search activity…" value={query} onValueChange={change(setQuery)} className="min-w-44 flex-1 basis-full sm:basis-44" />
         <Popover><PopoverTrigger className={`${control} flex items-center gap-2 hover:bg-muted`}><Filter className="size-3.5" />Filters{(range !== 'all' || direction !== 'all' || sandboxes.length > 0 || verdicts.length > 0 || Object.values(filters).some((f) => f.value)) && <span className="rounded bg-foreground px-1.5 text-[10px] text-background">{Number(range !== 'all') + Number(direction !== 'all') + Number(sandboxes.length > 0) + Number(verdicts.length > 0) + Object.values(filters).filter((f) => f.value).length}</span>}</PopoverTrigger>
           <PopoverContent align="end" className="max-h-[min(38rem,80svh)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto p-4">
             <p className="text-xs font-medium">Filter activity</p>
@@ -237,7 +239,7 @@ function ScopedActivityView() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {(history.error || live.historyError) && !live.demo && <div role="alert" className="border-b border-red-200 bg-red-50 px-6 py-2 text-xs text-red-700">History unavailable: {history.error || live.historyError}<Button size="xs" variant="ghost" onClick={history.refresh}>Retry</Button></div>}
+      {(history.error || live.historyError) && !live.demo && <Notice id="activity:history-error" tone="error" title="History unavailable" actions={<Button size="xs" variant="outline" onClick={history.refresh}>Retry</Button>}>{history.error || live.historyError}</Notice>}
       {range === 'custom' && <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs"><label className="flex items-center gap-2">From<input type="datetime-local" aria-label="From time" className={control} value={from} onInput={(e) => change(setFrom)(e.currentTarget.value)} /></label><label className="flex items-center gap-2">To<input type="datetime-local" aria-label="To time" className={control} value={to} onInput={(e) => change(setTo)(e.currentTarget.value)} /></label><span className="text-muted-foreground">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>{invalidRange && <span role="alert" className="text-red-600">Choose a start or end time; the end must follow the start.</span>}</div>}
       {Boolean(filtering) && <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-6 py-2">{chips.map((chip) => <button key={chip.label} onClick={chip.clear} title={`Remove ${chip.label}`} className="flex max-w-72 items-center gap-2 rounded border border-border bg-muted/40 px-2 py-1 text-[11px]"><span className="truncate">{chip.label}</span><X className="size-3 shrink-0" /></button>)}<Button size="xs" variant="ghost" onClick={clear}>Clear all</Button></div>}
       <div className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-6 py-2 text-[11px] text-muted-foreground">
@@ -250,8 +252,8 @@ function ScopedActivityView() {
       </div>
       <div ref={virtual.ref} onScroll={(e) => { virtual.onScroll(e); if (e.currentTarget.scrollTop > 0) hold() }} tabIndex={0} role="region" aria-label="Activity events" className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         <table style={{ minWidth: columns.reduce((sum, c) => sum + c.width, live.demo ? 0 : 40) }} className="w-full table-fixed border-separate border-spacing-0 text-xs" aria-label="Activity" aria-rowcount={shown.length + 1}>
-          <colgroup>{!live.demo && <col style={{ width: 40 }} />}{columns.map((c) => <col key={c.id} style={{ width: c.width }} />)}</colgroup>
-          <thead className="sticky top-0 z-10 bg-muted"><tr>{!live.demo && <th scope="col" className="h-10 border-b border-border px-3"><input type="checkbox" aria-label="Select logs on this page" disabled={!shown.length || shown.length > 5000} checked={shown.length > 0 && shown.every((row) => checked.has(row.key))} ref={(node) => { if (node) node.indeterminate = shown.some((row) => checked.has(row.key)) && !shown.every((row) => checked.has(row.key)) }} onChange={(e) => { hold(); setChecked(e.target.checked ? new Set(shown.map((row) => row.key)) : new Set()) }} /></th>}{columns.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'} className="h-10 border-b border-border px-3 text-left font-medium text-muted-foreground"><div className="flex items-center gap-1"><button className="flex h-9 flex-1 items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => change(setSort)({ key: c.id, direction: sort.key === c.id && sort.direction === 'asc' ? 'desc' : 'asc' })}>{c.label}{sort.key === c.id && (sort.direction === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>
+          <colgroup>{!live.demo && <col style={{ width: 52 }} />}{columns.map((c) => <col key={c.id} style={{ width: c.width }} />)}</colgroup>
+          <thead className="sticky top-0 z-10 bg-muted"><tr>{!live.demo && <th scope="col" className="h-10 border-b border-border pr-3 pl-4 text-left sm:pl-6"><input type="checkbox" aria-label="Select logs on this page" disabled={!shown.length || shown.length > 5000} checked={shown.length > 0 && shown.every((row) => checked.has(row.key))} ref={(node) => { if (node) node.indeterminate = shown.some((row) => checked.has(row.key)) && !shown.every((row) => checked.has(row.key)) }} onChange={(e) => { hold(); setChecked(e.target.checked ? new Set(shown.map((row) => row.key)) : new Set()) }} /></th>}{columns.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'} className="h-10 border-b border-border px-3 text-left font-medium text-muted-foreground"><div className="flex items-center gap-1"><button className="flex h-9 flex-1 items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => change(setSort)({ key: c.id, direction: sort.key === c.id && sort.direction === 'asc' ? 'desc' : 'asc' })}>{c.label}{sort.key === c.id && (sort.direction === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>
             <Popover><PopoverTrigger aria-label={`Filter ${c.label}`} className={`rounded p-1 hover:bg-accent ${(c.id === 'time' ? range !== 'all' : c.id === 'sandbox' ? sandboxes.length : c.id === 'verdict' ? verdicts.length : c.id === 'agent' ? agents.length || filters.agent?.value : filters[c.id]?.value) ? 'bg-accent text-foreground' : ''}`}><Filter className="size-3" /></PopoverTrigger><PopoverContent align="start">
               <p className="text-xs font-medium">Filter {c.label.toLowerCase()}</p>
               {c.id === 'agent' ? <div role="group" aria-label="Observed agents" className="max-h-64 overflow-y-auto">
@@ -270,7 +272,7 @@ function ScopedActivityView() {
           <tbody>
             {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={columns.length + (live.demo ? 0 : 1)} style={{ height: virtual.paddingTop, padding: 0 }} /></tr>}
             {shown.slice(virtual.start, virtual.end).map((row, i) => <tr key={row.key} aria-rowindex={virtual.start + i + 2} onClick={() => { hold(); setSelected(row) }} className={`group cursor-pointer hover:bg-muted/70 ${selected?.key === row.key ? 'bg-accent' : 'bg-card'}`}>
-              {!live.demo && <td className="h-12 border-b border-border/60 px-3" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select log ${row.values.sandbox} ${row.values.time}`} checked={checked.has(row.key)} disabled={!checked.has(row.key) && checked.size >= 5000} onChange={() => toggleChecked(row.key)} /></td>}
+              {!live.demo && <td className="h-12 border-b border-border/60 pr-3 pl-4 sm:pl-6" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select log ${row.values.sandbox} ${row.values.time}`} checked={checked.has(row.key)} disabled={!checked.has(row.key) && checked.size >= 5000} onChange={() => toggleChecked(row.key)} /></td>}
               {columns.map((c) => <td key={c.id} className={`h-12 border-b border-border/60 px-3 py-0 font-mono text-[11px] ${c.id === 'verdict' ? row.values.verdict === 'denied' ? 'text-red-600' : row.values.verdict === 'allowed' ? 'text-emerald-700' : 'text-muted-foreground' : c.id === 'destination' ? 'text-foreground' : 'text-muted-foreground'}`}>
                 {c.id === 'time' ? <button aria-label={`Inspect event ${row.values.sandbox} ${row.values.time}`} aria-haspopup="dialog" className="h-8 w-full truncate text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(e) => { e.stopPropagation(); hold(); setSelected(row) }}>{timestamp(row.values.time)}</button> : c.id === 'action' ? <span className="block truncate" title={`${row.values.category} · ${row.values.action} · ${row.values.process}`}><span className="block truncate text-foreground">{row.values.category} · {row.event.method || row.event.action || 'Not reported'}</span><span className="block truncate text-[10px]">{row.values.process || row.event.detail || row.event.message || 'Process not reported'}</span></span> : c.id === 'agent' && row.agent ? <span className="font-sans text-foreground"><AgentLabel agent={row.agent} /></span> : <span className="block truncate" title={row.values[c.id]}>{row.values[c.id] || '-'}</span>}
               </td>)}
@@ -309,7 +311,7 @@ function ScopedActivityView() {
       {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
       <AlertDialogFooter><AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={deleteBusy || !deletion?.count || Boolean(deleteError)} onClick={confirmDeletion}>{deleteBusy ? 'Deleting…' : `Delete ${deletion?.count.toLocaleString()} log${deletion?.count === 1 ? '' : 's'}`}</AlertDialogAction></AlertDialogFooter>
     </AlertDialogContent></AlertDialog>
-    <Sheet open={destinationsOpen} onOpenChange={setDestinationsOpen}><SheetContent className="gap-0 data-[side=right]:w-full sm:data-[side=right]:max-w-2xl"><SheetHeader className="border-b border-border pr-12"><SheetTitle>Webhooks</SheetTitle><SheetDescription>Send activity to an HTTPS endpoint.</SheetDescription></SheetHeader>{destinationsOpen && <ActivityDestinations />}</SheetContent></Sheet>
+    <Sheet open={destinationsOpen} onOpenChange={setDestinationsOpen}><SheetContent className="gap-0 data-[side=right]:w-full sm:data-[side=right]:max-w-2xl"><SheetHeader className="border-b border-border pr-12"><SheetTitle className="flex items-center gap-2"><Webhook aria-hidden="true" className="size-4 text-muted-foreground" strokeWidth={1.5} />Webhooks</SheetTitle><SheetDescription>Send activity to an HTTPS endpoint.</SheetDescription></SheetHeader>{destinationsOpen && <ActivityDestinations />}</SheetContent></Sheet>
     <Sheet open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelected(null) }}><SheetContent className="w-full gap-0 sm:max-w-lg"><SheetHeader className="border-b border-border pr-12"><SheetTitle>Event details</SheetTitle><SheetDescription>Full values from this event. The activity view stays paused.</SheetDescription></SheetHeader>{selected && <div className="min-h-0 flex-1 space-y-5 overflow-auto p-5">
       <div className="flex flex-wrap gap-2">{[[selected.event.scope ? 'scope' : 'sandbox', selected.event.scope || selected.values.sandbox, 'Sandbox timeline'], ['destination', selected.values.destination, 'Same target'], ['process', selected.values.process, 'Same executable'], ['policy', selected.values.policy, 'Same policy'], ['session', selected.values.session, 'Same session'], ['correlation', selected.values.correlation, 'Same correlation']].filter(([, value]) => value).map(([key, value, label]) => <Button key={key} size="xs" variant="outline" onClick={() => pivot(key, value)}>{label}</Button>)}</div>
       {!live.demo && <Button size="sm" variant="destructive" disabled={deleteBusy} onClick={() => reviewDeletion('selected', [selected.key])}><Trash2 />Delete log</Button>}
