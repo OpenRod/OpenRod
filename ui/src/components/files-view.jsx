@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { relativeTime } from "@/lib/format"
 import { projectOf } from "@/lib/sandbox-session"
 import { SANDBOX_ROOT, TRANSFER_LIMIT, downloadCommand, formatBytes, uploadCommand } from "@/lib/files"
@@ -79,6 +79,7 @@ function SeedStatus({ seed, onRetry }) {
 }
 
 export function FilesView({ sandbox, demo }) {
+  const api = useApi()
   const name = sandbox.name
   const ready = sandbox.phase === "ready"
   const project = projectOf(sandbox)
@@ -149,7 +150,7 @@ export function FilesView({ sandbox, demo }) {
     try {
       const { token, filename, bytes } = await api.prepareDownload(name, target)
       const link = document.createElement("a")
-      link.href = `/api/os/downloads/${token}`
+      link.href = api.path(`/downloads/${token}`)
       link.download = filename
       document.body.append(link); link.click(); link.remove()
       toast.success(`Downloading ${filename}`, { id, description: formatBytes(bytes) })

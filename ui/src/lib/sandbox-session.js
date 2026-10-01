@@ -1,3 +1,4 @@
+import { currentComputeTarget } from './compute-target.js'
 import { AGENTS } from "./image-templates.js"
 import { agentsOf } from "./agents.js"
 
@@ -78,4 +79,4 @@ export function sessionChoices(sandbox) {
   return [{ id: "shell", name: "Shell" }, ...commands.map((command) => ({ id: command, name: sessionName(command) }))]
 }
 // A browser terminal is its own tab; the app routes this hash to it.
-export const terminalHref = (name, session) => `#terminal/${encodeURIComponent(name)}${session ? `?session=${encodeURIComponent(session)}` : ""}`
+export const terminalHref = (name, session, target = currentComputeTarget()) => `?target=${target}#terminal/${encodeURIComponent(name)}${session ? `?session=${encodeURIComponent(session)}` : ""}`

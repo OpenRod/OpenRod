@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { useLive } from "@/lib/live"
 import { relativeTime } from "@/lib/format"
 import { styleOf } from "@/lib/sandboxes"
@@ -65,6 +65,7 @@ function CopyButton({ text }) {
 
 // One open door: the sentence first, the controls after it.
 function ServiceDoor({ service, visits, now, onChanged, remote }) {
+  const api = useApi()
   const [busy, setBusy] = React.useState(null)
   const [extending, setExtending] = React.useState(false)
   const label = service.name || "default"
@@ -122,6 +123,7 @@ function ServiceDoor({ service, visits, now, onChanged, remote }) {
 }
 
 function OpenDoorForm({ sandbox, onOpened }) {
+  const api = useApi()
   const [port, setPort] = React.useState("")
   const [name, setName] = React.useState("")
   const [minutes, setMinutes] = React.useState(60)
@@ -193,6 +195,7 @@ function collapseVisits(events) {
 }
 
 export function IngressView() {
+  const api = useApi()
   const live = useLive()
   const now = useNow()
   const sandboxes = (live.sandboxes ?? []).filter((s) => s.phase !== "deleting")

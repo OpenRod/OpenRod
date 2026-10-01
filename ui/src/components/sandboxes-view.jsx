@@ -1,7 +1,7 @@
 import * as React from "react"
 import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
-import { api } from "@/lib/api"
+import { useApi, useCompute } from "@/lib/compute"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -26,6 +26,7 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "bas
 const COLUMNS = [{ id: "name", label: "Sandbox", width: "28%" }, { id: "phase", label: "Status", width: "12%" }, { id: "owner", label: "Owner", width: "13%" }, { id: "image", label: "Image", width: "26%" }, { id: "startedAt", label: "Uptime", width: "10%" }, { id: "createdAt", label: "Created", width: "11%" }]
 
 export function SandboxesView({ onNavigate }) {
+  const api = useApi()
   const live = useDemoFleet(useLive())
   const [creations, setCreations] = React.useState([])
   const reportedSandboxes = live.sandboxes ?? EMPTY
@@ -44,7 +45,9 @@ export function SandboxesView({ onNavigate }) {
   const [deleting, setDeleting] = React.useState(false)
   const deletionInFlight = React.useRef(false)
   const [deleteErrors, setDeleteErrors] = React.useState([])
-  const [creating, setCreating] = React.useState(false)
+  const compute = useCompute()
+  const [creating, setCreating] = React.useState(Boolean(compute?.createRequested))
+  React.useEffect(() => { if (compute?.createRequested) { setCreating(true); compute.requestCreate(false) } }, [compute?.createRequested])
   const [now, setNow] = React.useState(Date.now)
   const search = React.useRef(null)
   React.useEffect(() => {
@@ -66,7 +69,8 @@ export function SandboxesView({ onNavigate }) {
     })
   }, [reportedSandboxes, live.sandboxes])
   function sandboxCreated(name, sandbox) {
-    setOpened(null)
+    if (api.signal?.aborted) return
+    setOpened(compute?.target === "cloud" ? name : null)
     setCreations((current) => [...current.filter((item) => item.name !== name), { ...sandbox, name, phase: sandbox?.phase || "provisioning" }])
     setQuery(""); setStatus("all"); setImageFilter("")
     setSort({ key: "createdAt", direction: "desc" })

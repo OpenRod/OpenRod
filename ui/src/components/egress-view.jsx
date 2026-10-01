@@ -20,7 +20,7 @@ import {
 import { RuleEditor } from "@/components/rule-editor"
 import { BlockedHostsDialog, PolicyDialog, appliesTo, appliesToText, blockPatterns, newPolicy } from "@/components/egress-policies"
 import { HostTile } from "@/components/perimeter"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
 import { styleOf } from "@/lib/sandboxes"
@@ -569,6 +569,7 @@ function RevisionDots({ revisions, onOpen }) {
 }
 
 function RevisionSheet({ sandbox, version, latest, onClose, onRestore }) {
+  const api = useApi()
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
     setData(null)
@@ -605,6 +606,7 @@ function BackLink({ onClick }) {
 }
 
 function GlobalPanel({ onBack }) {
+  const api = useApi()
   const [data, setData] = React.useState(null)
   const [confirm, setConfirm] = React.useState(false)
   const load = React.useCallback(() => api.globalPolicy().then(setData).catch((e) => setData({ error: e.message })), [])
@@ -687,6 +689,7 @@ function FilesStrip({ filesystem, landlock, failureMode }) {
 const FILTERS = [{ id: "all", label: "All" }, ...SOURCE_ORDER.map((s) => ({ id: s, label: SOURCE[s].label }))]
 
 function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, reloadSignal }) {
+  const api = useApi()
   const [policy, setPolicy] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [deleting, setDeleting] = React.useState(null)
@@ -869,6 +872,7 @@ export const SANDBOX_HANDOFF = "egress-sandbox"
 export const POLICY_HANDOFF = "egress-policy"
 
 export function EgressView({ onNavigate }) {
+  const api = useApi()
   const live = useLive()
   const [scope, setScope] = React.useState(null)
   // Other pages hand over one sandbox to show the rules that reach it.

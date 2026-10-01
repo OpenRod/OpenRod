@@ -13,7 +13,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { RuleEditor, RuleLine } from "@/components/rule-editor"
 import { DURATIONS } from "@/components/ingress-view"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { useLive } from "@/lib/live"
 
 const lines = (text) => text.split("\n").map((s) => s.trim()).filter(Boolean)
@@ -48,6 +48,7 @@ function TemplateSummary({ template }) {
 }
 
 function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
+  const api = useApi()
   const [t, setT] = React.useState(null)
   const [ro, setRo] = React.useState("")
   const [rw, setRw] = React.useState("")
@@ -177,6 +178,7 @@ function TemplateEditor({ open, initial, onClose, onSaved, knownPrograms }) {
 // Saved policies: the files and starting network rules a sandbox is created
 // with. New sandbox picks one; later changes happen on the Network page.
 export function PoliciesView() {
+  const api = useApi()
   const live = useLive()
   const [templates, setTemplates] = React.useState(null)
   const [editing, setEditing] = React.useState(null)

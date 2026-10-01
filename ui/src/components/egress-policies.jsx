@@ -9,7 +9,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { RequestList, Segmented } from "@/components/rule-editor"
 import { GroupPicker } from "@/components/group-picker"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { appliesTo as reaches } from "@/lib/egress"
 import { cn } from "@/lib/utils"
 
@@ -95,6 +95,7 @@ const SCOPES = [
 const scopeOf = (to) => (to?.everyone ? "everyone" : to?.groups?.length ? "groups" : to?.sandboxes?.length ? "sandboxes" : "groups")
 
 export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, knownPrograms = [], onSaved, onGroupCreated }) {
+  const api = useApi()
   const isNew = !initial?.id
   const [form, setForm] = React.useState(() => toForm(initial))
   const [scope, setScope] = React.useState(() => scopeOf(initial?.appliesTo))
@@ -296,6 +297,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
 
 // The hosts blocked in every sandbox. They beat every rule.
 export function BlockedHostsDialog({ open, onOpenChange, org, onSaved }) {
+  const api = useApi()
   const [text, setText] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)

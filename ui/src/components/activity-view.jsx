@@ -3,7 +3,7 @@ import * as React from "react"
 import { ArrowDown, ArrowUp, Check, Copy, Filter, Pause, Play, Search, X, SlidersHorizontal, Download, Webhook, ChevronDown, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ActivityDestinations } from "@/components/activity-destinations"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { exportDocument } from "@/lib/activity-export"
 import { AgentLabel } from "@/components/agent-label"
@@ -71,6 +71,7 @@ function download(events, context, format) {
 }
 
 export function ActivityView() {
+  const api = useApi()
   const live = useDemoFleet(useLive())
   const [initial] = React.useState(readInvestigation)
   const [visibleColumns, setVisibleColumns] = React.useState(['time', 'sandbox', 'agent', 'action', 'verdict', 'destination'])
@@ -145,7 +146,7 @@ export function ActivityView() {
     try {
       if (live.demo) { download(filterActivity(rows, { ...exportQuery, now: anchor }).map((r) => r.event), { ...exportQuery, demo: true }, exportFormat); setExportOptions(null); return }
       const link = document.createElement('a')
-      link.href = `/api/os/activity/export?format=${exportFormat}&query=${encodeURIComponent(JSON.stringify(exportQuery))}`
+      link.href = api.path(`/activity/export?format=${exportFormat}&query=${encodeURIComponent(JSON.stringify(exportQuery))}`)
       link.download = exportFormat === 'ocsf' ? 'openshell-activity-ocsf.json' : 'openshell-activity.json'
       document.body.appendChild(link); link.click(); link.remove(); setExportOptions(null)
     } catch (e) { toast.error(`Export failed: ${e.message}`) } finally { setExporting(false) }

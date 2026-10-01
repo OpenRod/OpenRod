@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ServiceLogo } from "@/components/service-logo"
 import { credentialFields, setupIssue, validateSecretCredentials } from "../../shared/secret-fields"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { SERVICES, SERVICE_GROUPS } from "@/lib/services"
 
 // Step one is a choice of service, not of "profile": the profile behind it is
@@ -51,6 +51,7 @@ function ServiceGrid({ query, setQuery, have, onPick, picking }) {
 }
 
 function KeyForm({ service, profile, taken, sandboxes, onBack, onDone }) {
+  const api = useApi()
   const [name, setName] = React.useState(() => {
     const base = `my-${service.id}`
     if (!taken.has(base)) return base
@@ -170,6 +171,7 @@ function KeyForm({ service, profile, taken, sandboxes, onBack, onDone }) {
 }
 
 export function AddSecretDialog({ open, onOpenChange, profiles, providers, sandboxes, reload }) {
+  const api = useApi()
   const reduce = useReducedMotion()
   const [query, setQuery] = React.useState("")
   const [service, setService] = React.useState(null)

@@ -15,7 +15,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
 import { AGENTS } from "@/lib/image-templates"
@@ -121,6 +121,7 @@ function nextName(taken, prefix = "sandbox") {
 }
 
 export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImageTemplate = null }) {
+  const api = useApi()
   const { sandboxes, overview } = useLive()
   const providers = overview?.providers ?? []
   const [name, setName] = React.useState("")
@@ -241,6 +242,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       if (controller.signal.aborted) return
       setPreparing(false); setProgress("Creating sandbox…")
       const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, ...(group ? { group } : {}), ...files })
+      if (api.signal?.aborted || controller.signal.aborted) return
       toast.success(`Creating ${created.name}`)
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })

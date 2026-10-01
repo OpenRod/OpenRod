@@ -1,3 +1,4 @@
+import {createCloudConnections} from './cloud-connections.js'
 import { firebaseMachines, MACHINE_DATABASE } from './machines.js'
 import { createHandoffs, cloudRouter } from './cloud-proxy.js'
 import http from 'node:http'
@@ -10,7 +11,7 @@ import { createSessionRevocations } from './session-revocations.js'
 import { openshellApi } from './api.js'
 import { cloudConfig, createSecurity, firebaseAuth, requestPath } from './security.js'
 
-export async function createConsoleServer({ config = cloudConfig(), auth, machines, handoffs, dist = path.resolve(import.meta.dirname, '../dist') } = {}) {
+export async function createConsoleServer({ config = cloudConfig(), auth, machines, handoffs, connections, dist = path.resolve(import.meta.dirname, '../dist') } = {}) {
   if (!fs.existsSync(path.join(dist, 'index.html'))) throw Error('Build the UI with npm run build before starting the server')
   const revocations = config.mode === 'cloud' ? createSessionRevocations(path.resolve(import.meta.dirname, '../.state/sessions.sqlite')) : undefined
   auth ??= config.mode === 'cloud' ? await firebaseAuth(config) : undefined
@@ -29,11 +30,13 @@ export async function createConsoleServer({ config = cloudConfig(), auth, machin
     next()
   })
   if (config.mode === 'cloud') {
-    if (!handoffs) {
+    if (!handoffs || !connections) {
       const {getApps} = await import('firebase-admin/app'), {getFirestore} = await import('firebase-admin/firestore')
-      handoffs = createHandoffs(getFirestore(getApps()[0], MACHINE_DATABASE))
+      const db=getFirestore(getApps()[0], MACHINE_DATABASE)
+      handoffs ??= createHandoffs(db)
+      connections ??= createCloudConnections(db,auth,{org:config.org,isSessionRevoked:security.isSessionRevoked})
     }
-    const routes = cloudRouter(security, machines ?? await firebaseMachines(config), handoffs, auth)
+    const routes = cloudRouter(security, machines ?? await firebaseMachines(config), handoffs, auth, {connections})
     app.use(routes.publicRoutes)
     app.use(security.middleware)
     app.use(routes.protectedRoutes)
@@ -41,7 +44,7 @@ export async function createConsoleServer({ config = cloudConfig(), auth, machin
   } else openshellApi(security).configureServer({ middlewares: app, httpServer: server, config: { logger: { info: console.info } } })
   app.use('/healthz', (req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('ready') })
   server.on('upgrade', (req, socket) => {
-    try { if (requestPath(req) !== '/api/os/terminal') socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n') }
+    try { if (!['/api/os/terminal','/api/os/ssh','/api/remote/os/terminal','/api/remote/os/ssh','/api/cloud/local-connect/os/terminal','/api/cloud/local-connect/os/ssh'].includes(requestPath(req))) socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n') }
     catch { /* The API upgrade handler rejects malformed targets. */ }
   })
   app.use(serveStatic(dist, { index: 'index.html', dotfiles: 'deny', maxAge: 0 }))

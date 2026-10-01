@@ -1,3 +1,4 @@
+import http from 'node:http'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { signWorkerRequest } from './worker-auth.js'
 export const MACHINE_DATABASE='openrod-cloud'
@@ -27,10 +28,16 @@ export function createMachineStore(db,{maxMachines=10,now=()=>Date.now()}={}) {
   async update(uid,values){return db.runTransaction(async tx=>{const r=ref(uid);await tx.get(r);tx.update(r,values)})},
  }
 }
-export function createMachineManager(store,compute,{ready=async(record,address)=>{
+export function workerReady(record,address,{port=4600,host=process.env.OPENROD_PUBLIC_ORIGIN?new URL(process.env.OPENROD_PUBLIC_ORIGIN).host:'cloud.example.com'}={}) {
  const request={method:'GET',url:'/api/os/overview'}
- try{const response=await fetch(`http://${address}:4600${request.url}`,{headers:{host:process.env.OPENROD_PUBLIC_ORIGIN?new URL(process.env.OPENROD_PUBLIC_ORIGIN).host:'cloud.example.com','x-openrod-worker-auth':signWorkerRequest(record.key,{uid:record.uid,expires:Date.now()+60000},request)},signal:AbortSignal.timeout(5000)});return response.ok}catch{return false}
-}}={}) {
+ return new Promise(resolve=>{
+  const probe=http.request({hostname:address,port,path:request.url,method:request.method,headers:{host,'x-openrod-worker-auth':signWorkerRequest(record.key,{uid:record.uid,expires:Date.now()+60000},request)}},response=>{response.resume();resolve(response.statusCode===200)})
+  probe.setTimeout(5000,()=>probe.destroy())
+  probe.on('error',()=>resolve(false))
+  probe.end()
+ })
+}
+export function createMachineManager(store,compute,{ready=workerReady}={}) {
  const inflight=new Map(),readyCache=new Map()
  async function ensure(identity) {
   const cached=readyCache.get(identity.uid)

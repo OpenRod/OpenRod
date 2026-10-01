@@ -1,7 +1,8 @@
 import * as React from 'react'
-import { api } from '@/lib/api'
+import { useApi } from "@/lib/compute"
 
 export function useActivityHistory(options, { paused, demo, activityRevision }) {
+  const api = useApi()
   const pausedRef = React.useRef(paused)
   pausedRef.current = paused
   const query = JSON.stringify(options)

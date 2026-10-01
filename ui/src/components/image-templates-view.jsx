@@ -1,3 +1,4 @@
+import { clearComputeRecipe, pendingComputeRecipe } from '@/lib/compute-target'
 import * as React from 'react'
 import { ArrowRight, Copy, HardDrive, Pencil, Plus, RotateCw, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,8 +10,8 @@ import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
 import { ImageTemplateBuilder } from '@/components/image-template-builder'
 import { CreateSandboxDialog } from '@/components/create-sandbox-dialog'
-import { api } from '@/lib/api'
-import { AGENTS, PENDING_RECIPE_KEY, STARTS, pendingRecipe } from '@/lib/image-templates'
+import { useApi } from "@/lib/compute"
+import { AGENTS, PENDING_RECIPE_KEY, STARTS } from '@/lib/image-templates'
 
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
 const working = (t) => t.status === 'building'
@@ -23,10 +24,11 @@ function Status({ record }) {
 const startsIn = (command) => STARTS.find((s) => s.id === command)?.name ?? command
 
 export function TemplatesView() {
+  const api = useApi()
   const [records, setRecords] = React.useState(null)
   const [error, setError] = React.useState('')
   const [query, setQuery] = React.useState('')
-  const [editor, setEditor] = React.useState(pendingRecipe)
+  const [editor, setEditor] = React.useState(() => pendingComputeRecipe(PENDING_RECIPE_KEY, sessionStorage))
   const [selectedName, setSelectedName] = React.useState(null)
   const [remove, setRemove] = React.useState(null)
   const [launch, setLaunch] = React.useState(null)
@@ -89,7 +91,7 @@ export function TemplatesView() {
     } finally { deleting.current = false; setBusy(false) }
   }
   function edit(recipe, replace) { setSelectedName(null); setEditor({ recipe, replace }) }
-  function closeEditor() { try { sessionStorage.removeItem(PENDING_RECIPE_KEY) } catch {} setEditor(null) }
+  function closeEditor() { try { clearComputeRecipe(PENDING_RECIPE_KEY, sessionStorage) } catch {} setEditor(null) }
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
     {editor && <ImageTemplateBuilder key={editor.recipe?.name || 'new'} initial={editor} onClose={closeEditor} onStarted={(record) => { closeEditor(); setSelectedName(record.name); load() }} />}

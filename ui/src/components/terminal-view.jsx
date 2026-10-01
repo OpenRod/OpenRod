@@ -5,7 +5,7 @@ import "@xterm/xterm/css/xterm.css"
 import { ChevronDown, RotateCcw, Terminal as TerminalIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { api } from "@/lib/api"
+import { useApi, useCompute } from "@/lib/compute"
 import { defaultSession, sessionChoices, sessionName, terminalHref } from "@/lib/sandbox-session"
 
 // The terminal itself is always dark, whatever the console's theme.
@@ -26,6 +26,8 @@ const STATUS = {
 // streams keystrokes and output over a WebSocket; closing the tab ends the
 // session, like closing a terminal window.
 export function TerminalView({ name, session: requested, setupLogin, mcp }) {
+  const api = useApi()
+  const compute = useCompute()
   const [sandbox, setSandbox] = React.useState(null)
   const [loadError, setLoadError] = React.useState(null)
   const [state, setState] = React.useState({ status: "connecting" })
@@ -74,7 +76,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
         const { ticket } = await api.terminalSession(name, { session, setupLogin, mcp, cols: term.cols, rows: term.rows })
         if (closed) return
         const scheme = window.location.protocol === "https:" ? "wss" : "ws"
-        socket = new WebSocket(`${scheme}://${window.location.host}/api/os/terminal?ticket=${encodeURIComponent(ticket)}`)
+        socket = new WebSocket(`${scheme}://${window.location.host}${api.path("/terminal")}?ticket=${encodeURIComponent(ticket)}`)
         socket.binaryType = "arraybuffer"
         // A socket from a finished attempt must not touch the next one's state.
         socket.onopen = () => { if (closed) return; setState({ status: "live" }); socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })) }
@@ -105,6 +107,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
       <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border bg-card px-3 text-xs">
         <TerminalIcon className="size-4 text-muted-foreground" aria-hidden="true" />
         <span className="font-medium">{name}</span>
+        <span className="text-muted-foreground">Compute: {compute?.target === "cloud" ? "Cloud" : "Local"}</span>
         {session && <span className="text-muted-foreground">{sessionName(session)}</span>}
         <span className="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground" role="status">
           <span className={`size-1.5 shrink-0 rounded-full ${status.dot}`} aria-hidden="true" />
