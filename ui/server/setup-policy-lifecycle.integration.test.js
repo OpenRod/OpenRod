@@ -10,7 +10,16 @@ import { pathToFileURL } from 'node:url'
 async function fixture(t) {
   const source = path.resolve(import.meta.dirname, '..')
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'setup-policy-lifecycle-')))
-  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const keys = ['OPENSHELL_CONSOLE_DATA_DIR', 'OPENSHELL_GATEWAY', 'OPENSHELL_WORKSPACE']
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]))
+  Object.assign(process.env, { OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: 'setup-lifecycle-fixture', OPENSHELL_WORKSPACE: 'default' })
+  t.after(async () => {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key]
+      else process.env[key] = previous[key]
+    }
+    await fs.rm(root, { recursive: true, force: true })
+  })
   for (const part of ['server', 'shared', 'src/lib']) await fs.cp(path.join(source, part), path.join(root, part), { recursive: true })
   await fs.copyFile(path.join(source, 'package.json'), path.join(root, 'package.json'))
   await fs.symlink(path.join(source, 'node_modules'), path.join(root, 'node_modules'))
@@ -18,6 +27,7 @@ async function fixture(t) {
   await fs.rename(file, path.join(root, 'server/gateway-original.js'))
   await fs.writeFile(file, `
 export * from './gateway-original.js'
+import { contextSelection, workspaceScope } from './gateway-original.js'
 import { create } from '@bufbuild/protobuf'
 import { NetworkPolicyRuleSchema } from '@nvidia/openshell-sdk/raw'
 export const state = { rules: {}, attempts: 0, down: false }
@@ -38,10 +48,13 @@ const raw = {
   async getGatewayConfig() { return { settings: { proposal_approval_mode: {value: {value: 'manual'}}, agent_policy_proposals_enabled: {value: {value: false}} } } },
   async getDraftPolicy() { state.afterSweep?.(); return { chunks: [] } },
 }
-export async function gateway() { return { client: { raw }, target: { endpoint: 'fixture://gateway' } } }
+export async function gateway(context = contextSelection()) { return { client: { raw }, target: { name: context.gateway, endpoint: 'fixture://gateway' }, workspace: context.workspace, workspaceScope: workspaceScope(context.workspace) } }
 `)
   const module = name => import(pathToFileURL(path.join(root, 'server', name)))
-  const { setupStore, setupRoute } = await module('setups.js')
+  const { getSetupStore, setupRoute } = await module('setups.js')
+  const setupStore = getSetupStore()
+  const { policyDirectory } = await module('paths.js')
+  const policies = await policyDirectory()
   const { orgRoute, syncAll, startOrgSweeper } = await module('org.js')
   const { listPolicies } = await module('egress.js')
   const { state } = await module('gateway.js')
@@ -59,7 +72,7 @@ export async function gateway() { return { client: { raw }, target: { endpoint: 
     return setup
   }
   const hosts = () => Object.values(state.rules).flatMap(rule => rule.endpoints.map(e => e.host)).sort()
-  return { root, setupStore, setupRoute, orgRoute, syncAll, startOrgSweeper, listPolicies, state, item, save, hosts, createSetupEgress }
+  return { root, policies, setupStore, setupRoute, orgRoute, syncAll, startOrgSweeper, listPolicies, state, item, save, hosts, createSetupEgress }
 }
 
 test('failed host revocation reconciles after recovery without rewriting equal protobuf rules', async t => {
@@ -90,9 +103,9 @@ test('automatic recompute and manual policy edits share the write queue', async 
   const read = fs.readFile
   let pause = true, watch = true
   fs.readFile = async function(file, ...args) {
-    if (String(file) === path.join(h.root, 'policies/org/organization.json') && pause) { pause = false; await blocked }
+    if (String(file) === path.join(h.policies, 'org/organization.json') && pause) { pause = false; await blocked }
     const data = await read.call(this, file, ...args)
-    if (String(file) === path.join(h.root, 'policies/egress', manual.id + '.json') && watch) { watch = false; captured() }
+    if (String(file) === path.join(h.policies, 'egress', manual.id + '.json') && watch) { watch = false; captured() }
     return data
   }
   try {
@@ -113,7 +126,7 @@ test('failed policy-file deletion leaves the setup present and can be retried', 
   const setup = await h.save(['cleanup.example.com'])
   const rm = fs.rm
   fs.rm = async function(file, ...args) {
-    if (String(file) === path.join(h.root, 'policies/egress', `setup-${setup.id}.json`)) throw Object.assign(new Error('Policy file is read-only'), { code: 'EACCES' })
+    if (String(file) === path.join(h.policies, 'egress', `setup-${setup.id}.json`)) throw Object.assign(new Error('Policy file is read-only'), { code: 'EACCES' })
     return rm.call(this, file, ...args)
   }
   try {
@@ -151,7 +164,7 @@ test('a partial automatic policy write preserves manual edits and the setup for 
   const setup = await h.save(['old.example.com', 'keep.example.com'])
   const policy = (await h.listPolicies())[0]
   const { policy: manual } = await h.orgRoute('POST', ['egress', 'policies'], { ...policy, name: 'Manual name', destinations: [...policy.destinations, 'manual.example.com'] })
-  const policyFile = path.join(h.root, 'policies/egress', policy.id + '.json')
+  const policyFile = path.join(h.policies, 'egress', policy.id + '.json')
   const write = fs.writeFile
   fs.writeFile = async function(file, data, ...args) {
     if (String(file).startsWith(policyFile)) {

@@ -3,10 +3,12 @@ import { Cloud, Laptop } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import { api } from '@/lib/api'
+import { useApi, useLocation } from '@/lib/location-context'
 import { CLOUD_ORIGIN, LOCAL_ORIGIN, cloudHandoffUrl, localHandoffUrl, isCloudReadyMessage, isLocalHandoffMessage } from '@/lib/cloud-transfer'
 
 export function ContinueInCloud({ name, sandbox }) {
+  const api = useApi()
+  const location = useLocation()
   const [stage, setStage] = React.useState(null)
   const handoff = React.useRef(null)
   React.useEffect(() => {
@@ -38,12 +40,12 @@ export function ContinueInCloud({ name, sandbox }) {
       }
     }, 1000)
     return () => { active = false; window.removeEventListener('message', receive); clearInterval(timer); handoff.current = null }
-  }, [name])
+  }, [name, api])
 
   if (sandbox?.phase !== 'ready') return null
   return (
     <div className="space-y-1.5">
-      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage)} onClick={() => {
+      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
         const nonce = crypto.randomUUID()
         // The opener is required for the origin-checked one-use ticket exchange.
         const popup = window.open(cloudHandoffUrl(window.location.origin, nonce), '_blank')
@@ -60,6 +62,8 @@ export function ContinueInCloud({ name, sandbox }) {
 }
 
 export function ContinueLocally({ name, sandbox }) {
+  const api = useApi()
+  const location = useLocation()
   const [stage, setStage] = React.useState(null)
   const handoff = React.useRef(null)
   React.useEffect(() => {
@@ -100,12 +104,12 @@ export function ContinueLocally({ name, sandbox }) {
       }
     }, 1000)
     return () => { active = false; window.removeEventListener('message', receive); clearInterval(timer); handoff.current = null }
-  }, [name])
+  }, [name, api])
 
   if (sandbox?.phase !== 'ready') return null
   return (
     <div className="space-y-1.5">
-      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage)} onClick={() => {
+      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
         const nonce = crypto.randomUUID()
         const popup = window.open(localHandoffUrl(nonce), '_blank')
         if (!popup) { toast.error('Allow popups to continue locally.'); return }

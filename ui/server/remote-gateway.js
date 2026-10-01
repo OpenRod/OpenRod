@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { setTimeout as delay } from 'node:timers/promises'
-import { CONFIG_DIR, clearConsoleContext, contextConfigured, contextSelection, listGateways, gatewayWorkspaces, selectConsoleContext } from './gateway.js'
+import { CONFIG_DIR, clearConsoleContext, contextConfigured, contextSelection, defaultContextSelection, listGateways, gatewayWorkspaces, selectConsoleContext } from './gateway.js'
 import { stateDirectory } from './paths.js'
 import { fail, findExecutable, runCli, sshBinary } from './openshell-cli.js'
 import { listSshHosts, probeHost, installDocker as installHostDocker, installRuntime, sshArgs } from './remote-hosts.js'
@@ -16,7 +16,7 @@ import { prepareGatewayState, registerManagedGateway } from './remote-gateway-st
 import { ensureGateway } from './gateway-install.js'
 
 const PACKAGE_LIMIT = 4 * 1024 ** 3
-const localGateways = () => listGateways().filter(target => target.supported && !target.remote && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(target.endpoint).hostname))
+const localGateways = () => listGateways().filter(target => target.name !== 'aws-eks' && target.supported && !target.remote && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(target.endpoint).hostname))
 
 function ownedProcess(executable, args, env, onExit) {
   const child = spawn(executable, args, { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -99,6 +99,51 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
   let disconnecting = false
   const initial = contextSelection()
   let returnContext = contextConfigured() && localGateways().some(target => target.name === initial.gateway) ? initial : null
+  let lastRemote = null, historyReady = null, historyWrites = Promise.resolve()
+  const historyFile = path.join(stateDirectory(), 'remote-gateways', 'last-location.json')
+  const validContext = value => value && /^[\w.-]{1,64}$/.test(value.gateway ?? '') && /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(value.workspace ?? '')
+  const loadHistory = () => historyReady ??= (async () => {
+    try {
+      const saved = JSON.parse(await fs.readFile(historyFile, 'utf8'))
+      if (!returnContext && validContext(saved.returnContext) && localGateways().some(target => target.name === saved.returnContext.gateway)) returnContext = saved.returnContext
+      if (validContext(saved.remote) && /^console-ssh-[a-f0-9]{24}$/.test(saved.remote.gateway) && typeof saved.remote.host === 'string') lastRemote = { ...saved.remote, status: 'disconnected', error: null }
+    } catch (error) { if (error.code !== 'ENOENT') logger.warn(`Remote location history unavailable: ${error.message}`) }
+  })()
+  const saveHistory = () => {
+    const data = JSON.stringify({ returnContext, remote: lastRemote })
+    historyWrites = historyWrites.catch(() => {}).then(async () => {
+      await fs.mkdir(path.dirname(historyFile), { recursive: true, mode: 0o700 })
+      const temporary = `${historyFile}.${randomUUID()}.tmp`
+      await fs.writeFile(temporary, data, { mode: 0o600 })
+      await fs.rename(temporary, historyFile)
+    })
+    return historyWrites.catch(error => logger.warn(`Remote location history could not be saved: ${error.message}`))
+  }
+  async function locationSnapshot() {
+    await loadHistory()
+    const selected = defaultContextSelection()
+    const before = JSON.stringify({ returnContext, remote: lastRemote })
+    if (contextConfigured() && localGateways().some(target => target.name === selected.gateway)) returnContext = selected
+    if (active?.status === 'connected' && selected.gateway === active.gateway) {
+      active.workspace = selected.workspace
+      lastRemote = { host: active.host, gateway: active.gateway, workspace: active.workspace, status: 'disconnected', error: null }
+    }
+    let remote = active?.workspace && (active.status === 'connected' || active.gateway === lastRemote?.gateway) ? active : lastRemote
+    if (!remote && /^console-ssh-[a-f0-9]{24}$/.test(selected.gateway)) {
+      try {
+        const owner = JSON.parse(await fs.readFile(path.join(CONFIG_DIR, 'gateways', selected.gateway, 'console-managed.json'), 'utf8'))
+        if (typeof owner.host === 'string') remote = { host: owner.host, ...selected, status: 'disconnected', error: null }
+      } catch { /* No managed registration to retain. */ }
+    }
+    if (!returnContext && (remote || contextConfigured())) {
+      const locals = localGateways()
+      const target = locals.find(candidate => candidate.name === 'openshell') ?? (locals.length === 1 ? locals[0] : null)
+      if (target) returnContext = { gateway: target.name, workspace: process.env.OPENSHELL_WORKSPACE || 'default' }
+    }
+    if (before !== JSON.stringify({ returnContext, remote: lastRemote })) await saveHistory()
+    const local = returnContext && localGateways().some(target => target.name === returnContext.gateway) ? returnContext : null
+    return view({ returnContext: local, remote: remote ? { host: remote.host, gateway: remote.gateway, workspace: remote.workspace, status: remote.status, error: remote.error ?? null } : null })
+  }
   const jobs = new Map(), pending = new Set(), abort = new AbortController()
   const signal = abort.signal
   const view = value => value ? structuredClone(value) : null
@@ -143,13 +188,17 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
   }
   async function select(gateway, preferredWorkspace) {
     checkOpen()
+    await loadHistory()
     const workspaces = await gatewayWorkspaces(gateway)
-    const previous = contextSelection()
+    const previous = defaultContextSelection()
+    if (contextConfigured() && localGateways().some(target => target.name === previous.gateway)) returnContext = previous
     const preferred = preferredWorkspace ?? (previous.gateway === gateway ? previous.workspace : 'default')
     const workspace = process.env.OPENSHELL_WORKSPACE || workspaces.find(item => item.name === preferred)?.name || workspaces.find(item => item.name === 'default')?.name || workspaces[0]?.name
     if (!workspace) throw fail('This gateway returned no accessible workspaces.', 409)
     const result = await selectConsoleContext({ gateway, workspace })
     if (localGateways().some(target => target.name === gateway)) returnContext = { gateway, workspace }
+    if (active?.gateway === gateway) active.workspace = workspace
+    await saveHistory()
     checkOpen()
     onSelected(result)
   }
@@ -176,6 +225,8 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
       await select(state.name)
       tunnel.check(); daemon.check()
       active.status = 'connected'
+      lastRemote = { host: active.host, gateway: active.gateway, workspace: active.workspace, status: 'disconnected', error: null }
+      await saveHistory()
       value.gateway = state.name; value.status = 'ready'; value.stage = 'Connected'
     } catch (error) {
       await stopRemote()
@@ -251,15 +302,10 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     return view(value)
   }
   return {
+    locationSnapshot,
     async overview() {
-      let connection = active
-      const current = contextSelection().gateway
-      if (!connection && /^console-ssh-[a-f0-9]{24}$/.test(current)) {
-        try {
-          const owner = JSON.parse(await fs.readFile(path.join(CONFIG_DIR, 'gateways', current, 'console-managed.json'), 'utf8'))
-          if (typeof owner.host === 'string') connection = { host: owner.host, gateway: current, status: 'disconnected', error: null }
-        } catch { /* An absent registration is handled by normal connection errors. */ }
-      }
+      const snapshot = await locationSnapshot()
+      const connection = snapshot.remote
       return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')) } }
     },
     changing: () => disconnecting || job?.status === 'working',
@@ -342,6 +388,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
       if (closed) return
       closed = true; abort.abort()
       await Promise.allSettled([...pending])
+      await historyWrites.catch(() => {})
       await stopRemote()
     },
   }

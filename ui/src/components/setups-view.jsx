@@ -13,7 +13,8 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/
 import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
 import { terminalHref } from '@/lib/sandbox-session'
-import { api } from '@/lib/api'
+import { LocationProvider, useApi, useLocation } from '@/lib/location-context'
+import { LocationBadge } from '@/components/location-badge'
 import { importNeedsAttention, inactiveItems, providedCredentials } from '@/lib/import-setup'
 import { POLICY_HANDOFF } from '@/components/egress-view'
 import { setupImports } from '@/lib/setup-imports'
@@ -67,7 +68,14 @@ function SetupItemTabs({ items, children }) {
   </Tabs>
 }
 
-export function SetupsView({ sandbox = null, setupIds = [] }) {
+export function SetupsView(props) {
+  const location = useLocation()
+  return <ScopedSetupsView key={location?.context ?? 'default'} {...props} />
+}
+
+function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
+  const api = useApi()
+  const location = useLocation()
   const [setups, setSetups] = React.useState(null)
   const [error, setError] = React.useState('')
   const [importing, setImporting] = React.useState(false)
@@ -84,9 +92,9 @@ export function SetupsView({ sandbox = null, setupIds = [] }) {
     setRefreshing(true)
     try { setSetups(await api.setups()); setError('') } catch (e) { setError(e.message) }
     finally { setRefreshing(false) }
-  }, [])
+  }, [api])
   const importJobs = React.useSyncExternalStore(setupImports.subscribe, setupImports.getSnapshot)
-  const completedImports = importJobs.filter(job => job.status === 'saved').map(job => job.id).join(',')
+  const completedImports = importJobs.filter(job => job.status === 'saved' && job.location?.context === location?.context).map(job => job.id).join(',')
   React.useEffect(() => { refresh() }, [refresh, completedImports])
   const shown = React.useMemo(() => (setups || []).filter((setup) => {
     const matches = [setup.name, ...setup.items.flatMap(item => [item.name, ...(item.sources || [])])].join(' ').toLowerCase().includes(query.trim().toLowerCase())
@@ -164,23 +172,25 @@ export function SetupImportNotifications() {
       {jobs.map(job => <div key={job.id} role={job.status === 'failed' || job.status === 'needs-attention' ? 'alert' : 'status'} className="flex items-center gap-3 px-4 py-3 text-xs sm:px-8">
         {job.status === 'importing' ? <Spinner /> : job.status === 'saved' ? <Check className="size-4 shrink-0 text-emerald-600" /> : <ShieldCheck className="size-4 shrink-0 text-amber-600" />}
         <div className="min-w-0 flex-1"><p className="font-medium">{job.name} · {job.status === 'importing' ? 'Importing' : job.status === 'saved' ? 'Imported' : job.status === 'cancelled' ? 'Import cancelled' : job.status === 'failed' ? 'Import failed' : 'Import needs attention'}</p><p className="mt-0.5 break-words text-muted-foreground">{job.message}</p></div>
+        <LocationBadge location={job.location} />
         {!['importing', 'saved'].includes(job.status) && <Button size="sm" variant="outline" onClick={() => setReviewing(job)}>Review import</Button>}
-        {job.status === 'saved' && networkOutcome(job.setup) && <Button size="sm" variant="outline" onClick={() => setNetwork(networkOutcome(job.setup))}>View egress policy</Button>}
+        {job.status === 'saved' && networkOutcome(job.setup) && <Button size="sm" variant="outline" onClick={() => setNetwork({ policy: networkOutcome(job.setup), location: job.location })}>View egress policy</Button>}
         {job.status !== 'importing' && <Button size="sm" variant="ghost" aria-label={`Dismiss import notification for ${job.name}`} onClick={() => setupImports.dismiss(job.id)}>Dismiss</Button>}
       </div>)}
     </div>}
-    {reviewing && <ImportSetup key={reviewing.id} initialJob={reviewing} initialReview={reviewing.review} initialName={reviewing.name} onClose={() => setReviewing(null)} onSaved={(saved) => { setReviewing(null); setNetwork(networkOutcome(saved)) }} />}
-    {network && <SetupNetworkDialog policy={network} onClose={() => setNetwork(null)} />}
+    {reviewing && <LocationProvider location={reviewing.location}><ImportSetup key={reviewing.id} initialJob={reviewing} initialReview={reviewing.review} initialName={reviewing.name} onClose={() => setReviewing(null)} onSaved={(saved) => { setNetwork({ policy: networkOutcome(saved), location: reviewing.location }); setReviewing(null) }} /></LocationProvider>}
+    {network?.policy && <LocationProvider location={network.location}><SetupNetworkDialog policy={network.policy} onClose={() => setNetwork(null)} /></LocationProvider>}
   </>
 }
 
 // Saving a setup creates or updates its egress policy; this says what it allows.
 function SetupNetworkDialog({ policy, onClose }) {
+  const location = useLocation()
   const rows = policyRows(policy)
   const openInEgress = () => {
     try { sessionStorage.setItem(POLICY_HANDOFF, JSON.stringify({ edit: policy.id })) } catch { /* optional */ }
     onClose()
-    window.location.hash = 'egress'
+    window.dispatchEvent(new CustomEvent('openrod-navigate', { detail: { view: 'egress', location } }))
     // Egress may already be open; it then takes the handoff from this event.
     window.dispatchEvent(new Event(POLICY_HANDOFF))
   }
@@ -258,6 +268,8 @@ function ExtraHosts({ item, choice, disabled, onChange }) {
 }
 
 function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My setup", initialJob = null }) {
+  const api = useApi()
+  const location = useLocation()
   const [sources, setSources] = React.useState([])
   const [scan, setScan] = React.useState(null)
   const [ids, setIds] = React.useState([])
@@ -289,7 +301,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
   async function importSelection(saveOnly = false) {
     setImportAttempted(true)
     setFinalImport(true)
-    const task = setupImports.start({ id: jobId.current, review, name, choices, saveOnly,
+    const task = setupImports.start({ id: jobId.current, review, name, choices, saveOnly, api, location,
       resumeJob: preparation?.status === 'running' ? preparation : undefined,
     }, {
       onProgress: next => { if (mounted.current) setPreparation(next) },
@@ -400,6 +412,8 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
 }
 
 function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
+  const api = useApi()
+  const location = useLocation()
   const [sandboxes, setSandboxes] = React.useState([])
   const [context, setContext] = React.useState(null)
   const [destination, setDestination] = React.useState(sandbox || '')
@@ -409,7 +423,11 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   const [jobs, setJobs] = React.useState([])
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState('')
-  React.useEffect(() => { api.overview().then((r) => { setSandboxes(r.sandboxes); setContext(r.gateway) }).catch((e) => setError(e.message)) }, [])
+  React.useEffect(() => {
+    let current = true
+    api.overview().then((r) => { if (current) { setSandboxes(r.sandboxes); setContext(r.gateway) } }).catch((e) => { if (current) setError(e.message) })
+    return () => { current = false }
+  }, [api])
   React.useEffect(() => {
     let stopped = false, timer
     const refresh = async () => {
@@ -422,7 +440,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
     }
     refresh()
     return () => { stopped = true; clearTimeout(timer) }
-  }, [setup.id, result])
+  }, [setup.id, result, api])
   async function run(task) { setBusy(true); setError(''); try { await task() } catch (e) { setError(e.message); setPlan(null) } finally { setBusy(false) } }
   const signInItems = setup.items.filter(item => !item.disabled && !item.issues.length && !item.credentialRef && item.auth?.mode === 'agent-session')
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}><DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
@@ -458,7 +476,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
       {plan.problems.map((p) => <p key={p} className="text-xs text-amber-700">{p}</p>)}
       {plan.network.map((r, i) => <div key={i} className="rounded-lg border p-3 text-xs"><p className="flex justify-between gap-2 font-medium"><span>{r.item} · {r.host}:{r.port}{r.path || ''}</span><span>{r.status === 'allowed' ? 'Existing access' : r.status === 'policy' ? 'Allowed by setup policy' : r.status === 'blocked' ? 'Blocked' : r.status === 'proposed' ? 'Requested access' : 'Needs review'}</span></p><p className="mt-1 text-muted-foreground">{r.reason}</p>{r.binaries?.length > 0 && <p className="mt-1 break-all font-mono text-muted-foreground">{r.binaries.join(', ')}</p>}{r.credentialProvider && <p>Credential binding: {r.credentialProvider}</p>}</div>)}
       {plan.inactive?.map(item => <p key={item.name} className="text-xs text-muted-foreground">{item.name}: inactive · {item.issues.join(' ')}</p>)}{plan.notes.length > 0 && <Note>{plan.notes.join(' ')}</Note>}
-      {!plan.canEnable && <a href="#egress" onClick={onClose} className="inline-block text-xs underline underline-offset-4">Review access in Network › Egress</a>}
+      {!plan.canEnable && <button type="button" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('openrod-navigate', { detail: { view: 'egress', location } })) }} className="inline-block text-xs underline underline-offset-4">Review access in Network › Egress</button>}
       <div className="flex justify-end gap-2">{plan.installed && <Button variant="outline" disabled={busy} onClick={() => run(async () => { setResult(await api.removeSetup(setup.id, destination, plan.token)); setPlan(null) })}>Remove from sandbox</Button>}<Button disabled={busy || !plan.canEnable} onClick={() => run(async () => { setResult(await api.enableSetup(setup.id, destination, plan.token, plan.requiresApproval)); setPlan(null) })}>{busy && <Spinner />}{plan.requiresApproval ? 'Approve access & enable' : plan.installed ? 'Check & reapply' : 'Enable & check'}</Button></div>
     </div>}
     {result && <p role="status" className="rounded-lg border bg-muted/30 p-3 text-xs">{result.status === 'removed' ? 'Removed from this sandbox. Restart the agent to unload it. The sandbox no longer gets this setup’s egress policy; access you approved for it separately stays.' : 'Prepared configuration installed. Restart the agent to load it. Connection checks below apply to this sandbox; they do not execute tools.'}</p>}
@@ -471,14 +489,29 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   </DialogContent></Dialog>
 }
 
-export function SetupPicker({ value = [], onChange, inherited = [], accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox' }) {
+export function SetupPicker(props) {
+  const location = useLocation()
+  return <ScopedSetupPicker key={location?.context ?? 'default'} {...props} />
+}
+
+function ScopedSetupPicker({ value = [], onChange, inherited = [], accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox' }) {
+  const api = useApi()
   const [items, setItems] = React.useState([])
   const [error, setError] = React.useState('')
   // Hosts a setup's egress policy allows need no approval. Without policies, all do.
   const [policies, setPolicies] = React.useState(null)
   const reviewsAccess = Boolean(onAccessReview)
-  React.useEffect(() => { api.setups().then(setItems).catch((e) => setError(e.message)) }, [])
-  React.useEffect(() => { if (reviewsAccess) api.org().then(org => setPolicies(org.policies ?? null)).catch(() => setPolicies(null)) }, [reviewsAccess])
+  React.useEffect(() => {
+    let current = true
+    api.setups().then((value) => { if (current) setItems(value) }).catch((e) => { if (current) setError(e.message) })
+    return () => { current = false }
+  }, [api])
+  React.useEffect(() => {
+    if (!reviewsAccess) return
+    let current = true
+    api.org().then(org => { if (current) setPolicies(org.policies ?? null) }).catch(() => { if (current) setPolicies(null) })
+    return () => { current = false }
+  }, [reviewsAccess, api])
   const selected = items.filter(s => value.includes(s.id) || inherited.includes(s.id))
   const eligible = (item) => autoPrepare ? launchableItem(item) : !item.disabled && !item.issues.length
   const pending = (setup) => autoPrepare ? setup.items.filter(canPrepareAtLaunch) : []

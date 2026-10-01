@@ -10,7 +10,16 @@ import { pathToFileURL } from 'node:url'
 async function fixture(t) {
   const source = path.resolve(import.meta.dirname, '..')
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'setup-import-'))
-  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const keys = ['OPENSHELL_CONSOLE_DATA_DIR', 'OPENSHELL_GATEWAY', 'OPENSHELL_WORKSPACE']
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]))
+  Object.assign(process.env, { OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: 'setup-import-fixture', OPENSHELL_WORKSPACE: 'default' })
+  t.after(async () => {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key]
+      else process.env[key] = previous[key]
+    }
+    await fs.rm(root, { recursive: true, force: true })
+  })
   for (const dir of ['server', 'shared', 'src']) await fs.cp(path.join(source, dir), path.join(root, dir), { recursive: true })
   await fs.copyFile(path.join(source, 'package.json'), path.join(root, 'package.json'))
   await fs.symlink(path.join(source, 'node_modules'), path.join(root, 'node_modules'), 'dir')
@@ -32,19 +41,21 @@ export async function oauthFetch(input) {
 `)
   const load = file => import(pathToFileURL(path.join(root, file)))
   const { createSetupStore, usableSetup } = await load('server/setups.js')
+  const { scopedStateDirectory, policyDirectory } = await load('server/paths.js')
+  const policies = await policyDirectory()
   const { normalizeMcp } = await load('server/setup-discovery.js')
   const { prepareImport, preparationStatus } = await load('server/setup-preparation.js')
   const { importSetup } = await load('src/lib/import-setup.js')
   const remote = await load('server/setup-remote-check.js')
   const metadata = await load('server/setup-http.js')
-  const store = createSetupStore({ home: path.join(root, 'home'), dir: path.join(root, 'saved') })
+  const store = createSetupStore({ home: path.join(root, 'home'), dir: path.join(scopedStateDirectory(), 'setups') })
   const api = {
     prepareSetup: (token, items) => prepareImport(store, { token, items, approved: true }),
     setupPreparation: preparationStatus,
     saveSetup: (token, name, acknowledged) => store.save(token, name, acknowledged),
   }
   const run = (items, choices = {}) => importSetup(api, store.stage(items), 'Mixed setup', choices, { wait: () => new Promise(resolve => setTimeout(resolve, 1)) })
-  return { store, run, remote, metadata, normalizeMcp, usableSetup, root }
+  return { store, run, remote, metadata, normalizeMcp, usableSetup, root, policies }
 }
 const skill = { id:'safe-skill',kind:'skill',name:'Safe skill',sources:['codex'],requirements:[],issues:[],credentialFields:[],files:[{path:'SKILL.md',content:'# Review code\n'}] }
 const publicMcp = { id:'public',kind:'mcp',name:'Public MCP',config:{url:'https://accounts.example.com/public-mcp'},requirements:[{phase:'runtime',host:'accounts.example.com',port:443,path:'/public-mcp'}],issues:[],credentialFields:[] }
@@ -126,8 +137,8 @@ test('an endpoint sign-in challenge discovers OAuth after the connection check',
 
 test('a blocked host on a known unsupported row cannot stop a compatible skill import', async t => {
  const f=await fixture(t)
- await fs.mkdir(path.join(f.root,'policies/org'),{recursive:true})
- await fs.writeFile(path.join(f.root,'policies/org/organization.json'),JSON.stringify({blocked:['tool.example.com']}))
+ await fs.mkdir(path.join(f.policies,'org'),{recursive:true})
+ await fs.writeFile(path.join(f.policies,'org/organization.json'),JSON.stringify({blocked:['tool.example.com']}))
  const sse={...f.normalizeMcp('Old SSE tool',{url:'https://tool.example.com/mcp',type:'sse'},'codex'),id:'old-sse'}
  const result=await f.run([skill,sse])
  assert.equal(result.status,'saved')
@@ -138,8 +149,8 @@ test('a blocked host on a known unsupported row cannot stop a compatible skill i
 
 test('usable remote, pending package and provided credentials still respect new organization blocks', async t => {
  const f=await fixture(t)
- await fs.mkdir(path.join(f.root,'policies/org'),{recursive:true})
- await fs.writeFile(path.join(f.root,'policies/org/organization.json'),JSON.stringify({blocked:['accounts.example.com','registry.npmjs.org']}))
+ await fs.mkdir(path.join(f.policies,'org'),{recursive:true})
+ await fs.writeFile(path.join(f.policies,'org/organization.json'),JSON.stringify({blocked:['accounts.example.com','registry.npmjs.org']}))
  const token={...f.normalizeMcp('Token MCP',{url:publicMcp.config.url,bearer_token_env_var:'API_TOKEN'},'codex'),id:'token'}
  const pending={...f.normalizeMcp('Package MCP',{command:'npx',args:['example-mcp']},'codex'),id:'package'}
  for(const item of [publicMcp,pending,token]){
