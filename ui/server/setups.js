@@ -7,9 +7,10 @@ import { discover, readSkill, publicItem, hash, fail } from './setup-discovery.j
 export const usableSetup = (setup) => ({ ...setup, items: setup.items.filter(i => !i.disabled && !i.issues.length && (i.kind === 'skill' || i.config)) })
 export const SETUP_ID = /^[a-f0-9]{24}$/
 const TTL = 15 * 60_000
+export const MAX_SELECTION = 64 * 1024 * 1024
 // Tokens pin the reviewed snapshot. The browser cannot submit arbitrary paths,
 // executable configuration or replacement skill contents to the save endpoint.
-export function createSetupStore({ home = os.homedir(), dir = path.resolve(import.meta.dirname, '../.state/setups'), now = Date.now, state = { scans: new Map(), previews: new Map(), edits: Promise.resolve() } } = {}) {
+export function createSetupStore({ home = os.homedir(), dir = path.resolve(import.meta.dirname, '../.state/setups'), now = Date.now, maxSelection = MAX_SELECTION, state = { scans: new Map(), previews: new Map(), edits: Promise.resolve() } } = {}) {
   const { scans, previews } = state
   const expire = (map) => { for (const [key, value] of map) if (value.expires < now()) map.delete(key); if (map.size >= 20) throw fail('Too many pending imports. Finish one or wait 15 minutes.', 429) }
   const token = (map, id) => { const value = map.get(id); if (!value || value.expires < now()) throw fail('This preview expired. Scan and review again.', 409); return value }
@@ -34,17 +35,19 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
       previews.set(id, { items, credentials, revision, expires: now() + TTL })
       return { token: id, revision, items: items.map(publicItem) }
     },
-    delete(id, revision) {
+    delete(id, revision, beforeDelete = async () => {}) {
       const edit = state.edits.then(async () => {
         const setup = await get(id)
         if (revision !== setup.revision) throw fail('This Setup changed. Refresh the list before deleting it.', 409)
+        // Keep the setup retryable if policy cleanup or coverage validation fails.
+        await beforeDelete(setup)
         await fs.unlink(filename(id))
         return { deleted: id }
       })
       state.edits = edit.catch(() => {})
       return edit
     },
-    deleteItem(id, itemId, revision) {
+    deleteItem(id, itemId, revision, beforeWrite = async () => {}) {
       const edit = state.edits.then(async () => {
         const setup = await get(id)
         if (revision !== setup.revision) throw fail('This Setup changed. Close and reopen it before deleting a row.', 409)
@@ -54,6 +57,7 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
         const temporary = filename(id) + '.' + randomUUID() + '.tmp'
         try {
           await fs.writeFile(temporary, JSON.stringify(updated), { flag: 'wx', mode: 0o600 })
+          await beforeWrite(updated)
           await fs.rename(temporary, filename(id))
         } finally { await fs.rm(temporary, { force: true }) }
         return view(updated)
@@ -76,12 +80,12 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
           try { Object.assign(item, await readSkill(root, home)) } catch (e) { item.issues = [e.status ? e.message : 'Skill could not be read safely.']; item.files = [] }
         }
         selectionBytes += Buffer.byteLength(JSON.stringify(item)) + (items.length ? 1 : 0)
-        if (selectionBytes > 8 * 1024 * 1024) throw fail('Selection exceeds 8 MB. Create a smaller Setup.')
+        if (selectionBytes > maxSelection) throw fail(`This selection exceeds ${maxSelection / 1024 / 1024} MB. Select fewer skills and import the rest as a second setup.`)
         items.push(item)
       }
       expire(previews); const id = randomUUID(); const revision = hash(JSON.stringify(items))
       previews.set(id, { items, credentials, revision, expires: now() + TTL })
-      return { token: id, revision, items: items.map(publicItem), warnings: ['Credential scanning is best-effort. Review every selected skill file before saving or deploying.', 'Import does not grant network access or execute commands.'] }
+      return { token: id, revision, items: items.map(publicItem) }
     },
     async file(previewToken, itemId, filename) {
       const preview = token(previews, previewToken)
@@ -123,6 +127,12 @@ export async function resolveSetups(ids = []) {
   if (!Array.isArray(ids) || ids.length > 8 || new Set(ids).size !== ids.length) throw fail('Choose up to eight unique Setups.')
   return Promise.all(ids.map((id) => setupStore.get(id)))
 }
+// Each saved Setup keeps one managed egress policy in step with its items.
+// A policy problem is reported, never undoes the Setup change.
+async function syncEgress(id) {
+  try { const { syncSetupPolicy } = await import('./setup-egress.js'); return { egressPolicy: await syncSetupPolicy(await setupStore.get(id)) } }
+  catch (e) { return { egressPolicy: null, egressPolicyError: e.status ? e.message : 'The policy file could not be written.' } }
+}
 export async function setupRoute(method, parts, input) {
   if (parts[0] !== 'setups') return undefined
   if (method === 'GET' && parts.length === 3 && parts[1] === 'preparations') return (await import('./setup-preparation.js')).preparationStatus(parts[2])
@@ -130,14 +140,22 @@ export async function setupRoute(method, parts, input) {
   if (method === 'POST' && parts.length === 3 && parts[2] === 'prepare-launch') return (await import('./setup-preparation.js')).prepareLaunch(setupStore, parts[1], input)
   if (method === 'GET' && parts.length === 1) return setupStore.list()
   if (method === 'POST' && parts.length === 3 && parts[2] === 'prepare') return setupStore.stage((await setupStore.get(parts[1])).items)
-  if (method === 'POST' && parts.length === 3 && parts[2] === 'delete') return setupStore.delete(parts[1], input.revision)
-  if (method === 'POST' && parts.length === 3 && parts[2] === 'delete-item') return setupStore.deleteItem(parts[1], input.item, input.revision)
+  if (method === 'POST' && parts.length === 3 && parts[2] === 'delete') {
+    return setupStore.delete(parts[1], input.revision, async () => {
+      await (await import('./setup-egress.js')).removeSetupPolicy(parts[1])
+    })
+  }
+  if (method === 'POST' && parts.length === 3 && parts[2] === 'delete-item') {
+    return setupStore.deleteItem(parts[1], input.item, input.revision, async (updated) => {
+      await (await import('./setup-egress.js')).syncSetupPolicy(updated)
+    })
+  }
   if (method !== 'POST' || parts.length !== 2) return undefined
   if (parts[1] === 'prepare') return (await import('./setup-preparation.js')).prepareImport(setupStore, input)
   if (parts[1] === 'scan') return setupStore.scan(input.sources)
   if (parts[1] === 'review') return setupStore.review(input.token, input.ids)
   if (parts[1] === 'remove-review-item') return setupStore.removeReviewItem(input.token, input.item)
   if (parts[1] === 'file') return setupStore.file(input.token, input.item, input.path)
-  if (parts[1] === 'save') return setupStore.save(input.token, input.name, input.acknowledged)
+  if (parts[1] === 'save') { const view = await setupStore.save(input.token, input.name, input.acknowledged); return { ...view, ...(await syncEgress(view.id)) } }
   return undefined
 }

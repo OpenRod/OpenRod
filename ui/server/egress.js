@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { ruleToProto } from './policy.js'
 import { appliesTo, blockHosts } from '../src/lib/egress.js'
 
@@ -10,7 +11,8 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 // ---- egress policies ---------------------------------------------------------
 //
 // A policy is a name, some destinations, and an action: allow or block. It
-// applies to everyone, to groups, or to named sandboxes. Sandboxes start
+// applies to everyone, to groups, to named sandboxes, or to the sandboxes that
+// use an MCPs & Skills setup (server/setup-egress.js). Sandboxes start
 // locked down, so nothing leaves one until an allow policy covers it, and a
 // block (a block policy or the organization's blocked hosts) beats every allow.
 //
@@ -25,6 +27,7 @@ const DIR = path.resolve(import.meta.dirname, '../policies/egress')
 const ID = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/
 const HOST = /^(\*\*?\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i
 const SANDBOX = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
+const SETUP = /^[a-f0-9]{24}$/
 const BINARY = /^\/[\w.+@*?/[\]-]{1,255}$/
 const CIDR = /^[0-9a-f:.]+(\/\d{1,3})?$/i
 const REQUESTS = ['any', 'read-only', 'read-write', 'custom']
@@ -70,24 +73,45 @@ export function validatePolicy(input) {
   if (!ID.test(id)) throw fail('Rule ids use lowercase letters, digits and dashes (up to 40).')
   const action = input?.action === 'block' ? 'block' : input?.action === 'allow' ? 'allow' : null
   if (!action) throw fail('Choose allow or block.')
-  const destinations = uniq(list(input.destinations).map((h) => String(h).trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))
+  const destinations = hostList(input.destinations)
   if (!destinations.length) throw fail('Add at least one destination.')
-  if (destinations.length > 200) throw fail('Too many destinations. Split them into several rules.')
-  for (const h of destinations) {
-    if (h === '*' || h === '**') throw fail('"All destinations" needs OpenShell support that does not exist yet. List the hosts instead.')
-    if (!HOST.test(h)) throw fail(`"${h}" is not a host (wildcards: *.example.com or **.example.com).`)
-    if (/^\*\*?\./.test(h) && h.split('.').length < 3) throw fail(`"${h}" is too broad. OpenShell needs at least two labels after the wildcard.`)
-  }
   const to = input.appliesTo ?? {}
   const appliesTo = {
     everyone: Boolean(to.everyone),
     groups: uniq(list(to.groups).map(String)),
     sandboxes: uniq(list(to.sandboxes).map(String)),
+    setups: uniq(list(to.setups).map(String)),
   }
   for (const s of appliesTo.sandboxes) if (!SANDBOX.test(s)) throw fail(`"${s}" is not a sandbox name.`)
+  for (const s of appliesTo.setups) if (!SETUP.test(s)) throw fail(`"${s}" is not an MCPs & Skills setup.`)
   const policy = { id, name, action, destinations, appliesTo }
   if (action === 'allow') policy.advanced = validateAdvanced(input.advanced)
+  if (input.setup != null) policy.setup = setupMarker(input.setup)
   return policy
+}
+
+function hostList(input) {
+  const hosts = uniq(list(input).map((h) => String(h).trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))
+  if (hosts.length > 200) throw fail('Too many destinations. Split them into several rules.')
+  for (const h of hosts) {
+    if (h === '*' || h === '**') throw fail('"All destinations" needs OpenShell support that does not exist yet. List the hosts instead.')
+    if (!HOST.test(h)) throw fail(`"${h}" is not a host (wildcards: *.example.com or **.example.com).`)
+    if (/^\*\*?\./.test(h) && h.split('.').length < 3) throw fail(`"${h}" is too broad. OpenShell needs at least two labels after the wildcard.`)
+  }
+  return hosts
+}
+
+// The console keeps one allow policy per MCPs & Skills setup. The marker names
+// the setup and the hosts and ports it needs, so a recompute keeps the ones
+// people added.
+function setupMarker(input) {
+  const id = String(input?.id ?? '')
+  if (!SETUP.test(id)) throw fail('Unknown MCPs & Skills setup.')
+  const name = String(input.name ?? '').trim().slice(0, 80)
+  if (/[\x00-\x1f\x7f]/.test(name)) throw fail('The setup name has control characters.')
+  const ports = uniq(list(input.ports).map(Number))
+  if (ports.some((p) => !Number.isInteger(p) || p < 1 || p > 65535)) throw fail('Ports must be 1–65535.')
+  return { id, name, required: hostList(input.required), ports }
 }
 
 // ---- storage -----------------------------------------------------------------
@@ -96,21 +120,26 @@ async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
 }
 
-export async function listPolicies() {
+// `dir` is for tests.
+export async function listPolicies(dir = DIR) {
   let files = []
-  try { files = (await fs.readdir(DIR)).filter((f) => f.endsWith('.json')) } catch (error) { if (error.code !== 'ENOENT') throw error }
-  const policies = await Promise.all(files.map(async (f) => { try { return validatePolicy(await readJson(path.join(DIR, f))) } catch { return null } }))
+  try { files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json')) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  const policies = await Promise.all(files.map(async (f) => { try { return validatePolicy(await readJson(path.join(dir, f))) } catch { return null } }))
   return policies.filter(Boolean).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export async function writePolicy(policy) {
-  await fs.mkdir(DIR, { recursive: true })
-  await fs.writeFile(path.join(DIR, `${policy.id}.json`), `${JSON.stringify(policy, null, 2)}\n`)
+export async function writePolicy(policy, dir = DIR) {
+  await fs.mkdir(dir, { recursive: true })
+  const file = path.join(dir, `${policy.id}.json`), temporary = `${file}.${randomUUID()}.tmp`
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(policy, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+    await fs.rename(temporary, file)
+  } finally { await fs.rm(temporary, { force: true }) }
 }
 
-export async function removePolicy(id) {
+export async function removePolicy(id, dir = DIR) {
   if (!ID.test(String(id))) throw fail('Unknown rule.')
-  await fs.rm(path.join(DIR, `${id}.json`), { force: true })
+  await fs.rm(path.join(dir, `${id}.json`), { force: true })
 }
 
 // ---- compile -----------------------------------------------------------------

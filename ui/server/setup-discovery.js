@@ -6,11 +6,14 @@ import { unzipSync } from 'fflate'
 import { createHash, randomUUID } from 'node:crypto'
 import { parse } from 'smol-toml'
 import { packageLaunch, packageRuntimeRequirements } from './setup-packages.js'
+import { PACKAGE_PENDING } from '../shared/setup-launch.js'
 
 export const SOURCES = ['codex', 'claude', 'cursor']
 export const hash = (value) => createHash('sha256').update(value).digest('hex')
 export const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 const MAX_FILE = 512 * 1024
+// Agent config files (notably ~/.claude.json) also hold history and grow over time.
+const MAX_CONFIG = 4 * 1024 * 1024
 const MAX_BUNDLE = 4 * 1024 * 1024
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}$/
 const secret = /(?:-----BEGIN [\w ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16})|(?:api[_-]?key|token|password|secret|authorization)\s*[:=]\s*["']?(?!\$|<|\{|YOUR_|your_|example|placeholder|process\.env|os\.environ)[A-Za-z0-9_+/.=-]{16,})/i
@@ -21,15 +24,33 @@ const inside = (root, file) => file === root || file.startsWith(root + path.sep)
 const validMcpName = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 200 && !/[\p{C}]/u.test(value) && !secret.test(value)
 const safeLabel = value => validMcpName(value) ? value : 'Unrecognized item'
 
-async function readBounded(file) {
+async function readBounded(file, limit = MAX_FILE) {
   const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+  const size = limit % (1024 * 1024) ? `${limit / 1024} KB` : `${limit / 1024 / 1024} MB`
   try {
     const stat = await handle.stat()
-    if (!stat.isFile() || stat.size > MAX_FILE) throw fail('File is not a regular file or exceeds 512 KB.')
+    if (!stat.isFile() || stat.size > limit) throw fail(`File is not a regular file or exceeds ${size}.`)
     const data = await handle.readFile()
-    if (data.length > MAX_FILE) throw fail('File exceeds 512 KB.')
+    if (data.length > limit) throw fail(`File exceeds ${size}.`)
     return data
   } finally { await handle.close() }
+}
+
+// Plain-text guidance (no markdown). Echo only a short basename that cannot carry a secret.
+const commandLabel = command => { const base = path.basename(command); return /^[A-Za-z0-9._+ -]{1,60}$/.test(base) && !secret.test(base) ? `“${base}”` : null }
+const SCRIPT_EXTENSIONS = new Set(['.sh', '.bash', '.zsh', '.py', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl'])
+function launcherIssue(command) {
+  const base = path.basename(command), name = commandLabel(command) ?? 'This command', is = (...names) => names.includes(base)
+  if (!command.trim()) return 'No command or URL is set for this MCP, so there’s nothing to import.'
+  if (command.includes('.app/')) return `${name} belongs to a desktop app on this computer. Sandboxes run Linux, so this MCP can’t be imported.`
+  if (is('npx', 'npm')) return `This “${base}” command can’t be imported: it points to a local path, includes something that looks like a secret, or doesn’t name an npm package. Use “npx -y <package>@<version>” with plain arguments.`
+  if (is('sh', 'bash', 'zsh', 'fish', 'cmd', 'powershell')) return `This MCP starts through “${base}”, which runs a script on this computer. Sandboxes can’t run local scripts. To import it, change its command to start the npm package directly, like “npx -y <package>@<version>”.`
+  if (is('node', 'python', 'python3', 'ruby', 'perl')) return `This MCP runs a file from this computer with “${base}”. Local files aren’t copied into sandboxes. If the MCP is published on npm, change its command to “npx -y <package>@<version>”.`
+  if (is('uv', 'uvx', 'pip')) return `Python launchers like “${base}” aren’t supported yet. Only npm packages started with npx, and remote MCPs, can be imported.`
+  if (is('docker')) return '“docker” isn’t available inside sandboxes. If this MCP is published on npm, change its command to “npx -y <package>@<version>”.'
+  if (is('curl', 'wget')) return `This MCP downloads code with “${base}” when it starts, which isn’t allowed. Use a published npm package instead.`
+  if (SCRIPT_EXTENSIONS.has(path.extname(base).toLowerCase())) return `${name} is a script on this computer. Sandboxes can’t run local scripts. To import this MCP, change its command in your agent settings to start the npm package directly, like “npx -y <package>@<version>”.`
+  return `${name} is a program on this computer, not an npm package, so it can’t be copied into a sandbox. If it’s published on npm, change the command to “npx -y <package>@<version>”.`
 }
 
 // Never return values of env, headers, tokens or arbitrary configuration fields.
@@ -37,11 +58,11 @@ export function normalizeMcp(name, raw, source) {
   const item = { kind: 'mcp', name: safeLabel(name), sources: [source], transport: raw?.url ? 'http' : 'stdio', requirements: [], issues: [], credentialFields: [], credentialBindings: {}, config: null }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !validMcpName(name)) { item.issues.push('Unsupported configuration or server name.'); return item }
   if (raw.enabled === false || raw.disabled === true) { item.disabled = true; item.issues.push('Disabled in the source harness. Enable it there before importing.') }
-  const values = {}, environment = {}, ordinaryHeaders = {}
+  const values = {}, environment = {}, ordinaryHeaders = {}, localPaths = []
   for (const [key, value] of Object.entries(raw.env || {})) {
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,100}$/.test(key) || typeof value !== 'string') { item.issues.push('Unsupported environment setting.'); continue }
     if (/token|password|secret|api.?key|authorization|credential|session|cookie|bearer/i.test(key) || secret.test(value)) { item.credentialFields.push(key); if (!/^\$\{|^openshell:resolve:env:/.test(value)) values[key] = value }
-    else if (/^(?:\/|~\/)|\/Users\/|\/Applications\//.test(value) || /(?:PATH|DIR|HOME|SOCKET|TRUSTED)/i.test(key)) item.issues.push(`Local setting ${key} needs a sandbox path; it was not copied.`)
+    else if (/^(?:\/|~\/)|\/Users\/|\/Applications\//.test(value) || /(?:PATH|DIR|HOME|SOCKET|TRUSTED)/i.test(key)) localPaths.push(key)
     else if (value.length <= 2048 && !/[\x00-\x1f]/.test(value)) environment[key] = value
   }
   for (const [key, value] of Object.entries(raw.http_headers || raw.headers || {})) {
@@ -64,14 +85,14 @@ export function normalizeMcp(name, raw, source) {
   }
   if (raw.oauth || raw.bearer_token) item.auth = {mode:'agent-session',status:'sign-in-required'}
   item.credentialFields = [...new Set(item.credentialFields)]
-  if (item.credentialFields.length) item.issues.push('Connect credentials in the next step. Values are never included in Setup files.')
+  if (item.credentialFields.length) item.issues.push(`Connect credentials (${item.credentialFields.join(', ')}) to use this MCP. They’re kept in the gateway, never in the setup.`)
   if (Object.keys(values).length) item._sourceCredentials = values
   if (raw.cwd || raw.envFile || raw.env_file) item.issues.push('Working directories and environment files need manual packaging. They were not imported.')
   if (raw.url) {
     try {
       const url = new URL(raw.url)
       if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || secret.test(raw.url) || !url.hostname.includes('.') || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(url.hostname)) throw Error()
-      item.requirements.push({ phase: 'runtime', host: url.hostname, port: Number(url.port || 443), path: url.pathname, reason: 'MCP endpoint; account sign-in may require additional destinations.' })
+      item.requirements.push({ phase: 'runtime', host: url.hostname, port: Number(url.port || 443), path: url.pathname, reason: 'The MCP server.' })
       if (raw.type && !['http', 'streamable-http'].includes(raw.type)) item.issues.push('Only Streamable HTTP is supported for remote MCPs.')
       item.config = { url: url.href }
     } catch { item.issues.push('Endpoint needs review: use a public HTTPS URL without embedded credentials. Local and private services require a dedicated connection adapter.') }
@@ -82,13 +103,15 @@ export function normalizeMcp(name, raw, source) {
     if (dependency) {
       item.package = dependency
       item.requirements.push(...packageRuntimeRequirements(dependency))
-      item.requirements.push({ phase: 'build', host: 'registry.npmjs.org', port: 443, reason: 'Resolve and install pinned dependencies in an isolated builder; install scripts are disabled.' })
-      item.issues.push('Prepare package dependencies in the next step.')
+      item.requirements.push({ phase: 'build', host: 'registry.npmjs.org', port: 443, reason: 'Downloads the npm package during import, in a temporary sandbox with install scripts off. Your sandboxes don’t get this access.' })
+      item.issues.push(PACKAGE_PENDING)
     } else if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,60}$/.test(command) || ['sh','bash','zsh','fish','cmd','powershell','node','python','python3','ruby','perl','npx','npm','uv','uvx','pip','docker','curl','wget'].includes(command)) {
-      item.issues.push(command.includes('.app/') ? 'Computer-only integration: this launcher depends on the desktop application. It cannot run inside a Linux sandbox.' : 'Needs a supported Linux package or launcher adapter. Local executables and shell commands are not copied or run on this computer.')
-    } else if (!Array.isArray(args) || args.length > 32 || args.some((arg) => typeof arg !== 'string' || !/^[a-zA-Z0-9_.=-]{1,128}$/.test(arg) || /token|password|secret|key|eval|exec/i.test(arg) || secret.test(arg))) item.issues.push('Arguments need manual review; values were not imported.')
+      item.issues.push(launcherIssue(command))
+    } else if (!Array.isArray(args) || args.length > 32 || args.some((arg) => typeof arg !== 'string' || !/^[a-zA-Z0-9_.=-]{1,128}$/.test(arg) || /token|password|secret|key|eval|exec/i.test(arg) || secret.test(arg))) item.issues.push(`Some arguments for ${commandLabel(command) ?? 'this command'} can’t be copied. Arguments may only contain letters, numbers and . _ = - (no paths, quotes or secrets).`)
     else item.config = { command, args }
   }
+  // Unrunnable items keep only their launcher message; path settings matter once the MCP can start.
+  if (localPaths.length && (item.config || item.package)) item.issues.push(localPaths.length === 1 ? `Local setting ${localPaths[0]} points to a folder on this computer and wasn’t copied. Set a sandbox path for it if the MCP needs it.` : `Local settings ${localPaths.join(', ')} point to folders on this computer and weren’t copied. Set sandbox paths for them if the MCP needs them.`)
   if (item.config?.url && Object.keys(ordinaryHeaders).length) item.config.headers = ordinaryHeaders
   if (item.config && Object.keys(environment).length) item.config.env = environment
   else if (Object.keys(environment).length) item.environment = environment
@@ -205,13 +228,13 @@ export async function discover({ sources, home = os.homedir() }) {
     if (!skillDigests.has(root)) skillDigests.set(root, readSkill(root, home).then(value => value.digest).catch(() => null))
     return skillDigests.get(root)
   }
-  const configPaths = { codex: '.codex/config.toml', claude: '.claude.json', cursor: '.cursor/mcp.json' }
+  const configPaths = { codex: '.codex/config.toml', claude: '.claude.json', cursor: '.cursor/mcp.json' }, labels = { codex: 'Codex', claude: 'Claude Code', cursor: 'Cursor' }
   for (const source of [...new Set(sources)]) {
     try {
       const file = path.join(home, configPaths[source])
       const resolved = await fs.realpath(file)
       if (!inside(await fs.realpath(home), resolved)) throw fail('Configuration links outside the home directory are not read.')
-      const raw = await readBounded(resolved)
+      const raw = await readBounded(resolved, MAX_CONFIG)
       const data = source === 'codex' ? parse(raw.toString()) : JSON.parse(raw)
       const entries = Object.entries(data[source === 'codex' ? 'mcp_servers' : 'mcpServers'] ?? {})
       if (entries.length > 200) throw fail('More than 200 MCP configurations; narrow the source first.')
@@ -227,7 +250,7 @@ export async function discover({ sources, home = os.homedir() }) {
         const record = { ...item, id: randomUUID(), digest }
         seen.set(key, record); items.push(record)
       }
-    } catch (error) { warnings.push(`${source}: ${error.code === 'ENOENT' ? 'No user MCP configuration found.' : 'Configuration could not be safely parsed. No contents were returned.'}`) }
+    } catch (error) { warnings.push(`${labels[source]}: ${error.code === 'ENOENT' ? `no MCP config found at ~/${configPaths[source]}.` : error.status ? error.message : `couldn’t read ~/${configPaths[source]}. Check that it’s valid ${source === 'codex' ? 'TOML' : 'JSON'}.`}`) }
     const roots = [path.join(home, source === 'claude' ? '.claude/skills' : `.${source}/skills`), ...(source === 'codex' ? [path.join(home, '.agents/skills')] : [])]
     for (const root of roots) {
       const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
@@ -257,7 +280,7 @@ export async function discover({ sources, home = os.homedir() }) {
       }
     }
   }
-  return { items, warnings: [...warnings, 'User-level configuration only. Project and plugin-managed items are not included. Same-name skill copies are compared by content; selected skills are read again for review.'] }
+  return { items, warnings: [...warnings, 'Only your personal MCPs and skills are listed. Project-level MCPs and plugin skills aren’t included.'] }
 }
 
 export function publicItem(item) {

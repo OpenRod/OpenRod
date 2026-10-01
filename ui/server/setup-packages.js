@@ -9,6 +9,9 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 const unavailable = message => Object.assign(fail(message, 503), { preparationUnavailable: true })
 
 export const ARTIFACT_DIR = path.resolve(import.meta.dirname, '../.state/setup-artifacts')
+// Official multi-platform Node 22 Bookworm image. Update the digest deliberately
+// so a floating tag cannot change the runtime behind a persistent cache entry.
+const BUILDER_IMAGE = 'node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c'
 const PACKAGE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(?:@[a-zA-Z0-9.*^~+_-]+)?$/
 export function packageLaunch(command, args = []) {
   if (!['npx', 'npm'].includes(path.basename(command || ''))) return null
@@ -121,51 +124,85 @@ export async function installPackage(client, name, pinned, signal) {
   return metadata
 }
 
-export async function buildPackage(plan, { signal, progress = async () => {} } = {}) {
+// The gateway may move to a different architecture, including behind the same
+// endpoint. Probe this builder before reusing anything; npm and MCP checks are
+// skipped only for an identical pinned image and actual runtime.
+const cacheIndex = (pinned, runtime, dir) => path.join(dir, 'index', createHash('sha256').update(JSON.stringify({ v: 2, name: pinned.name, version: pinned.version, integrity: pinned.integrity, args: pinned.args, image: BUILDER_IMAGE, runtime })).digest('hex') + '.json')
+async function builderRuntime(client, name, signal) {
+  const script = "console.log(JSON.stringify({node:process.versions.node,arch:process.arch,platform:process.platform,libc:process.report.getReport().header.glibcVersionRuntime?'glibc':null}))"
+  const result = await client.sandbox.exec(name, ['/usr/local/bin/node', '-e', script], { noLoginShell: true, timeoutSecs: 10, signal })
+  let runtime
+  try { runtime = JSON.parse(result.stdout.toString()) } catch {}
+  if (result.exitCode !== 0 || !/^22\.\d+\.\d+$/.test(runtime?.node || '') || !/^[a-z0-9_]+$/.test(runtime?.arch || '') || runtime?.platform !== 'linux' || runtime?.libc !== 'glibc') throw fail('Could not establish the preparation builder runtime. Retry preparation.', 409)
+  return { node: runtime.node, arch: runtime.arch, platform: runtime.platform, libc: runtime.libc }
+}
+async function cachedArtifact(index, pinned, runtime, dir) {
+  try {
+    const artifact = JSON.parse(await fs.readFile(index, 'utf8'))
+    if (!/^[a-f0-9]{64}$/.test(artifact?.digest || '') || typeof artifact.bin !== 'string' || artifact.name !== pinned.name || artifact.version !== pinned.version || artifact.integrity !== pinned.integrity || artifact.verification?.status !== 'connected' || Object.entries(runtime).some(([key, value]) => artifact[key] !== value)) throw fail('Invalid prepared package index.')
+    await artifactFile(artifact, dir)
+    return { ...artifact, requested: pinned.requested }
+  } catch { await fs.rm(index, { force: true }).catch(() => {}); return null }
+}
+async function saveCached(index, artifact) {
+  const tmp = index + '.' + randomUUID() + '.tmp'
+  try { await fs.mkdir(path.dirname(index), { recursive: true, mode: 0o700 }); await fs.writeFile(tmp, JSON.stringify(artifact), { mode: 0o600, flag: 'wx' }); await fs.rename(tmp, index) } catch { await fs.rm(tmp, { force: true }).catch(() => {}) }
+}
+
+export async function buildPackage(plan, { signal, progress = async () => {}, dir = ARTIFACT_DIR, connect = gateway, fetcher = fetch, settle = 12000 } = {}) {
   const org = await readOrg()
   if (blockedBy(org, ['registry.npmjs.org']) || blockedByPolicy(await listPolicies(), {name:'',group:null}, ['registry.npmjs.org'], hostMatches)) throw fail('Organization policy blocks the npm registry.', 403)
-  const pinned = await resolvePackage(plan, fetch, signal)
-  const { client } = await gateway()
+  await progress('Looking up the package on npm')
+  const pinned = await resolvePackage(plan, fetcher, signal)
+  const { client } = await connect()
   const name = 'sp-' + randomUUID().slice(0, 12)
   const base = await planSandbox({ name, systemBaseline: true })
   base.policy.networkPolicies = {}
   base.policy.networkPolicies.setup_registry = { name:'setup_registry', binaries:[{path:'/usr/local/bin/node'}],endpoints:[{host:'registry.npmjs.org',port:443,protocol:'rest',access:1,enforcement:1,allowEncodedSlash:true}] }
   let created = false, temporary
   try {
-    await progress('Starting isolated package builder')
-    await client.sandbox.create({ name, image:'node:22-bookworm-slim', command:['/bin/sleep','infinity'],providers:[],policy:base.policy,labels:{'openshell.console/setup-builder':'true'} });created=true
+    await progress('Starting a temporary sandbox')
+    await client.sandbox.create({ name, image:BUILDER_IMAGE, command:['/bin/sleep','infinity'],providers:[],policy:base.policy,labels:{'openshell.console/setup-builder':'true'} });created=true
     await waitReady(client,name,signal)
     const effective=await client.raw.getSandboxConfig({name,workspaceScope:WORKSPACE})
     if(effective.policySource===2)throw fail('Gateway global policy overrides isolated preparation. Ask the administrator for a dedicated preparation gateway.',403)
+    await progress('Checking the package runtime')
+    const runtime = await builderRuntime(client, name, signal)
+    const index = cacheIndex(pinned, runtime, dir), cached = await cachedArtifact(index, pinned, runtime, dir)
+    signal?.throwIfAborted()
+    if (cached) { await progress('Using the package prepared earlier'); signal?.throwIfAborted(); return cached }
     // The supervisor's first provider-environment poll replaces synthetic DNS
     // mappings. Start npm after that initial refresh so its DNS cache is fresh.
-    await progress('Waiting for the preparation sandbox policy to settle')
-    await new Promise((resolve,reject)=>{const done=()=>{signal?.removeEventListener('abort',stop);resolve()};const timer=setTimeout(done,12000);const stop=()=>{clearTimeout(timer);reject(signal.reason)};if(signal?.aborted)stop();else signal?.addEventListener('abort',stop,{once:true})})
-    await progress('Checking npm registry connectivity')
+    await progress('Waiting for the sandbox network to be ready')
+    await new Promise((resolve,reject)=>{const done=()=>{signal?.removeEventListener('abort',stop);resolve()};const timer=setTimeout(done,settle);const stop=()=>{clearTimeout(timer);reject(signal.reason)};if(signal?.aborted)stop();else signal?.addEventListener('abort',stop,{once:true})})
+    await progress('Checking access to the npm registry')
     await checkPreparationRegistry(client, name, signal)
-    await progress(`Installing ${pinned.name}@${pinned.version} without install scripts`)
+    await progress(`Downloading ${pinned.name}@${pinned.version} (install scripts off)`)
     const metadata = await installPackage(client, name, pinned, signal)
-    await fs.mkdir(ARTIFACT_DIR,{recursive:true,mode:0o700})
-    temporary=path.join(ARTIFACT_DIR,randomUUID()+'.tmp')
+    await progress('Saving the package')
+    await fs.mkdir(dir,{recursive:true,mode:0o700})
+    temporary=path.join(dir,randomUUID()+'.tmp')
     const handle=await fs.open(temporary,'wx',0o600);const digest=createHash('sha256');let bytes=0,exit=null
     try{for await(const event of client.sandbox.execStream(name,['tar','-czf','-','-C','/sandbox/package','.'],{noLoginShell:true,timeoutSecs:120,signal})){
       if(event.stream==='stdout'){bytes+=event.data.length;if(bytes>100*1024*1024)throw fail('Compressed package exceeds 100 MB.');digest.update(event.data);await handle.write(event.data)}
       if(event.type==='exit')exit=event.exitCode
     }}finally{await handle.close()}
     if(exit!==0)throw fail('Could not export the prepared package.')
-    const id=digest.digest('hex');await fs.rename(temporary,path.join(ARTIFACT_DIR,id+'.tar.gz'));temporary=null
-    await progress('Checking MCP initialization and capability discovery')
+    const id=digest.digest('hex');await fs.rename(temporary,path.join(dir,id+'.tar.gz'));temporary=null
+    await progress('Checking that the MCP starts')
     const verifier=await fs.readFile(path.join(import.meta.dirname,'setup-verifier.cjs'),'utf8')
     const check=await client.sandbox.exec(name,['/usr/local/bin/node','-e',verifier],{noLoginShell:true,stdin:Buffer.from(JSON.stringify({config:{command:'/usr/local/bin/node',args:['/sandbox/package/'+metadata.bin,...pinned.args]}})),timeoutSecs:35,signal})
     let verification={status:'unverified',reason:'Initialization check did not finish.'}
     try{verification=JSON.parse(check.stdout.toString())}catch{}
-    return { ...pinned,...metadata,digest:id,compressedBytes:bytes,verification,preparedAt:new Date().toISOString() }
+    const artifact={ ...pinned,...metadata,digest:id,compressedBytes:bytes,verification,preparedAt:new Date().toISOString() }
+    if(verification?.status==='connected')await saveCached(index,artifact)
+    return artifact
   }finally{if(temporary)await fs.rm(temporary,{force:true});if(created)await client.sandbox.delete(name).catch(()=>{})}
 }
 
-export async function artifactFile(artifact) {
+export async function artifactFile(artifact, dir = ARTIFACT_DIR) {
   if(!/^[a-f0-9]{64}$/.test(artifact?.digest||''))throw fail('Invalid prepared artifact.')
-  const file=path.join(ARTIFACT_DIR,artifact.digest+'.tar.gz');const data=await fs.readFile(file)
+  const file=path.join(dir,artifact.digest+'.tar.gz');const data=await fs.readFile(file)
   if(createHash('sha256').update(data).digest('hex')!==artifact.digest)throw fail('Prepared artifact integrity check failed.',409)
   return {file,data}
 }
