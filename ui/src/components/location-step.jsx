@@ -65,6 +65,16 @@ function ServerArt({ live }) {
   </svg>
 }
 
+function CloudArt() {
+  return <svg viewBox="0 0 76 48" className="h-16 w-auto text-foreground" aria-hidden="true">
+    {/* The top arc rises above y=0, so the drawing sits 3 units lower. */}
+    <g transform="translate(0 3)">
+      <path d="M20 42a14 14 0 0 1-1.6-27.9A18 18 0 0 1 52.6 10 13 13 0 0 1 56 42Z" fill="var(--popover)" stroke="currentColor" strokeOpacity="0.55" strokeLinejoin="round" />
+      {[0, 1, 2].map((unit) => <rect key={unit} x={24 + unit * 10} y="26" width="7" height="7" rx="1.5" fill="currentColor" fillOpacity={0.3 - unit * 0.07} />)}
+    </g>
+  </svg>
+}
+
 // The little scene at the top of each card: where the sandbox will physically run.
 function Scene({ kind, live }) {
   const container = React.useRef(null)
@@ -72,6 +82,7 @@ function Scene({ kind, live }) {
   const to = React.useRef(null)
   return <div ref={container} className="relative flex h-36 items-center justify-center gap-14">
     <DotPattern width={14} height={14} className="text-foreground/15 transition-colors duration-500 [mask-image:radial-gradient(160px_circle_at_center,white,transparent)] group-hover:text-foreground/30" />
+    {kind === "cloud" && <span className="relative z-10"><CloudArt /></span>}
     {kind === "local" && <span className="relative z-10 transition-transform duration-500 group-hover:scale-105"><LaptopArt live={live} /></span>}
     {kind === "remote" && <>
       <span ref={from} className="relative z-10 transition-transform duration-500 group-hover:-translate-x-1"><LaptopArt live={live} /></span>
@@ -89,8 +100,8 @@ function Place({ index, scene, live, title, caption, tone = "idle", disabled, on
     event.currentTarget.style.setProperty("--y", `${event.clientY - bounds.top}px`)
   }
   return <motion.button type="button" disabled={disabled} onClick={onClick} onPointerMove={move}
-    initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: index * 0.07, ease: [0.22, 1, 0.36, 1] }}
-    className="group relative block w-full overflow-hidden rounded-2xl bg-muted/30 text-left outline-none transition-colors duration-300 hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-1 focus-visible:ring-foreground/20 disabled:pointer-events-none disabled:opacity-50">
+    initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: disabled ? 0.5 : 1, y: 0 }} transition={{ duration: 0.35, delay: index * 0.07, ease: [0.22, 1, 0.36, 1] }}
+    className="group relative block w-full overflow-hidden rounded-2xl bg-muted/30 text-left outline-none transition-colors duration-300 hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-1 focus-visible:ring-foreground/20 disabled:pointer-events-none">
     <span aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
       style={{ background: "radial-gradient(260px circle at var(--x, 50%) var(--y, 50%), color-mix(in oklab, var(--foreground) 7%, transparent), transparent 70%)" }} />
     <Scene kind={scene} live={live} />
@@ -148,7 +159,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
     <div className="-m-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
       <AnimatePresence mode="wait" initial={false}>
         {view === "choose" ? <motion.div key="choose" {...slide} className="grid gap-3">
-          <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-2" : ""}`}>
+          <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-3" : ""}`}>
           <Place index={0} scene="local" live={local?.connected} title="This computer" caption={localCaption} tone={local?.connected ? "live" : "idle"}
             disabled={local ? !local.connected : !locals?.length || localBusy}
             onClick={() => local ? onPick(local.id ?? local.context) : chooseRegisteredLocal()}
@@ -156,6 +167,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
           {allowRemote && <Place index={1} scene="remote" live={remote?.connected} title="Remote machine"
             caption={remote?.connected ? `Connected · ${hostOf(remote)}` : remote ? `${hostOf(remote)} · Disconnected` : "Your server, over SSH"}
             tone={remote?.connected ? "live" : remote ? "warn" : "idle"} onClick={() => setView("remote")} />}
+          {allowRemote && <Place index={2} scene="cloud" title="Cloud" caption="Coming soon" disabled trailing={<span aria-hidden="true" />} />}
           </div>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <div className="mt-3 flex justify-end">

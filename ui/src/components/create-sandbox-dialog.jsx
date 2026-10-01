@@ -318,7 +318,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`max-h-[90svh] gap-4 bg-transparent p-0 ring-0 ${chooser ? "sm:max-w-3xl" : "sm:max-w-4xl"}`}>
+      <DialogContent className="max-h-[90svh] gap-4 bg-transparent p-0 ring-0 sm:max-w-4xl">
         {chooser ?? <>
         <form onSubmit={submit} className={`@container flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-popover ring-1 ring-foreground/10 max-h-[90svh]`}>
           <Tabs value={mode} onValueChange={(value) => { setMode(value); setError(null) }} className="contents">
