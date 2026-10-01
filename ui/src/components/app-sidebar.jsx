@@ -37,6 +37,7 @@ const CONNECTION = {
   connecting: { label: "Connecting", dot: "bg-amber-400" },
   reconnecting: { label: "Reconnecting", dot: "bg-amber-400" },
   "gateway-down": { label: "Unreachable", dot: "bg-red-500" },
+  "setup-required": { label: "Not connected", dot: "bg-muted-foreground" },
 }
 
 export function AppSidebar({ view, onNavigate }) {
@@ -48,9 +49,10 @@ export function AppSidebar({ view, onNavigate }) {
     <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
       <SidebarHeader className="h-14 shrink-0 justify-center px-6 py-0">
         <div className="flex items-center gap-2">
-          <img src="/openegg.png" alt="" aria-hidden="true" className="size-9 shrink-0 object-contain" />
-          <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">ShellOS
+          <span className="sidebar-icon-hover inline-flex shrink-0">
+            <img src="/openegg.png" alt="" aria-hidden="true" className="sidebar-icon size-9 object-contain" />
           </span>
+          <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">ShellOS</span>
         </div>
       </SidebarHeader>
 
@@ -115,12 +117,21 @@ export function AppSidebar({ view, onNavigate }) {
           <PopoverContent side="top" align="start" sideOffset={10} className="w-64 gap-3 p-4">
             <p className="flex items-center gap-1.5 text-xs font-medium">
               <span className={`size-1.5 rounded-full ${gateway?.status === "healthy" ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
-              {gateway ? (gateway.status === "healthy" ? "Healthy" : gateway.status) : overview?.error ? "Unreachable" : "Reading…"}
+              {gateway ? (gateway.status === "healthy" ? "Healthy" : gateway.status) : connection === "setup-required" ? "No connection selected" : overview?.error ? "Unreachable" : "Reading…"}
             </p>
             {gateway ? (
-              <dl>
-                <dt className="text-[10px] text-muted-foreground">Gateway endpoint</dt>
-                <dd className="break-all font-mono text-[11px]">{gateway.endpoint}</dd>
+              <dl className="grid gap-2.5">
+                {[
+                  ["Endpoint", gateway.endpoint, true],
+                  ["Authentication", gateway.authMode === "mtls" ? "mTLS" : gateway.authMode],
+                  ["Runtime", gateway.drivers.map((d) => `${d.driver}${d.version ? ` ${d.version}` : ""}`).join(", ") || "-", true],
+                  ["Registration", gateway.remote ? "Remote" : "Local / tunnel endpoint"],
+                ].map(([label, value, mono]) => (
+                  <div key={label}>
+                    <dt className="text-[10px] text-muted-foreground">{label}</dt>
+                    <dd className={`break-all ${mono ? "font-mono text-[11px]" : "text-xs"}`}>{value}</dd>
+                  </div>
+                ))}
               </dl>
             ) : overview?.error ? <p className="font-mono text-[10px] text-muted-foreground">{overview.error}</p> : null}
           </PopoverContent>

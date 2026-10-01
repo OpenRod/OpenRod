@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { WORKSPACE, gateway, iso } from './gateway.js'
+import { gateway, iso, contextKey, contextSelection, runWithContext } from './gateway.js'
+import { stateDirectory } from './paths.js'
 
 // Ingress: the ways into a sandbox. OpenShell sandboxes accept nothing inbound
 // on their own; every way in is something the gateway opened on purpose:
@@ -16,17 +17,28 @@ import { WORKSPACE, gateway, iso } from './gateway.js'
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 const SANDBOX = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const SERVICE = /^([a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?)?$/
-const STATE_FILE = path.resolve(import.meta.dirname, '../.state/ingress.json')
+const stateFile = () => path.join(stateDirectory(), 'ingress.json')
 const MAX_MINUTES = 7 * 24 * 60
 
-const keyOf = (sandbox, name) => `${sandbox}/${name}`
+const keyOf = (sandbox, name) => JSON.stringify([contextKey(), sandbox, name])
 
 async function readDeadlines() {
-  try { return JSON.parse(await fs.readFile(STATE_FILE, 'utf8')) } catch { return {} }
+  try { return JSON.parse(await fs.readFile(stateFile(), 'utf8')) } catch (error) { if (error.code === 'ENOENT') return {}; throw error }
 }
 async function writeDeadlines(deadlines) {
-  await fs.mkdir(path.dirname(STATE_FILE), { recursive: true })
-  await fs.writeFile(STATE_FILE, `${JSON.stringify(deadlines, null, 2)}\n`)
+  await fs.mkdir(path.dirname(stateFile()), { recursive: true })
+  await fs.writeFile(stateFile(), `${JSON.stringify(deadlines, null, 2)}\n`)
+}
+
+let deadlineWrite = Promise.resolve()
+function updateDeadlines(change) {
+  const pending = deadlineWrite.then(async () => {
+    const deadlines = await readDeadlines()
+    change(deadlines)
+    await writeDeadlines(deadlines)
+  })
+  deadlineWrite = pending.catch(() => {})
+  return pending
 }
 
 function serviceView(s, deadlines) {
@@ -42,9 +54,9 @@ function serviceView(s, deadlines) {
 }
 
 async function listServices() {
-  const { client } = await gateway()
+  const { client, workspaceScope } = await gateway()
   const [response, deadlines] = await Promise.all([
-    client.raw.listServices({ workspaceScope: WORKSPACE, pageSize: 1000 }),
+    client.raw.listServices({ workspaceScope: workspaceScope, pageSize: 1000 }),
     readDeadlines(),
   ])
   return response.services.map((s) => serviceView(s, deadlines))
@@ -58,10 +70,12 @@ function deadlineFrom(minutes) {
 }
 
 async function setDeadline(sandbox, name, expiresAt) {
-  const deadlines = await readDeadlines()
-  if (expiresAt) deadlines[keyOf(sandbox, name)] = { expiresAt }
-  else delete deadlines[keyOf(sandbox, name)]
-  await writeDeadlines(deadlines)
+  const key = keyOf(sandbox, name)
+  const context = contextSelection()
+  await updateDeadlines((deadlines) => {
+    if (expiresAt) deadlines[key] = { expiresAt, context, sandbox, name }
+    else delete deadlines[key]
+  })
 }
 
 export async function expose({ sandbox, name = '', port, closeAfterMinutes }) {
@@ -70,16 +84,16 @@ export async function expose({ sandbox, name = '', port, closeAfterMinutes }) {
   const targetPort = Number(port)
   if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) throw fail('Ports are 1–65535.')
   const expiresAt = deadlineFrom(closeAfterMinutes)
-  const { client } = await gateway()
-  const response = await client.raw.exposeService({ sandbox, name, targetPort, domain: true, workspaceScope: WORKSPACE, requestId: randomUUID() })
+  const { client, workspaceScope } = await gateway()
+  const response = await client.raw.exposeService({ sandbox, name, targetPort, domain: true, workspaceScope: workspaceScope, requestId: randomUUID() })
   await setDeadline(sandbox, name, expiresAt)
   return { url: response.url || null, expiresAt }
 }
 
 export async function close({ sandbox, name = '' }, reason = 'closed') {
   if (!SANDBOX.test(sandbox ?? '') || !SERVICE.test(name)) throw fail('Unknown service.')
-  const { client } = await gateway()
-  await client.raw.deleteService({ sandbox, name, allowMissing: true, workspaceScope: WORKSPACE, requestId: randomUUID() })
+  const { client, workspaceScope } = await gateway()
+  await client.raw.deleteService({ sandbox, name, allowMissing: true, workspaceScope: workspaceScope, requestId: randomUUID() })
   await setDeadline(sandbox, name, null)
   return { ok: true, reason }
 }
@@ -110,7 +124,7 @@ async function sessionPolicy() {
 
 export async function ingressOverview() {
   const { target } = await gateway()
-  const [services, sessions] = await Promise.all([listServices(), sessionPolicy()])
+  const [services, sessions] = await Promise.all([listServices(), target.remote ? { file: null, ttlSeconds: null } : sessionPolicy()])
   return {
     services,
     sessions,
@@ -127,19 +141,26 @@ export async function sweep(log = () => {}) {
   try {
     const deadlines = await readDeadlines()
     const now = Date.now()
-    const due = Object.entries(deadlines).filter(([, d]) => Date.parse(d.expiresAt) <= now)
-    for (const [key] of due) {
-      const [sandbox, ...rest] = key.split('/')
-      const name = rest.join('/')
-      try { await close({ sandbox, name }, 'expired'); log(`closed expired service ${key}`) } catch (error) { log(`could not close ${key}: ${error.message}`) }
+    const due = Object.entries(deadlines).filter(([, d]) => d.context && Date.parse(d.expiresAt) <= now)
+    for (const [key, deadline] of due) {
+      try {
+        await runWithContext(deadline.context, () => close(deadline, 'expired'))
+        log(`closed expired service ${key}`)
+      } catch (error) { log(`could not close ${key}: ${error.message}`) }
     }
-    // Forget deadlines for services that were closed some other way (CLI, sandbox deleted).
-    if (Object.keys(deadlines).length) {
-      const open = new Set((await listServices()).map((s) => keyOf(s.sandbox, s.name)))
-      const current = await readDeadlines()
-      let changed = false
-      for (const key of Object.keys(current)) if (!open.has(key)) { delete current[key]; changed = true }
-      if (changed) await writeDeadlines(current)
+    // Read each recorded context independently; never prune another gateway's deadlines.
+    const contexts = new Map(Object.values(deadlines).filter((d) => d.context).map((d) => [contextKey(d.context), d.context]))
+    for (const [scope, context] of contexts) {
+      try {
+        await runWithContext(context, async () => {
+          const open = new Set((await listServices()).map((s) => keyOf(s.sandbox, s.name)))
+          await updateDeadlines((current) => {
+            for (const [key, value] of Object.entries(current)) {
+              if (value.context && contextKey(value.context) === scope && !open.has(key) && value.expiresAt === deadlines[key]?.expiresAt) delete current[key]
+            }
+          })
+        })
+      } catch { /* An unreachable gateway keeps its own deadlines for the next pass. */ }
     }
   } catch { /* Gateway unreachable; try again on the next tick. */ } finally {
     sweeping = false

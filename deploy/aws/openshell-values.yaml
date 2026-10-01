@@ -1,0 +1,14 @@
+# Isolated evaluation only. Never expose this gateway publicly.
+# mTLS protects transport; user authorization is deliberately disabled here.
+# All workloads with access to this ClusterIP and its client credentials must be trusted.
+service:
+  type: ClusterIP
+server:
+  name: openshell-aws
+  telemetryEnabled: false
+  workspaceStorageClass: gp3
+  auth:
+    allowUnauthenticatedUsers: true
+  drivers:
+    kubernetes:
+      workspaceMode: shared

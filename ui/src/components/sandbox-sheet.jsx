@@ -1,6 +1,7 @@
 import { SetupsView } from "@/components/setups-view"
+import { useCloudMode } from "./auth-gate"
 import * as React from "react"
-import { AlertTriangle, Box, Copy, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Terminal, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, Copy, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -13,10 +14,12 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
 import { CopyCommand } from "@/components/copy-command"
+import { ContinueInCloud, ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
-import { api } from "@/lib/api"
-import { useLive } from "@/lib/live"
-import { defaultSession, sessionName, terminalHref } from "@/lib/sandbox-session"
+import { useApi, useLocation } from "@/lib/location-context"
+import { LocationBadge } from "@/components/location-badge"
+import { LiveProvider, useLive } from "@/lib/live"
+import { sessionName, terminalHref } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
 import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
@@ -38,14 +41,15 @@ function Section({ title, icon: Icon, children, aside, className }) {
   )
 }
 
-// Installed editors don't change while the console is open, so ask once, and
-// keep retrying while the sheet is open if that first request fails.
-let editorsRequest
 function useEditors() {
+  const api = useApi()
+  const cloud = useCloudMode()
   const [editors, setEditors] = React.useState([])
   React.useEffect(() => {
+    if (cloud) return
     let cancelled = false
     let timer
+    let editorsRequest
     const load = () => {
       editorsRequest ??= api.editors().then((list) => list.filter((editor) => editor.installed))
       editorsRequest.then((list) => { if (!cancelled) setEditors(list) })
@@ -53,27 +57,34 @@ function useEditors() {
     }
     load()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [])
+  }, [cloud, api])
   return editors
 }
 
-function OpenIn({ name, editors }) {
+// Cloud sandboxes have no local SSH or editors, so only the browser terminal applies.
+function OpenIn({ name, editors, cloud, context }) {
+  const api = useApi()
   const [connection, setConnection] = React.useState(null)
   const [error, setError] = React.useState(null)
+  const [mode, setMode] = React.useState("ssh")
   const [opening, setOpening] = React.useState(false)
   const [loadingConfig, setLoadingConfig] = React.useState(false)
   const [config, setConfig] = React.useState(null)
 
   React.useEffect(() => {
+    if (cloud) return
     let cancelled = false
-    setConnection(null); setError(null); setConfig(null)
+    setConnection(null); setError(null); setMode("ssh"); setConfig(null)
     api.sshConnection(name)
-      .then((value) => { if (!cancelled) setConnection(value) })
+      .then((value) => { if (!cancelled) { setConnection(value); setMode(value.defaultMode) } })
       .catch((e) => { if (!cancelled) setError(e.message) })
     return () => { cancelled = true }
-  }, [name])
+  }, [name, cloud, api])
 
-  const plan = connection?.modes.exec
+  const plan = connection?.modes[mode] ?? connection?.modes.ssh
+  const actionLabel = mode === "ssh" ? "Open SSH in terminal"
+    : mode === "attach" ? "Attach canonical TTY"
+    : `Exec new ${sessionName(plan?.session)?.toLowerCase() ?? "session"}`
   const unavailable = error || (!connection ? "Checking connection…"
     : !connection.cliInstalled ? "Install the openshell CLI to connect."
     : !connection.sshInstalled ? "Install OpenSSH to connect."
@@ -97,8 +108,8 @@ function OpenIn({ name, editors }) {
   async function open() {
     setOpening(true)
     try {
-      await api.openSshTerminal(name, "exec")
-      toast.success(`Opening ${name} over SSH`)
+      await api.openSshTerminal(name, mode)
+      toast.success(mode === "ssh" ? `Opening SSH to ${name}` : mode === "attach" ? `Attaching to ${name}` : `Starting a new session in ${name}`)
     } catch (e) {
       toast.error("Couldn’t open SSH terminal", { description: e.message })
     } finally {
@@ -113,23 +124,53 @@ function OpenIn({ name, editors }) {
     finally { setLoadingConfig(false) }
   }
 
+  const browser = <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} disabled={!cloud && (!context?.name || !context?.workspace)} render={<a href={cloud || (context?.name && context?.workspace) ? terminalHref(name, undefined, context) : undefined} target="_blank" rel="noreferrer" />}>
+    <Globe className="size-3.5" />Browser
+  </Button>
+
+  if (cloud) return <Section title="Open in"><div className="grid grid-cols-2 gap-1.5">{browser}</div></Section>
+
   return (
     <>
       <Section title="Open in">
+        {connection && <>
+          <dl aria-label="SSH target" className="mb-3 grid gap-1 text-[11px]">
+            <div><dt className="text-muted-foreground">Gateway</dt><dd className="break-all font-mono">{connection.gateway.name}</dd></div>
+            <div><dt className="text-muted-foreground">Workspace</dt><dd className="break-all font-mono">{connection.gateway.workspace}</dd></div>
+            <div><dt className="text-muted-foreground">Sandbox</dt><dd className="break-all font-mono">{name}</dd></div>
+          </dl>
+          <div className="mb-2 flex flex-wrap gap-1 rounded-md bg-muted p-1">
+            <Button type="button" variant={mode === "ssh" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("ssh")}>SSH shell</Button>
+            <Button type="button" variant={mode === "exec" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("exec")}>Exec new</Button>
+            {connection.modes.attach && <Button type="button" variant={mode === "attach" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("attach")}>Attach TTY</Button>}
+          </div>
+        </>}
         <div className="grid grid-cols-2 gap-1.5">
-          <Button variant="outline" size="sm" className="justify-start text-xs" disabled={!connection?.canOpenTerminal || opening} title={unavailable ?? undefined} onClick={open}>
+          <Button variant="outline" size="sm" className="justify-start text-xs" disabled={!connection?.canOpenTerminal || opening} title={unavailable ?? actionLabel} onClick={open}>
             {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" />}Terminal
           </Button>
           {[{ id: "cursor", label: "Cursor" }, { id: "vscode", label: "VS Code" }].map((editor) => {
             const installed = editors.some((item) => item.id === editor.id)
-            return <Button key={editor.id} variant="outline" size="sm" className="justify-start text-xs" disabled={!installed || opening} title={!installed ? `${editor.label} is not installed.` : undefined} onClick={() => openEditor(editor)}>
+            return <Button key={editor.id} variant="outline" size="sm" className="justify-start text-xs" disabled={!installed || opening} title={!installed ? `${editor.label} is not installed.` : "Connects over SSH through OpenShell. The first time, OpenShell adds one Include line to ~/.ssh/config."} onClick={() => openEditor(editor)}>
               <img src={`/logos/${editor.id}.svg`} alt="" className="size-3.5 dark:invert" />{editor.label}
             </Button>
           })}
-          <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} render={<a href={terminalHref(name)} target="_blank" rel="noreferrer" />}>
-            <Globe className="size-3.5" />Browser
-          </Button>
+          {browser}
         </div>
+        {connection && <div className="mt-2 space-y-1.5">
+          {plan && <CopyCommand command={plan.command} />}
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            {mode === "ssh" ? "Direct OpenSSH login shell. Its private, temporary config is removed when the session exits."
+              : mode === "attach" ? "Reconnects to the sandbox’s original TTY process."
+              : "Starts a separate shell or agent with openshell exec."}
+          </p>
+          <details className="text-[10px] text-muted-foreground">
+            <summary className="cursor-pointer py-1">How SSH reaches this sandbox</summary>
+            <p className="mt-1">OpenSSH → OpenShell SSH proxy → gateway → this sandbox. The SSH target is the sandbox, not the gateway host.</p>
+            <p className="mt-2 break-all font-mono">{connection.gateway.endpoint}</p>
+            <p className="mt-1">A localhost gateway address can be a tunnel to a remote Kubernetes cluster. It does not mean the sandbox runs on this machine.</p>
+          </details>
+        </div>}
         <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3">
           <Button variant="outline" size="sm" className="justify-start text-xs font-normal text-muted-foreground" disabled={!plan} onClick={copyCommand}>
             <Copy className="size-3.5" />Copy SSH command
@@ -163,9 +204,19 @@ function OpenIn({ name, editors }) {
 const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", full: "full", custom: "custom rules", blocked: "blocked" }
 const RULE_TAG = { secret: "from provider", policy: "network rule", org: "blocked everywhere", group: "inherited", agent: "agent defaults", own: "rule" }
 
-export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
+export function SandboxSheet(props) {
+  const location = useLocation()
+  return location && !props.liveData?.demo
+    ? <LiveProvider key={location.context}><SandboxSheetContent key={props.name} {...props} scoped /></LiveProvider>
+    : <SandboxSheetContent key={props.name} {...props} />
+}
+
+function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate, onChanged, liveData, scoped }) {
+  const api = useApi()
+  const location = useLocation()
   const context = useLive()
-  const live = liveData ?? context
+  const live = scoped ? context : liveData ?? context
+  const navigate = (view) => onNavigate(view, location)
   const [minutes, setMinutes] = React.useState(15)
   const [now, setNow] = React.useState(Date.now)
   React.useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(timer) }, [])
@@ -173,14 +224,15 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const cloud = useCloudMode()
   const editors = useEditors()
-  const summary = live.sandboxes?.find((s) => s.name === name)
+  const summary = live.sandboxes?.find((s) => s.name === name) ?? owningSandbox
 
   // Re-read the full record whenever the live list reports a change to it:
   // a new phase or policy version means the policy shown here may be stale.
   const version = summary ? `${summary.phase}|${summary.policyVersion}` : null
   React.useEffect(() => {
-    if (!name) { setDetail(null); setError(null); return }
+    if (!name || location?.connected === false) { setDetail(null); setError(location?.error ?? null); return }
     setDetail(null); setError(null)
     if (live.demo) return
     let cancelled = false
@@ -193,16 +245,19 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
     }
     refresh()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [name, version, live.demo])
+  }, [name, version, live.demo, api, location?.connected, location?.error])
 
   const sandbox = detail?.name === name ? detail : summary
   const recent = React.useMemo(() => live.events.filter((e) => e.sandbox === name && e.kind === "audit" && e.verdict).slice(0, 14), [live.events, name])
 
   async function act(action) {
+    if (location?.connected === false) return
     setBusy(action)
     try {
       await api.lifecycle(name, action)
       toast.success(action === "delete" ? `Deleting ${name}` : action === "stop" ? `Stopping ${name}` : `Starting ${name}`)
+      onChanged?.()
+      live.refresh?.()
       if (action === "delete") onClose()
     } catch (e) {
       toast.error(e.message)
@@ -246,6 +301,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
             <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
               <Box aria-hidden="true" strokeWidth={1.5} className="size-4 shrink-0 text-muted-foreground" />
               <span className="truncate">{name}</span>
+              <LocationBadge location={location} />
               {phase && <span className="ml-2 flex shrink-0 items-center gap-1.5 text-xs font-normal text-muted-foreground"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} />{PHASE_LABEL[phase]}</span>}
             </DialogTitle>
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="mr-1 font-sans font-medium text-foreground">{detail?.policy ? allowed.length : "-"}</strong>allowed hosts</span><span><strong className="mr-1 font-sans font-medium text-foreground">{denied.length}</strong>blocked hosts</span></div>
@@ -277,7 +333,8 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && !live.demo && <OpenIn key={name} name={name} editors={editors} />}
+                    {phase === "ready" && !live.demo && location?.connected !== false && <OpenIn key={name} name={name} editors={editors} cloud={cloud} context={location ? { name: location.gateway, workspace: location.workspace } : live.overview?.gateway} />}
+                    {!live.demo && phase === "ready" && location?.connected !== false && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}
@@ -305,7 +362,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               </TabsContent>
               <TabsContent value="rules" className="min-h-0 space-y-6 overflow-y-auto p-5">
               <Section title="Network rules" icon={Globe}
-                aside={<button onClick={() => { try { sessionStorage.setItem("egress-sandbox", name) } catch { /* optional */ } onClose(); onNavigate("egress") }}
+                aside={<button disabled={location?.connected === false} onClick={() => { try { sessionStorage.setItem("egress-sandbox", name) } catch { /* optional */ } onClose(); navigate("egress") }}
                   className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Edit</button>}>
                 {!detail?.policy ? <p className="text-sm text-muted-foreground">{live.demo ? "Policy data is unavailable in this preview." : error ? "Rules could not be loaded. Close and reopen to retry." : detail ? "No policy reported." : "Loading rules…"}</p>
                   : rules.length === 0 ? <p className="text-[11px] text-muted-foreground">No rules. All outbound denied.</p>
@@ -339,9 +396,9 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
 
               </TabsContent>
-              <TabsContent value="setups" className="min-h-0 overflow-y-auto"><SetupsView sandbox={name} setupIds={detail?.setupIds ?? []} /></TabsContent>
+              <TabsContent value="setups" className="min-h-0 overflow-y-auto">{location?.connected === false ? <p role="status" className="p-5 text-sm text-muted-foreground">Reconnect this location to manage MCPs &amp; Skills.</p> : <SetupsView sandbox={name} setupIds={detail?.setupIds ?? []} />}</TabsContent>
               <TabsContent value="files" className="flex min-h-0 flex-col">
-                <FilesView sandbox={sandbox} demo={live.demo} />
+                {location?.connected === false ? <p role="status" className="p-5 text-sm text-muted-foreground">Reconnect this location to access files.</p> : <FilesView sandbox={sandbox} demo={live.demo} />}
               </TabsContent>
               <TabsContent value="activity" className="min-h-0 space-y-6 overflow-y-auto p-5">
               <Section title="Connection activity" aside={<div className="flex gap-1">{[15, 60].map((value) => <button key={value} onClick={() => setMinutes(value)} aria-pressed={minutes === value} className={`rounded px-2 py-1 text-xs ${minutes === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-muted"}`}>{value === 15 ? "15m" : "1h"}</button>)}</div>}>
@@ -349,7 +406,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <p className="mt-2 text-xs text-muted-foreground">Based on the recent event buffer{live.demo ? " · synthetic preview" : ""}.</p>
               </Section>
 
-              <Section title="Egress" aside={recent.length ? <button onClick={() => { onClose(); onNavigate("activity") }} className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">All</button> : null}>
+              <Section title="Egress" aside={recent.length ? <button onClick={() => { onClose(); navigate("activity") }} className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">All</button> : null}>
                 {recent.length ? (
                   <div className="rounded-md border border-border">
                     {recent.map((event) => <AuditLine key={`${event.at}|${event.message}`} event={event} dense />)}
@@ -384,16 +441,16 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
           ) : <p role="status" className="flex-1 p-5 text-sm text-muted-foreground">{error ? "Sandbox details unavailable." : "Loading sandbox…"}</p>}
               {sandbox && !live.demo && <div className="flex shrink-0 flex-wrap gap-2 border-t border-border bg-muted/20 px-5 py-3">
                 {canStop(phase) && (
-                  <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => act("stop")}>
+                  <Button variant="outline" size="sm" disabled={Boolean(busy) || location?.connected === false} onClick={() => act("stop")}>
                     {busy === "stop" ? <Spinner aria-hidden="true" /> : <Square aria-hidden="true" />}Stop
                   </Button>
                 )}
                 {canStart(phase) && (
-                  <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => act("start")}>
+                  <Button variant="outline" size="sm" disabled={Boolean(busy) || location?.connected === false} onClick={() => act("start")}>
                     {busy === "start" ? <Spinner aria-hidden="true" /> : <Play aria-hidden="true" />}Start
                   </Button>
                 )}
-                <Button variant="outline" size="sm" disabled={Boolean(busy) || phase === "deleting"}
+                <Button variant="outline" size="sm" disabled={Boolean(busy) || location?.connected === false || phase === "deleting"}
                   className="border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
                   onClick={() => setConfirmDelete(true)}>
                   <Trash2 aria-hidden="true" />Delete

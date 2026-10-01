@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
-import { api } from "@/lib/api"
+import { useApi, useLocation } from "@/lib/location-context"
 import { relativeTime } from "@/lib/format"
 import { projectOf } from "@/lib/sandbox-session"
 import { SANDBOX_ROOT, TRANSFER_LIMIT, downloadCommand, formatBytes, uploadCommand } from "@/lib/files"
@@ -78,7 +78,14 @@ function SeedStatus({ seed, onRetry }) {
   )
 }
 
-export function FilesView({ sandbox, demo }) {
+export function FilesView(props) {
+  const location = useLocation()
+  return <ScopedFilesView key={`${location?.context ?? "default"}:${props.sandbox.name}`} {...props} />
+}
+
+function ScopedFilesView({ sandbox, demo }) {
+  const api = useApi()
+  const location = useLocation()
   const name = sandbox.name
   const ready = sandbox.phase === "ready"
   const project = projectOf(sandbox)
@@ -106,7 +113,7 @@ export function FilesView({ sandbox, demo }) {
     } finally {
       setLoading(false)
     }
-  }, [name])
+  }, [name, api])
 
   React.useEffect(() => { if (ready && !demo) load(dir) }, [dir, ready, demo, load])
 
@@ -126,7 +133,7 @@ export function FilesView({ sandbox, demo }) {
     }
     if (!seed || RUNNING.has(seedState)) poll()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [name, demo, seedState]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [name, demo, seedState, api]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Once files land, show them: open the project folder, or re-read this one.
   const previousSeed = React.useRef(null)
@@ -149,7 +156,7 @@ export function FilesView({ sandbox, demo }) {
     try {
       const { token, filename, bytes } = await api.prepareDownload(name, target)
       const link = document.createElement("a")
-      link.href = `/api/os/downloads/${token}`
+      link.href = `/api/os/downloads/${token}?context=${encodeURIComponent(await api.contextKey())}${location ? "&location=1" : ""}`
       link.download = filename
       document.body.append(link); link.click(); link.remove()
       toast.success(`Downloading ${filename}`, { id, description: formatBytes(bytes) })

@@ -2,13 +2,12 @@ import { createTemplateStore } from './policy-template-store.js'
 import { BUILTIN_TEMPLATES, normalizeAccessTemplates } from '../shared/policy-templates.js'
 export { BUILTIN_TEMPLATES } from '../shared/policy-templates.js'
 import { validateSecretCredentials } from '../shared/secret-fields.js'
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { WORKSPACE, gateway, iso, policyView, providerView, sandboxView } from './gateway.js'
-import { blockedBy, isManaged, managedOpsFor, readOrg } from './org.js'
+import { gateway, iso, policyView, providerView, sandboxView } from './gateway.js'
+import { policyDirectory } from './paths.js'
+import { blockedBy, isManaged, managedOpsFor, readOrg, serializeOrgWrite } from './org.js'
 
 const exec = promisify(execFile)
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
@@ -93,11 +92,11 @@ function revisionView(r) {
 }
 
 async function policyOf(sandbox) {
-  const { client } = await gateway()
+  const { client, workspaceScope } = await gateway()
   const [status, config, list] = await Promise.all([
-    client.raw.getSandboxPolicyStatus({ sandbox, workspaceScope: WORKSPACE }),
-    client.raw.getSandboxConfig({ name: sandbox, workspaceScope: WORKSPACE }),
-    client.raw.listSandboxPolicies({ sandbox, workspaceScope: WORKSPACE, pageSize: 50 }),
+    client.raw.getSandboxPolicyStatus({ sandbox, workspaceScope: workspaceScope }),
+    client.raw.getSandboxConfig({ name: sandbox, workspaceScope: workspaceScope }),
+    client.raw.listSandboxPolicies({ sandbox, workspaceScope: workspaceScope, pageSize: 50 }),
   ])
   return {
     sandbox,
@@ -117,14 +116,14 @@ async function policyOf(sandbox) {
 
 // Every sandbox's effective rules in one reading, for the fleet summary.
 async function fleet() {
-  const { client } = await gateway()
-  const list = await client.raw.listSandboxes({ workspaceScope: WORKSPACE })
+  const { client, workspaceScope } = await gateway()
+  const list = await client.raw.listSandboxes({ workspaceScope: workspaceScope })
   const sandboxes = list.sandboxes.map(sandboxView).filter((s) => s.phase !== 'deleting')
   const rows = await Promise.all(sandboxes.map(async (s) => {
     try {
       const [config, status] = await Promise.all([
-        client.raw.getSandboxConfig({ name: s.name, workspaceScope: WORKSPACE }),
-        client.raw.getSandboxPolicyStatus({ sandbox: s.name, workspaceScope: WORKSPACE }),
+        client.raw.getSandboxConfig({ name: s.name, workspaceScope: workspaceScope }),
+        client.raw.getSandboxPolicyStatus({ sandbox: s.name, workspaceScope: workspaceScope }),
       ])
       return {
         name: s.name, phase: s.phase, labels: s.labels,
@@ -141,8 +140,8 @@ async function fleet() {
 }
 
 async function revisionPolicy(sandbox, version) {
-  const { client } = await gateway()
-  const status = await client.raw.getSandboxPolicyStatus({ sandbox, version, workspaceScope: WORKSPACE })
+  const { client, workspaceScope } = await gateway()
+  const status = await client.raw.getSandboxPolicyStatus({ sandbox, version, workspaceScope: workspaceScope })
   return { revision: revisionView(status.revision), policy: status.revision.policy }
 }
 
@@ -189,7 +188,11 @@ function mergeOp(op) {
   }
 }
 
-async function applyOps(sandbox, ops) {
+function applyOps(sandbox, ops) {
+  return serializeOrgWrite(() => applyOpsWhileLocked(sandbox, ops))
+}
+
+async function applyOpsWhileLocked(sandbox, ops) {
   if (!Array.isArray(ops) || !ops.length || ops.length > 20) throw fail('Nothing to apply.')
   const org = await readOrg()
   for (const op of ops) {
@@ -197,13 +200,13 @@ async function applyOps(sandbox, ops) {
     const hit = blockedBy(org, hosts)
     if (hit) throw fail(`${hit.host} is blocked by organization policy (${hit.pattern}).`, 403)
   }
-  const { client } = await gateway()
+  const { client, target, workspaceScope } = await gateway()
   // A block covers every port the sandbox opens, so a rule that opens a new
   // port takes the recomputed blocks along in the same revision.
   const opened = ops.flatMap((op) => (op.kind === 'addRule' ? (op.rule?.endpoints ?? []).flatMap((e) => e.ports ?? []) : ['addAllow', 'addDeny'].includes(op.kind) ? op.ports ?? [] : [])).map(Number)
-  const managed = opened.some((p) => ![443, 80].includes(p)) ? await managedOpsFor(client, sandbox, opened) : []
+  const managed = opened.some((p) => ![443, 80].includes(p)) ? await managedOpsFor(client, workspaceScope, sandbox, opened, target.endpoint) : []
   const response = await client.raw.updateConfig({
-    sandbox, workspaceScope: WORKSPACE, global: false,
+    sandbox, workspaceScope: workspaceScope, global: false,
     mergeOperations: [...ops.map(mergeOp), ...managed],
     annotations: { 'console.openshell/change': ops.map((o) => `${o.kind}:${o.ruleName ?? o.rule?.name ?? ''}`).join(',').slice(0, 200) },
     requestId: randomUUID(),
@@ -215,10 +218,10 @@ async function applyOps(sandbox, ops) {
 // landlock, process) are identical across a sandbox's revisions, so only the
 // network section actually changes.
 async function restore(sandbox, version) {
-  const { client } = await gateway()
+  const { client, workspaceScope } = await gateway()
   const { policy } = await revisionPolicy(sandbox, version)
   const response = await client.raw.updateConfig({
-    sandbox, workspaceScope: WORKSPACE, global: false, policy,
+    sandbox, workspaceScope: workspaceScope, global: false, policy,
     annotations: { 'console.openshell/change': `restore:v${version}` },
     requestId: randomUUID(),
   })
@@ -256,11 +259,11 @@ export const SETTINGS = {
 const settingValue = (v) => (v?.value?.case ? v.value.value : null)
 
 async function settings(sandbox) {
-  const { client } = await gateway()
+  const { client, workspaceScope } = await gateway()
   const globalConfig = await client.raw.getGatewayConfig({})
   const global = Object.fromEntries(Object.keys(SETTINGS).map((key) => [key, settingValue(globalConfig.settings?.[key])]))
   if (!sandbox) return { global }
-  const config = await client.raw.getSandboxConfig({ name: sandbox, workspaceScope: WORKSPACE })
+  const config = await client.raw.getSandboxConfig({ name: sandbox, workspaceScope: workspaceScope })
   const effective = Object.fromEntries(Object.keys(SETTINGS).map((key) => {
     const entry = config.settings?.[key]
     return [key, { value: settingValue(entry?.value), scope: ['default', 'sandbox', 'global'][entry?.scope ?? 0] ?? 'default' }]
@@ -271,8 +274,8 @@ async function settings(sandbox) {
 async function setSetting({ sandbox, key, value, clear }) {
   const spec = SETTINGS[key]
   if (!spec) throw fail('Unknown setting.')
-  const { client } = await gateway()
-  const scope = sandbox ? { sandbox, workspaceScope: WORKSPACE, global: false } : { global: true }
+  const { client, workspaceScope } = await gateway()
+  const scope = sandbox ? { sandbox, workspaceScope: workspaceScope, global: false } : { global: true }
   if (clear) {
     await client.raw.updateConfig({ ...scope, settingKey: key, deleteSetting: true, requestId: randomUUID() })
     return { ok: true }
@@ -320,11 +323,11 @@ export const PROFILE_CATALOG = [
 ].map(([id, name, category]) => ({ id, name, category }))
 
 async function secrets() {
-  const { client, target } = await gateway()
+  const { client, target, workspaceScope } = await gateway()
   const [providers, profiles, sandboxes] = await Promise.all([
-    client.raw.listProviders({ workspaceScope: WORKSPACE, pageSize: 200 }),
-    client.raw.listProviderProfiles({ workspaceScope: WORKSPACE, pageSize: 200 }),
-    client.raw.listSandboxes({ workspaceScope: WORKSPACE }),
+    client.raw.listProviders({ workspaceScope: workspaceScope, pageSize: 200 }),
+    client.raw.listProviderProfiles({ workspaceScope: workspaceScope, pageSize: 200 }),
+    client.raw.listSandboxes({ workspaceScope: workspaceScope }),
   ])
   const attached = {}
   for (const s of sandboxes.sandboxes) for (const p of s.spec?.providers ?? []) (attached[p] ??= []).push(s.metadata.name)
@@ -357,42 +360,42 @@ function credentialMap(input, { allowEmpty = false } = {}) {
 }
 
 async function createSecret(input) {
-  const { client } = await gateway()
+  const { client, workspaceScope, workspace } = await gateway()
   const name = String(input.name ?? '').trim()
   if (!SECRET_NAME.test(name)) throw fail('Use lowercase letters, digits and dashes for the name.')
-  const profiles = await client.raw.listProviderProfiles({ workspaceScope: WORKSPACE, pageSize: 200 })
+  const profiles = await client.raw.listProviderProfiles({ workspaceScope: workspaceScope, pageSize: 200 })
   const profile = profiles.profiles.find((p) => p.id === input.type)
   if (!profile) throw fail('Import this profile first.')
   let credentials
   try { credentials = validateSecretCredentials(profile, input.credentials) }
   catch (error) { throw fail(error.message) }
   await client.raw.createProvider({
-    workspaceScope: WORKSPACE, requestId: randomUUID(),
-    provider: { metadata: { name }, type: profile.id, profileWorkspace: profile.scope === 'workspace' ? 'default' : '', credentials, config: {} },
+    workspaceScope: workspaceScope, requestId: randomUUID(),
+    provider: { metadata: { name }, type: profile.id, profileWorkspace: profile.scope === 'workspace' ? workspace : '', credentials, config: {} },
   })
   return { name }
 }
 
 async function rotateSecret(name, input) {
-  const { client } = await gateway()
-  const current = await client.raw.getProvider({ name, workspaceScope: WORKSPACE })
+  const { client, workspaceScope } = await gateway()
+  const current = await client.raw.getProvider({ name, workspaceScope: workspaceScope })
   const credentials = credentialMap(input.credentials)
   if (!Object.keys(credentials).length) throw fail('Enter a new value.')
   const known = Object.keys(current.provider.credentials ?? {})
   for (const key of Object.keys(credentials)) if (!known.includes(key)) throw fail(`${key} is not a credential of this secret.`)
   const response = await client.raw.updateProvider({
-    workspaceScope: WORKSPACE, requestId: randomUUID(),
+    workspaceScope: workspaceScope, requestId: randomUUID(),
     provider: { metadata: { name }, type: current.provider.type, credentials, config: {} },
   })
   return { ok: true, sandboxesNotified: response.targetReceipts?.length ?? 0 }
 }
 
 async function setExpiry(name, input) {
-  const { client } = await gateway()
-  const current = await client.raw.getProvider({ name, workspaceScope: WORKSPACE })
+  const { client, workspaceScope } = await gateway()
+  const current = await client.raw.getProvider({ name, workspaceScope: workspaceScope })
   const key = String(input.key ?? '')
   if (!(key in (current.provider.credentials ?? {}))) throw fail('Unknown credential.')
-  const base = { workspaceScope: WORKSPACE, requestId: randomUUID(), provider: { metadata: { name }, type: current.provider.type, credentials: {}, config: {} } }
+  const base = { workspaceScope: workspaceScope, requestId: randomUUID(), provider: { metadata: { name }, type: current.provider.type, credentials: {}, config: {} } }
   if (!input.expiresAt) {
     await client.raw.updateProvider({ ...base, clearCredentialExpirationKeys: [key] })
   } else {
@@ -404,24 +407,24 @@ async function setExpiry(name, input) {
 }
 
 async function deleteSecret(name) {
-  const { client } = await gateway()
-  await client.raw.deleteProvider({ name, workspaceScope: WORKSPACE })
+  const { client, workspaceScope } = await gateway()
+  await client.raw.deleteProvider({ name, workspaceScope: workspaceScope })
   return { ok: true }
 }
 
 async function attachment(sandbox, provider, attach) {
-  const { client } = await gateway()
-  const request = { sandbox, provider, workspaceScope: WORKSPACE, requestId: randomUUID() }
+  const { client, workspaceScope } = await gateway()
+  const request = { sandbox, provider, workspaceScope: workspaceScope, requestId: randomUUID() }
   const response = attach ? await client.raw.attachSandboxProvider(request) : await client.raw.detachSandboxProvider(request)
   return { changed: attach ? response.attached : response.detached }
 }
 
 async function importProfile(id) {
   if (!PROFILE_CATALOG.some((p) => p.id === id)) throw fail('Unknown profile.')
-  const { target } = await gateway()
+  const { target, workspace } = await gateway()
   const url = `https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/providers/${id}.yaml`
   try {
-    const { stdout } = await exec('openshell', ['--gateway', target.name, 'profile', 'import', '--url', url], { timeout: 30000, maxBuffer: 1 << 20 })
+    const { stdout } = await exec('openshell', ['--gateway', target.name, '--workspace', workspace, 'profile', 'import', '--url', url], { timeout: 30000, maxBuffer: 1 << 20 })
     return { ok: true, message: stdout.trim() }
   } catch (error) {
     throw fail((error.stderr || error.message).toString().split('\n').filter(Boolean).slice(-3).join(' '), 502)
@@ -434,7 +437,6 @@ async function importProfile(id) {
 // they live in templates the New sandbox dialog applies. Stored as JSON next
 // to the console so they can be reviewed and committed like code.
 
-const TEMPLATE_DIR = path.resolve(import.meta.dirname, '../policies')
 const TEMPLATE_ID = /^[a-z0-9][a-z0-9-]{0,47}$/
 const ABS = /^\/[\w.@+-][\w./@+-]{0,255}$/
 const SYSTEM_RO = ['/bin', '/usr', '/lib', '/proc', '/dev/urandom', '/etc', '/var/log']
@@ -524,11 +526,18 @@ export function templateToPolicy(template) {
   }
 }
 
-const templateStore = createTemplateStore({ directory: TEMPLATE_DIR, builtins: BUILTIN_TEMPLATES, legacy: LEGACY_TEMPLATES, validate: validateTemplate })
-export const listTemplates = () => templateStore.list()
-export const findTemplate = (id) => templateStore.find(id)
-const saveTemplate = (input) => templateStore.save(input)
-const deleteTemplate = (id) => templateStore.deleteMany([id])
+const templateStores = new Map()
+async function templateStore() {
+  const directory = await policyDirectory()
+  if (!templateStores.has(directory)) {
+    templateStores.set(directory, createTemplateStore({ directory, builtins: BUILTIN_TEMPLATES, legacy: LEGACY_TEMPLATES, validate: validateTemplate }))
+  }
+  return templateStores.get(directory)
+}
+export const listTemplates = async () => (await templateStore()).list()
+export const findTemplate = async (id) => (await templateStore()).find(id)
+const saveTemplate = async (input) => (await templateStore()).save(input)
+const deleteTemplate = async (id) => (await templateStore()).deleteMany([id])
 
 // ---- routes -----------------------------------------------------------------
 
@@ -562,7 +571,7 @@ export async function policyRoute(method, parts, input) {
   }
   if (area === 'profiles' && a === 'import') return importProfile(String(input.id ?? ''))
   if (area === 'templates' && !a) return saveTemplate(input)
-  if (area === 'templates' && a === 'delete' && !b) return templateStore.deleteMany(input.ids)
+  if (area === 'templates' && a === 'delete' && !b) return (await templateStore()).deleteMany(input.ids)
   if (area === 'templates' && a && b === 'delete') return deleteTemplate(a)
   return undefined
 }

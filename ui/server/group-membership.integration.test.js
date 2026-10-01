@@ -10,26 +10,24 @@ import { pathToFileURL } from 'node:url'
 test('multi-group memberships persist, compose and synchronize without losing other groups', async () => {
   const source = path.resolve(import.meta.dirname, '..')
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-memberships-'))
+  const keys = ['OPENSHELL_CONSOLE_DATA_DIR', 'OPENSHELL_GATEWAY', 'OPENSHELL_WORKSPACE']
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]))
+  Object.assign(process.env, { OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: 'membership-fixture', OPENSHELL_WORKSPACE: 'default' })
   try {
     for (const dir of ['server', 'shared', 'src']) await fs.cp(path.join(source, dir), path.join(root, dir), { recursive: true })
     await fs.copyFile(path.join(source, 'package.json'), path.join(root, 'package.json'))
     await fs.symlink(path.join(source, 'node_modules'), path.join(root, 'node_modules'), 'dir')
     const write = async (file, value) => {
-      const target = path.join(root, file)
+      const target = path.join(await policyDirectory(), file.replace(/^policies\//, ''))
       await fs.mkdir(path.dirname(target), { recursive: true })
       await fs.writeFile(target, JSON.stringify(value))
     }
-    for (const id of ['frontend', 'data', 'extra']) await write(`policies/org/groups/${id}.json`, { id, name: id })
-    const rule = (id, action = 'allow') => ({ id, name: id, action, destinations: ['example.com'], appliesTo: { groups: [id] } })
-    await write('policies/egress/frontend.json', rule('frontend'))
-    await write('policies/egress/data.json', rule('data', 'block'))
-    await write('policies/org/members.json', { web: 'frontend' })
     const gatewayPath = path.join(root, 'server/gateway.js')
     const gatewaySource = await fs.readFile(gatewayPath, 'utf8')
-    await fs.writeFile(gatewayPath, gatewaySource.replace('export async function gateway()', 'async function unusedLiveGateway()') + `
+    await fs.writeFile(gatewayPath, gatewaySource.replace('export async function gateway(', 'async function unusedLiveGateway(') + `
 export const membershipTestState = { updates: [], rules: {} }
 export async function gateway() {
-  return { client: { raw: {
+  return { workspaceScope: workspaceScope(), client: { raw: {
     async listSandboxes() { return { sandboxes: [
       { metadata: { name: 'web', labels: { 'openshell.console/group': 'frontend' } }, status: { phase: 2 } },
       { metadata: { name: 'etl', labels: { 'openshell.console/group': 'data' } }, status: { phase: 2 } },
@@ -48,6 +46,12 @@ export async function gateway() {
   } } }
 }
 `)
+    const { policyDirectory } = await import(pathToFileURL(path.join(root, 'server/paths.js')))
+    for (const id of ['frontend', 'data', 'extra']) await write(`policies/org/groups/${id}.json`, { id, name: id })
+    const rule = (id, action = 'allow') => ({ id, name: id, action, destinations: ['example.com'], appliesTo: { groups: [id] } })
+    await write('policies/egress/frontend.json', rule('frontend'))
+    await write('policies/egress/data.json', rule('data', 'block'))
+    await write('policies/org/members.json', { web: 'frontend' })
     const { orgRoute, planSandbox, readMembers } = await import(pathToFileURL(path.join(root, 'server/org.js')))
     const { membershipTestState: state } = await import(pathToFileURL(gatewayPath))
     const { groupsFromLabels } = await import(pathToFileURL(path.join(root, 'shared/group-membership.js')))
@@ -79,8 +83,21 @@ export async function gateway() {
     assert.ok(state.rules.etl.egress_shared)
     overview = await orgRoute('GET', ['org'])
     assert.deepEqual(overview.assignments.web, ['data', 'frontend', 'extra'])
+    // web and etl inherit only "data" and "shared". Deleting both at once must
+    // leave one: the second request has to see the first one's deletion.
+    const deletions = await Promise.allSettled(['data', 'shared'].map((id) => orgRoute('POST', ['egress', 'policies', id, 'delete'], {})))
+    assert.equal(deletions.filter((d) => d.status === 'fulfilled').length, 1)
+    assert.match(deletions.find((d) => d.status === 'rejected').reason.message, /last network rule/)
+    const kept = ['data', 'shared'][deletions.findIndex((d) => d.status === 'rejected')]
+    const { listPolicies } = await import(pathToFileURL(path.join(root, 'server/egress.js')))
+    assert.deepEqual((await listPolicies()).map((p) => p.id), [kept])
+    assert.deepEqual(Object.keys(state.rules.web), [`egress_${kept}`])
+    assert.deepEqual(Object.keys(state.rules.etl), [`egress_${kept}`])
     await write('policies/org/groups/frontend.json', { id: 'frontend', template: 'locked-down' })
     await write('policies/org/groups/data.json', { id: 'data', template: 'claude' })
     await assert.rejects(planSandbox({ groups: ['frontend', 'data'], requireGroup: true }), /different base policies/)
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } finally {
+    for (const key of keys) if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })

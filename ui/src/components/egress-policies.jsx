@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { RequestList, Segmented } from "@/components/rule-editor"
 import { groupFor } from "@/lib/groups"
 import { GroupPicker } from "@/components/group-picker"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/location-context"
 import { appliesTo as reaches } from "@/lib/egress"
 import { cn } from "@/lib/utils"
 
@@ -49,7 +49,7 @@ const isDefault = (a) => JSON.stringify({ ...DEFAULT_ADVANCED, ...a }) === JSON.
 function toForm(p) {
   const a = { ...DEFAULT_ADVANCED, ...(p?.advanced ?? {}) }
   return {
-    id: p?.id ?? "", name: p?.name ?? "", action: p?.action ?? "allow",
+    id: p?.id ?? "", name: p?.name ?? "", action: p?.action ?? "allow", setup: p?.setup ?? null,
     destinations: (p?.destinations ?? []).join("\n"),
     appliesTo: { everyone: false, groups: [], sandboxes: [], ...(p?.appliesTo ?? {}) },
     ports: a.ports.join(", "), programs: [...a.programs], requests: a.requests, allow: [...a.allow], deny: [...a.deny], enforcement: a.enforcement, privateIps: a.privateIps.join(", "),
@@ -59,6 +59,8 @@ function toForm(p) {
 function toPolicy(f, isNew) {
   return {
     id: isNew ? slug(f.name) : f.id, name: f.name.trim(), action: f.action, destinations: lines(f.destinations), appliesTo: f.appliesTo,
+    // An MCPs & Skills setup's own policy keeps its marker, so the setup still finds it.
+    ...(f.setup ? { setup: f.setup } : {}),
     ...(f.action === "allow" ? { advanced: {
       ports: split(f.ports).map(Number), programs: f.programs, requests: f.requests,
       allow: f.requests === "custom" ? f.allow.filter((r) => r.path) : [], deny: f.deny.filter((r) => r.path),
@@ -67,10 +69,12 @@ function toPolicy(f, isNew) {
   }
 }
 
+const setupName = (p) => p.setup?.name ?? "an MCPs & Skills setup"
+
 export function appliesToText(p, groups) {
   const to = p.appliesTo
   if (to.everyone) return "every sandbox"
-  const names = [...to.groups.map((id) => groups.find((g) => g.id === id)?.name ?? id), ...to.sandboxes]
+  const names = [...to.groups.map((id) => groups.find((g) => g.id === id)?.name ?? id), ...to.sandboxes, ...(to.setups?.length ? [`sandboxes using “${setupName(p)}”`] : [])]
   return names.length ? joinAnd(names) : null
 }
 
@@ -88,7 +92,8 @@ export function describePolicy(p, groups = []) {
   return `Allows ${requests}${except} to ${hosts || "…"} on port${a.ports.length === 1 ? "" : "s"} ${joinAnd(a.ports.map(String))}, ${programs}.${audit} ${scope}`
 }
 
-export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, knownPrograms = [], onSaved, onGroupCreated }) {
+export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, setupMembers = {}, knownPrograms = [], onSaved, onGroupCreated }) {
+  const api = useApi()
   const isNew = !initial?.id
   const [form, setForm] = React.useState(() => toForm(initial))
   // Groups made from this form, until the page reloads its list.
@@ -102,7 +107,9 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
   const setTo = (patch) => setForm((f) => ({ ...f, appliesTo: { ...f.appliesTo, ...patch } }))
-  const validGroup = !form.appliesTo.everyone && !form.appliesTo.sandboxes.length && form.appliesTo.groups.length > 0 && form.appliesTo.groups.every((id) => groups.some((g) => g.id === id))
+  // A setup's own policy reaches the sandboxes that use the setup; groups are optional there.
+  const forSetup = form.appliesTo.setups?.length > 0
+  const validGroup = !form.appliesTo.everyone && !form.appliesTo.sandboxes.length && (forSetup || form.appliesTo.groups.length > 0) && form.appliesTo.groups.every((id) => groups.some((g) => g.id === id))
   const policy = toPolicy(form, isNew)
   const addProgram = (path) => {
     const value = path.trim()
@@ -110,7 +117,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
     setProgram("")
   }
   const counts = Object.fromEntries(groups.map((g) => [g.id, sandboxes.filter((n) => groupFor({ assignments }, n).includes(g.id)).length]))
-  const reached = sandboxes.filter((n) => reaches(policy, { name: n, groups: groupFor({ assignments }, n) }))
+  const reached = sandboxes.filter((n) => reaches(policy, { name: n, groups: groupFor({ assignments }, n), setups: setupMembers[n] ?? [] }))
 
   async function submit(event) {
     event.preventDefault()
@@ -150,13 +157,14 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
           </div>
 
           <fieldset className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3">
-            <legend className="px-1 text-xs font-medium">Groups <span className="text-muted-foreground">· Required</span></legend>
-            <GroupPicker multiple required groups={groups} counts={counts} value={form.appliesTo.groups}
+            <legend className="px-1 text-xs font-medium">Groups <span className="text-muted-foreground">· {forSetup ? "Optional" : "Required"}</span></legend>
+            {forSetup && <p className="text-[11px] leading-relaxed text-muted-foreground">Applies to sandboxes that use the MCPs &amp; Skills setup{form.setup?.name ? <> “<span className="text-foreground">{form.setup.name}</span>”</> : ""}. Groups you pick here also get it.</p>}
+            <GroupPicker multiple required={!forSetup} groups={groups} counts={counts} value={form.appliesTo.groups}
               onChange={(ids) => setTo({ everyone: false, groups: ids, sandboxes: [] })}
               onCreated={(g) => { setCreated((c) => [...c, g]); onGroupCreated?.(g) }} />
-            <p className="text-[11px] leading-relaxed text-muted-foreground">Choose one or more groups. Every sandbox in the selected groups inherits this rule, including sandboxes created later.</p>
+            {!forSetup && <p className="text-[11px] leading-relaxed text-muted-foreground">Choose one or more groups. Every sandbox in the selected groups inherits this rule, including sandboxes created later.</p>}
             {reached.length > 0 && <p className="text-[11px] text-muted-foreground">{reached.length} {reached.length === 1 ? "sandbox" : "sandboxes"} currently in scope.</p>}
-            {(!isNew && (initial.appliesTo.everyone || initial.appliesTo.sandboxes.length || !initial.appliesTo.groups.length)) && <p className="text-[11px] text-amber-700">This rule uses a legacy scope. Choose its groups before saving; saving replaces the previous scope.</p>}
+            {(!isNew && !forSetup && (initial.appliesTo.everyone || initial.appliesTo.sandboxes.length || !initial.appliesTo.groups.length)) && <p className="text-[11px] text-amber-700">This rule uses a legacy scope. Choose its groups before saving; saving replaces the previous scope.</p>}
           </fieldset>
 
           <div className="grid gap-1.5">
@@ -234,7 +242,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
           <DialogFooter className="sm:justify-between">
             {!isNew ? (
               confirmDelete
-                ? <Button type="button" variant="destructive" disabled={busy} onClick={remove}>Delete rule</Button>
+                ? <span className="grid gap-1.5">{form.setup && <span className="max-w-64 text-[11px] text-muted-foreground">Sandboxes that use “{form.setup.name}” lose access to these websites. Enabling the setup again asks you to approve them for each sandbox.</span>}<Button type="button" variant="destructive" disabled={busy} onClick={remove}>Delete rule</Button></span>
                 : <Button type="button" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(true)}>Delete</Button>
             ) : <span />}
             <span className="flex gap-2">
@@ -252,6 +260,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
 
 // The hosts blocked in every sandbox. They beat every rule.
 export function BlockedHostsDialog({ open, onOpenChange, org, onSaved }) {
+  const api = useApi()
   const [text, setText] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
