@@ -38,7 +38,8 @@ write_ssh_config() {
   # An Include below a Host block would only apply to that host, so it goes first
   if ! grep -qxF "$include_line" "$HOME/.ssh/config" 2>/dev/null; then
     [ -f "$HOME/.ssh/config" ] && cp "$HOME/.ssh/config" "$HOME/.ssh/config.bak-openshell"
-    { echo "# OpenShell sandboxes, added by openshell-workspace"; echo "$include_line"; echo; cat "$HOME/.ssh/config" 2>/dev/null; } > "$HOME/.ssh/config.tmp"
+    # A first run may have no config yet; an unreadable one still fails
+    { echo "# OpenShell sandboxes, added by openshell-workspace"; echo "$include_line"; echo; if [ -f "$HOME/.ssh/config" ]; then cat "$HOME/.ssh/config"; fi; } > "$HOME/.ssh/config.tmp"
     mv "$HOME/.ssh/config.tmp" "$HOME/.ssh/config"
     chmod 600 "$HOME/.ssh/config"
   fi
