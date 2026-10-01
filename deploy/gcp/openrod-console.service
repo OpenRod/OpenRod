@@ -1,5 +1,5 @@
 [Unit]
-Description=ShellOS customer console
+Description=OpenRod customer console
 After=network-online.target docker.service openrod-metadata-guard.service
 Wants=network-online.target
 Requires=docker.service openrod-metadata-guard.service

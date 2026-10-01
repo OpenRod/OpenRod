@@ -93,7 +93,7 @@ export function LocalComputeProvider({ children }) {
     if (status?.connected) return status
     if (pending.current) throw new Error('A cloud sign-in is already open.')
     const popup = window.open('about:blank', '_blank', 'popup,width=520,height=720')
-    if (!popup) throw new Error('Allow popups to connect your local ShellOS to cloud.')
+    if (!popup) throw new Error('Allow popups to connect your local OpenRod to cloud.')
     const attempt = createLocalSignInAttempt({ popup, origin: window.location.origin })
     // Ownership is synchronous: Cancel can stop even a delayed /start request.
     pending.current = attempt
@@ -131,7 +131,7 @@ export function LocalComputeProvider({ children }) {
   return <ComputeContext.Provider value={value}>
     {target === 'cloud' && !status?.connected ? <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
       <h1 className="text-2xl font-semibold">Connect your cloud workspace</h1>
-      <p className="mt-3 text-sm text-muted-foreground">Sign in with Google to control your private cloud machine from local ShellOS.</p>
+      <p className="mt-3 text-sm text-muted-foreground">Sign in with Google to control your private cloud machine from local OpenRod.</p>
       {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
       <button disabled={status === null || connecting} className="mt-6 rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground disabled:opacity-50" onClick={() => connect().catch(() => {})}>{status === null ? 'Checking connection…' : connecting ? 'Connecting…' : 'Continue with Google'}</button>
       <button className="mt-4 block w-full text-xs underline" onClick={() => { cancelConnect(); selectTarget('local') }}>Use local compute</button>

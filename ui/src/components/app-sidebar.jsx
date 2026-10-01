@@ -54,9 +54,12 @@ export function AppSidebar({ view, onNavigate }) {
       <SidebarHeader className="h-14 shrink-0 justify-center px-6 py-0">
         <div className="flex items-center gap-2">
           <span className="sidebar-icon-hover inline-flex shrink-0">
-            <img src="/openegg.png" alt="" aria-hidden="true" className="sidebar-icon size-9 object-contain" />
+            <img src="/openrod.png" alt="" aria-hidden="true" className="sidebar-icon size-9 object-contain" />
           </span>
-          <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">ShellOS</span>
+          <span className="flex flex-col leading-none">
+            <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">OpenRod</span>
+            <span className="mt-0.5 text-[10px] whitespace-nowrap text-muted-foreground">openshell-console</span>
+          </span>
         </div>
       </SidebarHeader>
 

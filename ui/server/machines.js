@@ -55,7 +55,7 @@ export function createMachineManager(store,compute,{ready=workerReady}={}) {
    try{
     const instance=await compute.get(record.name)
     if(!instance) {
-     if(record.everReady)throw fail('Your machine is missing. Contact your ShellOS administrator.')
+     if(record.everReady)throw fail('Your machine is missing. Contact your OpenRod administrator.')
      await compute.create(record)
      await store.update(identity.uid,{state:'provisioning',error:null})
     }else {
@@ -64,9 +64,9 @@ export function createMachineManager(store,compute,{ready=workerReady}={}) {
      if(address&&!/^10\.80\.0\.\d{1,3}$/.test(address))throw fail('Unexpected worker address')
      const isReady=instance.status==='RUNNING'&&address&&await ready(record,address)
      const stalled=!isReady && Date.now()-record.createdAt>30*60000
-     await store.update(identity.uid,{state:isReady?'ready':stalled?'error':'provisioning',address:address??null,everReady:Boolean(record.everReady||isReady),error:stalled?'Machine startup is taking longer than expected. Contact your ShellOS administrator.':null})
+     await store.update(identity.uid,{state:isReady?'ready':stalled?'error':'provisioning',address:address??null,everReady:Boolean(record.everReady||isReady),error:stalled?'Machine startup is taking longer than expected. Contact your OpenRod administrator.':null})
     }
-   }catch(error){await store.update(identity.uid,{state:'error',error:'Machine provisioning failed. Try again or contact your ShellOS administrator.'});console.error(JSON.stringify({event:'openrod.provision.failed',machine:record.name,error:error.message}));throw error}
+   }catch(error){await store.update(identity.uid,{state:'error',error:'Machine provisioning failed. Try again or contact your OpenRod administrator.'});console.error(JSON.stringify({event:'openrod.provision.failed',machine:record.name,error:error.message}));throw error}
    finally{await store.update(identity.uid,{leaseUntil:0})}
    const result=await store.get(identity.uid)
    if(result.state==='ready')readyCache.set(identity.uid,{record:result,until:Date.now()+30000})

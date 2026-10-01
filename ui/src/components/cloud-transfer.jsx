@@ -127,7 +127,7 @@ export function ContinueLocally({ name, sandbox }) {
     try {
       const destination = createApi('local', signal, destinationLocation.context)
       setStage('groups')
-      const groups = await chooseGroups(destination, 'local ShellOS', signal)
+      const groups = await chooseGroups(destination, 'local OpenRod', signal)
       setStage('transfer')
       const result = await copyCloudSandboxToLocal(createApi(api.target, signal, location?.context), destination, name, groups)
       signal.throwIfAborted()
@@ -152,14 +152,14 @@ export function ContinueLocally({ name, sandbox }) {
         setStage('connect')
       }}>
         {stage ? <Spinner className="size-3.5" /> : <Laptop className="size-3.5" aria-hidden="true" />}
-        {stage === 'connect' ? 'Connecting to local ShellOS…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Import and run locally'}
+        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Import and run locally'}
       </Button>
       <TooltipProvider delay={200}>
         <Tooltip>
           <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="What this does" className="text-muted-foreground" />}>
             <Info className="size-3.5" aria-hidden="true" />
           </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-60">{compute?.localViewer ? 'Creates a separate local sandbox, copies files and rebuilds the image for this computer. Your cloud source stays available.' : 'Open ShellOS on this computer first. Creates a local sandbox, copies files and rebuilds saved templates.'} Reconnect agents locally.</TooltipContent>
+          <TooltipContent side="bottom" className="max-w-60">{compute?.localViewer ? 'Creates a separate local sandbox, copies files and rebuilds the image for this computer. Your cloud source stays available.' : 'Open OpenRod on this computer first. Creates a local sandbox, copies files and rebuilds saved templates.'} Reconnect agents locally.</TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </div>

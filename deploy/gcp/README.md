@@ -1,6 +1,6 @@
-# ShellOS Cloud on GCP
+# OpenRod Cloud on GCP
 
-ShellOS local remains account-free on localhost. ShellOS Cloud accepts any enabled, verified Google account. There is no waitlist, email allowlist or manual membership approval. To revoke access, disable the account in Identity Platform; current-account checks run on every request and every minute for streams/terminals.
+OpenRod local remains account-free on localhost. OpenRod Cloud accepts any enabled, verified Google account. There is no waitlist, email allowlist or manual membership approval. To revoke access, disable the account in Identity Platform; current-account checks run on every request and every minute for streams/terminals.
 
 The existing `openrod-openrod-pilot` VM becomes the control plane at `https://cloud.example.com`. It holds Google session verification credentials, the Firestore machine registry and Compute provisioning permission. Customer workspace requests never reach its pilot gateway. Existing pilot files and gateway state are preserved, but are not copied automatically into users' new machines.
 
@@ -24,13 +24,13 @@ Firestore database `openrod-cloud`, in `us-east1`, stores `machines` owner/VM/le
 
 ## Local and cloud continuity
 
-Local ShellOS has a standalone **Sign in** action. Google authentication runs at `cloud.example.com`, returns the verified account to its originating local tab, focuses that tab and closes the authentication popup automatically. Sign-in does not change the compute target or allocate a VM. Authentication started in the cloud console stays in the console.
+Local OpenRod has a standalone **Sign in** action. Google authentication runs at `cloud.example.com`, returns the verified account to its originating local tab, focuses that tab and closes the authentication popup automatically. Sign-in does not change the compute target or allocate a VM. Authentication started in the cloud console stays in the console.
 
 **Build in cloud** offers new, existing and copied cloud workspaces. **Compute: Local / Cloud** controls which machine the local viewer operates. Terminal sessions and in-flight requests keep their original target; expired cloud access never falls back to local compute. The local backend holds a one-hour authorization in memory, so restarting it requires another sign-in. A second local sign-in for the same account replaces the prior local connection; console logout or account disablement revokes it.
 
 Native terminal, Cursor and VS Code actions use an authenticated SSH tunnel to the selected sandbox. Managed SSH aliases and verified public host keys are installed locally; gateway credentials stay on the private worker. No public worker SSH port or customer GCP credentials are needed.
 
-A ready local sandbox also exposes **Continue in cloud** for the console transfer flow. It signs in with Google, prepares the user's VM, and exchanges a five-minute single-use handoff ticket with the local page. The local backend sends workspace files to the cloud backend. A ready cloud sandbox exposes **Continue locally**, opening local ShellOS at `http://127.0.0.1:4600` and passing the same validated bundle through an origin/source/nonce-checked browser exchange.
+A ready local sandbox also exposes **Continue in cloud** for the console transfer flow. It signs in with Google, prepares the user's VM, and exchanges a five-minute single-use handoff ticket with the local page. The local backend sends workspace files to the cloud backend. A ready cloud sandbox exposes **Continue locally**, opening local OpenRod at `http://127.0.0.1:4600` and passing the same validated bundle through an origin/source/nonce-checked browser exchange.
 
 Transfers make a new uniquely named copy and leave the source untouched. They preserve regular files, executable bits, selected agent/shell session and portable saved image recipes. Recipes rebuild on the destination architecture rather than copying ARM/AMD images. Provider credentials and template environment values are omitted. Known credential files, private-key contents, symlinks, `.git`, `.openshell` Setup runtime state, installed dependencies and caches are excluded. These filters cannot identify every secret embedded in arbitrary source code or Docker recipes; review project contents before copying. Saved MCP/skill Setup references are omitted because destination Setup registries differ; reconnect these on the destination. Custom startup commands are replaced with a shell; reconnect credentials on the destination. Image-only local templates without a recipe fall back to Ubuntu and show a warning.
 
