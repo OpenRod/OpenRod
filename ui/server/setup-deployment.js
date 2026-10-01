@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { gateway, sandboxView, contextKey, contextSelection, runWithContext, workspaceName } from './gateway.js'
-import { setupStore, resolveSetups, usableSetup, SETUP_ID } from './setups.js'
+import { getSetupStore, resolveSetups, usableSetup, SETUP_ID } from './setups.js'
 import { fail, hash } from './setup-discovery.js'
 import { hostMatches } from '../src/lib/egress.js'
 import { readOrg, blockedBy, orgRoute, managedOpsFor, serializeOrgWrite, syncAll } from './org.js'
@@ -98,7 +98,7 @@ async function assertCurrentSandbox(plan) {
 }
 async function inspectTarget(name, id, targets, expected) {
   validateTargets(targets)
-  const snapshot = await setupStore.get(id)
+  const snapshot = await getSetupStore().get(id)
   const setup = usableSetup(snapshot)
   const inactive = snapshot.items.filter(i => !setup.items.some(a => a.id === i.id)).map(i => ({ name: i.name, issues: i.issues }))
   const { client, target, workspace, workspaceScope } = await gateway()
@@ -234,7 +234,7 @@ async function startInstall(name, ids, targets, expectedId, approvedRevisions, e
       let result
       try {
         if (!ready) throw fail('Sandbox is not ready. Retry from its Setups tab.')
-        if ((await setupStore.get(setup.id)).revision !== setup.revision) throw fail('Setup changed after creation. Review the updated version before enabling.')
+        if ((await getSetupStore().get(setup.id)).revision !== setup.revision) throw fail('Setup changed after creation. Review the updated version before enabling.')
         const preview = await deploymentRoute('POST', ['setups', setup.id, 'preview'], { sandbox: name, targets }, { expectedSandbox })
         if (!preview.canEnable) result = { status: 'blocked', error: [...preview.problems, ...preview.network.filter((r) => !ENABLEABLE.includes(r.status)).map((r) => `${r.host}: ${r.reason}`)].join(' ') }
         else result = await deploymentRoute('POST', ['setups', setup.id, 'enable'], { sandbox: name, token: preview.token, approveAccess: approvedRevisions[setup.id] === setup.revision }, { expectedSandbox })

@@ -2,13 +2,14 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { gateway, workspaceName, workspaceScope, contextSelection, runWithContext, sandboxView } from './gateway.js'
+import { scopedStateDirectory } from './paths.js'
 import { listPolicies, blockedByPolicy } from './egress.js'
 import { hostMatches } from '../src/lib/egress.js'
 import { planSandbox, readOrg, blockedBy } from './org.js'
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 const unavailable = message => Object.assign(fail(message, 503), { preparationUnavailable: true })
 
-export const ARTIFACT_DIR = path.resolve(import.meta.dirname, '../.state/setup-artifacts')
+const artifactDirectory = () => path.join(scopedStateDirectory(), 'setup-artifacts')
 // Official multi-platform Node 22 Bookworm image. Update the digest deliberately
 // so a floating tag cannot change the runtime behind a persistent cache entry.
 const BUILDER_IMAGE = 'node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c'
@@ -154,7 +155,7 @@ export function buildPackage(plan, options = {}) {
   return runWithContext(contextSelection(), () => buildInContext(plan, options))
 }
 
-async function buildInContext(plan, { signal, progress = async () => {}, dir = ARTIFACT_DIR, connect = gateway, fetcher = fetch, settle = 12000 } = {}) {
+async function buildInContext(plan, { signal, progress = async () => {}, dir = artifactDirectory(), connect = gateway, fetcher = fetch, settle = 12000 } = {}) {
   const org = await readOrg()
   if (blockedBy(org, ['registry.npmjs.org']) || blockedByPolicy(await listPolicies(), {name:'',group:null}, ['registry.npmjs.org'], hostMatches)) throw fail('Organization policy blocks the npm registry.', 403)
   await progress('Looking up the package on npm')
@@ -205,7 +206,7 @@ async function buildInContext(plan, { signal, progress = async () => {}, dir = A
   }finally{if(temporary)await fs.rm(temporary,{force:true});if(created)await client.sandbox.delete(name,{workspace}).catch(()=>{})}
 }
 
-export async function artifactFile(artifact, dir = ARTIFACT_DIR) {
+export async function artifactFile(artifact, dir = artifactDirectory()) {
   if(!/^[a-f0-9]{64}$/.test(artifact?.digest||''))throw fail('Invalid prepared artifact.')
   const file=path.join(dir,artifact.digest+'.tar.gz');const data=await fs.readFile(file)
   if(createHash('sha256').update(data).digest('hex')!==artifact.digest)throw fail('Prepared artifact integrity check failed.',409)

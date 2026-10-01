@@ -7,6 +7,7 @@ import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor
 import { IMAGE_TEMPLATE_NAME } from '../src/lib/sandbox-images.js'
 import { resolveSetups, usableSetup } from './setups.js'
 import { artifactFile } from './setup-packages.js'
+import { remoteImageEngine } from './remote-image-engine.js'
 import { gateway, resolveGateway, iso, contextKey, contextSelection, runWithContext, workspaceName, workspaceScope, listGateways, gatewayWorkspaces } from './gateway.js'
 
 // Image templates are OpenShell sandbox templates (`openshell sandbox template
@@ -59,26 +60,38 @@ function run(args, { job, engine, timeout = 30_000 } = {}) {
     })
   })
 }
-async function localEngine() {
-  const target = resolveGateway()
-  if (target.remote) throw fail('Image builds currently require a local gateway.')
-  const context = JSON.parse(await run(['context', 'inspect']))[0]
-  const endpoint = process.env.DOCKER_HOST || context?.Endpoints?.docker?.Host
-  if (!endpoint?.startsWith('unix://')) throw fail('Select a local Docker context to build images.')
-  const info = JSON.parse(await run(['info', '--format', '{{json .}}'], { engine: { endpoint } }))
-  if (info.OSType !== 'linux') throw fail('Linux containers are required.')
-  return { endpoint, architecture: info.Architecture === 'aarch64' ? 'arm64' : info.Architecture === 'x86_64' ? 'amd64' : info.Architecture }
+export async function localEngine({ execute = run } = {}) {
+  try {
+    const endpoint = process.env.DOCKER_HOST || JSON.parse(await execute(['context', 'inspect']))[0]?.Endpoints?.docker?.Host
+    if (!endpoint?.startsWith('unix://')) throw fail('Select a local Docker context with a Unix socket, then retry.')
+    const info = JSON.parse(await execute(['info', '--format', '{{json .}}'], { engine: { endpoint } }))
+    if (info.OSType !== 'linux') throw fail('Switch local Docker to Linux containers, then retry.')
+    return { endpoint, architecture: info.Architecture === 'aarch64' ? 'arm64' : info.Architecture === 'x86_64' ? 'amd64' : info.Architecture, engineId: info.ID }
+  } catch (e) {
+    throw fail(`Local Docker is required to build images. Install or start Docker on this computer and select a local Docker context. ${e.message}`)
+  }
 }
-async function inspect(reference, engine) {
-  const image = JSON.parse(await run(['image', 'inspect', reference], { engine }))[0]
+async function deploymentEngine(target) {
+  return target.remote ? remoteImageEngine(target, { execute: run }) : localEngine()
+}
+async function inspect(reference, engine, { execute = run, job, architecture = engine.architecture } = {}) {
+  const image = JSON.parse(await execute(['image', 'inspect', reference], { engine, job }))[0]
   if (image.Os !== 'linux') throw fail('Choose a Linux container image.')
-  if (image.Architecture !== engine.architecture) throw fail(`This image is ${image.Architecture}; the local engine uses ${engine.architecture}. Choose a matching image.`)
+  if (image.Architecture !== architecture) throw fail(`This image is ${image.Architecture}; the deployment engine uses ${architecture}. Choose a matching image.`)
+  return image
+}
+async function ensureImage(reference, engine, { execute, job }) {
+  try { return await inspect(reference, engine, { execute, job }) } catch (e) {
+    if (job.cancelled) throw fail('Operation cancelled.')
+    if (!/No such image:/i.test(e.message)) throw e
+    await execute(['pull', '--platform', `linux/${engine.architecture}`, reference], { engine, job, timeout: 30 * 60_000 })
+    return inspect(reference, engine, { execute, job })
+  }
 }
 
-export function buildImage(image, context, engine, job, execute = run, { networkNone = false } = {}) {
-  // Match the engine that will run this image, even when the operator's shell
-  // defaults Docker builds to a different platform or context.
-  return execute(['build', ...(networkNone ? ['--network=none'] : []), '--platform', `linux/${engine.architecture}`, '--progress=plain', '--tag', image, context], { engine, job, timeout: 30 * 60_000 })
+export function buildImage(image, context, engine, job, execute = run, { networkNone = false, architecture = engine.architecture } = {}) {
+  // Build locally for the deployment engine, regardless of shell defaults.
+  return execute(['build', ...(networkNone ? ['--network=none'] : []), '--platform', `linux/${architecture}`, '--progress=plain', '--tag', image, context], { engine, job, timeout: 30 * 60_000 })
 }
 
 export function templateView(t) {
@@ -112,19 +125,19 @@ export async function listImageTemplates() {
 
 // What New sandbox needs: the template name plus how the sandbox starts.
 export async function imageTemplateForLaunch(name) {
-  const { client, workspace } = await gateway()
+  const { client, target, workspace } = await gateway()
   let template
   try { template = templateView(await client.sandboxTemplates.get(checkName(name), { workspace })) } catch (e) { if (missing(e)) throw fail('Image template not found.', 404); throw e }
   if (template.image?.startsWith(BUILT_PREFIX)) {
-    const engine = await localEngine()
-    try { await inspect(template.image, engine) } catch { throw fail('This template’s image is no longer in local Docker. Rebuild the template before launching.') }
+    const engine = await deploymentEngine(target)
+    try { await inspect(template.image, engine) } catch { throw fail('This template’s image is unavailable or incompatible on the selected compute. Rebuild the template before launching.') }
   }
   return template
 }
 
 async function inventory() {
   try {
-    const engine = await localEngine()
+    const engine = await deploymentEngine(resolveGateway())
     const result = await run(['image', 'ls', '--format', '{{json .}}'], { engine })
     const images = result.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter((i) => i.Repository !== '<none>' && i.Tag !== '<none>' && !i.Repository.startsWith(BUILT_PREFIX)).map((i) => ({ reference: `${i.Repository}:${i.Tag}`, size: i.Size }))
     return { images }
@@ -154,54 +167,105 @@ async function start(input) {
   const replace = input.replace === true
   if (running(jobs.get(key))) throw fail('This template is already building.', 409)
   if ([...jobs.values()].filter(running).length >= 2) throw fail('Two image builds are already running. Wait for one to finish.', 409)
-  const { client, workspace } = await gateway()
+  const { client, target, workspace } = await gateway()
   let previous = null
   try { previous = await client.sandboxTemplates.get(name, { workspace }) } catch (e) { if (!missing(e)) throw e }
   if (previous && !replace) throw fail('A template with this name already exists. Pick another name.', 409)
   if (previous && !templateView(previous).managed) throw fail('This template was created outside the console. Edit it with the openshell CLI.', 409)
-  const engine = await localEngine()
+  const engine = await deploymentEngine(target)
+  const buildEngine = target.remote && (recipe.source === 'build' || setups.length) ? await localEngine() : engine
   const job = { name, scope: contextKey(), recipe, status: 'building', logs: '', error: null, cancelled: false, child: null, startedAt: new Date().toISOString() }
   jobs.set(key, job)
   void (async () => {
-    let temp
     try {
-      let image = recipe.image
-      if (recipe.source === 'build' || setups.length) {
-        temp = await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-image-'))
-        await fs.writeFile(path.join(temp, 'Dockerfile'), recipe.source === 'build' ? dockerfileFor(recipe) : `FROM ${recipe.image}\nCOPY --chown=1000:1000 setup-bundles/ /sandbox/.openshell/bundles/\n`)
-        if (setups.length) {
-          await fs.mkdir(path.join(temp, 'setup-bundles'), { mode: 0o700 })
-          for (const setup of setups) {
-            await fs.writeFile(path.join(temp, 'setup-bundles', setup.id + '.json'), JSON.stringify(setup), { mode: 0o600 })
-            for (const item of setup.items.filter(i => i.artifact)) { const { data } = await artifactFile(item.artifact); await fs.writeFile(path.join(temp, 'setup-bundles', item.artifact.digest + '.tar.gz'), data, { mode: 0o600 }) }
-          }
-        }
-        await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
-        image = `${BUILT_PREFIX}${name}:${randomUUID()}`
-        await buildImage(image, temp, engine, job, run, { networkNone: recipe.source === 'image' })
-      } else {
-        // OpenShell resolves the reference itself; check it once so a typo or
-        // the wrong CPU architecture fails here rather than at launch.
-        try { await run(['image', 'inspect', image], { engine }) } catch { await run(['pull', image], { job, engine, timeout: 30 * 60_000 }) }
-      }
-      await inspect(image, engine)
-      if (job.cancelled) throw fail('Operation cancelled.')
-      job.saving = true
-      try { await saveTemplate(client, workspace, recipe, image, previous) } catch (e) {
-        // Nothing points at an image whose template was never saved.
-        if (recipe.source === 'build' || setups.length) await run(['image', 'rm', image], { engine }).catch(() => {})
-        throw e
-      }
+      await publishImageTemplate({ recipe, setups, client, workspace, previous, target, engine, buildEngine, job })
       jobs.delete(key)
       // Other workspaces or gateways may still reference the previous Docker image.
-      // Keep published images; only the unpublished failed build above is disposable.
+      // Keep published images; removing a record must not remove a shared image.
     } catch (e) {
       job.status = 'failed'; job.error = e.message; job.saving = false
-    } finally {
-      if (temp) await fs.rm(temp, { recursive: true, force: true }).catch(() => {})
     }
   })()
   return jobView(job)
+}
+
+export async function publishImageTemplate({ recipe, setups = [], client, workspace, previous, target, engine, buildEngine = engine, job }, { execute = run } = {}) {
+  let temp
+  let baseTag
+  const generated = recipe.source === 'build' || setups.length > 0
+  const active = () => { if (job.cancelled) throw fail('Operation cancelled.') }
+  try {
+    active()
+    let image = recipe.image
+    if (generated) {
+      if (target.remote && (buildEngine.endpoint === engine.endpoint || (engine.engineId && buildEngine.engineId === engine.engineId))) throw fail('The selected Docker context points at the SSH host. Select a local Docker context to build this image, then retry.')
+      temp = await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-image-'))
+      let baseImage = recipe.image
+      if (target.remote && recipe.source === 'image') {
+        const base = await ensureImage(recipe.image, engine, { execute, job })
+        if (!base.Id) throw fail('Docker did not report the base image ID. Select the image again before rebuilding.')
+        const baseArchive = path.join(temp, 'base.tar')
+        active()
+        // Saving by ID omits user tags, so loading cannot overwrite a different
+        // local image with the same name as the selected remote image.
+        await execute(['save', '--output', baseArchive, base.Id], { engine, job, timeout: 30 * 60_000 })
+        active()
+        await execute(['load', '--input', baseArchive], { engine: buildEngine, job, timeout: 30 * 60_000 })
+        active()
+        const loaded = await inspect(base.Id, buildEngine, { execute, job, architecture: engine.architecture })
+        if (loaded.Id !== base.Id) throw fail('The base image loaded locally does not match the selected SSH host image. Retry the build.')
+        active()
+        baseTag = `${BUILT_PREFIX}${recipe.name}:base-${randomUUID()}`
+        await execute(['tag', base.Id, baseTag], { engine: buildEngine, job })
+        baseImage = baseTag
+        // The base archive must not become part of the Docker build context.
+        await fs.rm(baseArchive)
+      }
+      await fs.writeFile(path.join(temp, 'Dockerfile'), recipe.source === 'build' ? dockerfileFor(recipe) : `FROM ${baseImage}\nCOPY --chown=1000:1000 setup-bundles/ /sandbox/.openshell/bundles/\n`)
+      if (setups.length) {
+        await fs.mkdir(path.join(temp, 'setup-bundles'), { mode: 0o700 })
+        for (const setup of setups) {
+          await fs.writeFile(path.join(temp, 'setup-bundles', setup.id + '.json'), JSON.stringify(setup), { mode: 0o600 })
+          for (const item of setup.items.filter(i => i.artifact)) { const { data } = await artifactFile(item.artifact); await fs.writeFile(path.join(temp, 'setup-bundles', item.artifact.digest + '.tar.gz'), data, { mode: 0o600 }) }
+        }
+      }
+      await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
+      image = `${BUILT_PREFIX}${recipe.name}:${randomUUID()}`
+      active()
+      await buildImage(image, temp, buildEngine, job, execute, { networkNone: recipe.source === 'image', architecture: engine.architecture })
+      active()
+      const built = await inspect(image, buildEngine, { execute, job, architecture: engine.architecture })
+      if (target.remote) {
+        if (!built.Id) throw fail('Docker did not report the built image ID. Rebuild the template before transferring it.')
+        const archive = path.join(temp, 'image.tar')
+        active()
+        await execute(['save', '--output', archive, image], { engine: buildEngine, job, timeout: 30 * 60_000 })
+        active()
+        const info = JSON.parse(await execute(['info', '--format', '{{json .}}'], { engine, job }))
+        if (info.ID !== engine.engineId) throw fail('The SSH host’s Docker engine changed during the build. Reconnect the selected SSH host and retry.')
+        active()
+        await execute(['load', '--input', archive], { engine, job, timeout: 30 * 60_000 })
+        active()
+        const loaded = await inspect(image, engine, { execute, job })
+        if (loaded.Id !== built.Id) throw fail('The image loaded on the selected SSH host does not match the local build. Rebuild and transfer it again.')
+      }
+    } else {
+      // References are resolved on the deployment engine, not on local Docker.
+      await ensureImage(image, engine, { execute, job })
+    }
+    active()
+    job.saving = true
+    try { await saveTemplate(client, workspace, recipe, image, previous) } catch (e) {
+      // Only this build's unpublished local tag is disposable. Remote images
+      // may be shared with another gateway or workspace and are retained.
+      if (generated) await execute(['image', 'rm', '--', image], { engine: buildEngine }).catch(() => {})
+      throw e
+    }
+    return image
+  } finally {
+    if (baseTag) await execute(['image', 'rm', '--', baseTag], { engine: buildEngine }).catch(() => {})
+    if (temp) await fs.rm(temp, { recursive: true, force: true }).catch(() => {})
+  }
 }
 
 // OpenShell has no template update: replace means delete and recreate under

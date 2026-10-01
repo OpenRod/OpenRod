@@ -1,9 +1,7 @@
-import { useCloudMode } from "@/components/auth-gate"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import { Activity, Package, Box, DoorOpen, Layers3, Inbox, KeyRound, Network, Users } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { ConnectionPicker } from "@/components/connection-picker"
 
 import {
   Sidebar,
@@ -42,8 +40,7 @@ const CONNECTION = {
   "setup-required": { label: "Not connected", dot: "bg-muted-foreground" },
 }
 
-export function AppSidebar({ view, onNavigate, setupOpen, onSetupOpenChange }) {
-  const cloud = useCloudMode()
+export function AppSidebar({ view, onNavigate }) {
   const { connection, overview } = useLive()
   const state = CONNECTION[connection] ?? CONNECTION.connecting
   const gateway = overview?.gateway
@@ -102,7 +99,6 @@ export function AppSidebar({ view, onNavigate, setupOpen, onSetupOpenChange }) {
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <ThemeSwitcher />
-        {!cloud && <ConnectionPicker setupOpen={setupOpen} onSetupOpenChange={onSetupOpenChange} />}
         {/* The gateway is status, not a destination: its facts live here. */}
         <Popover>
           <PopoverTrigger className="flex w-full items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"

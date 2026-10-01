@@ -10,21 +10,29 @@ import { fail, publicItem, hash } from './setup-discovery.js'
 import { readOrg, blockedBy } from './org.js'
 import { listPolicies, blockedByPolicy } from './egress.js'
 import { hostMatches } from '../src/lib/egress.js'
+import { contextSelection, runWithContext } from './gateway.js'
+import { scopedStateDirectory } from './paths.js'
 
-const DIR=path.resolve(import.meta.dirname,'../.state/setup-preparations')
-const state=globalThis[Symbol.for('openshell.setup.preparation.v1')]??={jobs:new Map(),controllers:new Map()}
-const valid=(id)=>{if(!/^[a-f0-9-]{36}$/.test(id))throw fail('Unknown preparation.',404);return path.join(DIR,id+'.json')}
+const states=globalThis[Symbol.for('openshell.setup.preparation-contexts.v1')]??=new Map()
+function preparationState() {
+ const dir=path.join(scopedStateDirectory(),'setup-preparations')
+ let state=states.get(dir)
+ if(!state){state={jobs:new Map(),controllers:new Map()};states.set(dir,state)}
+ return state
+}
+const valid=(id)=>{if(!/^[a-f0-9-]{36}$/.test(id))throw fail('Unknown preparation.',404);return path.join(scopedStateDirectory(),'setup-preparations',id+'.json')}
 const publicJob=({preparedItems,...job})=>job
 // Prepared items can hold up to 64 MB of skill files and live only in memory; a restarted job is re-reviewed.
-const persist=async(job)=>{await fs.mkdir(DIR,{recursive:true,mode:0o700});const p=valid(job.id),tmp=p+'.'+randomUUID()+'.tmp';await fs.writeFile(tmp,JSON.stringify(publicJob(job)),{mode:0o600});await fs.rename(tmp,p)}
+const persist=async(job)=>{const p=valid(job.id),tmp=p+'.'+randomUUID()+'.tmp';await fs.mkdir(path.dirname(p),{recursive:true,mode:0o700});await fs.writeFile(tmp,JSON.stringify(publicJob(job)),{mode:0o600});await fs.rename(tmp,p)}
 export async function preparationStatus(id){
+ const state=preparationState()
  if(state.jobs.has(id))return publicJob(state.jobs.get(id))
  let job;try{job=JSON.parse(await fs.readFile(valid(id),'utf8'))}catch(e){if(e.code==='ENOENT')throw fail('Unknown preparation.',404);throw e}
  if((job.status==='complete'&&!job.setup)||job.status==='cancelled'){job.status='interrupted';job.message='The console restarted. Re-scan or prepare the saved Setup again; package artifacts and gateway credentials were retained.';delete job.review}
  if(job.status==='running'){delete job.current;return {...publicJob(job),status:'interrupted',message:'The console restarted. Review the selection again; completed package artifacts were retained.'}}
  return publicJob(job)
 }
-export async function cancelPreparation(id){const controller=state.controllers.get(id);if(controller)controller.abort();return {cancelled:!!controller}}
+export async function cancelPreparation(id){const controller=preparationState().controllers.get(id);if(controller)controller.abort();return {cancelled:!!controller}}
 export function runtimeRequirements(hosts){
  if(!Array.isArray(hosts)||hosts.length>20)throw fail('Add up to 20 exact runtime hosts.')
  return [...new Set(hosts.map(h=>String(h).trim()).filter(Boolean))].map(host=>{
@@ -68,6 +76,8 @@ export async function prepareLaunch(store, id, input) {
  return prepareImport(store,{token:review.token,approved:true},{source,packagesOnly:true})
 }
 export async function prepareImport(store,input,{source,packagesOnly=false}={}){
+ return runWithContext(contextSelection(),async()=>{
+ const state=preparationState()
  if(input.approved!==true)throw fail('Review and approve preparation and requested access first.')
  const preview=store.preview(input.token)
  if([...state.controllers.values()].length>=2)throw fail('Two imports are already preparing. Wait or cancel one.',429)
@@ -90,7 +100,8 @@ export async function prepareImport(store,input,{source,packagesOnly=false}={}){
  const id=randomUUID(),controller=new AbortController()
  const job={id,status:'running',createdAt:new Date().toISOString(),message:'Preparing selected tools',items:items.map(publicItem)}
  state.jobs.set(id,job);state.controllers.set(id,controller);await persist(job)
- void(async()=>{
+ const context=contextSelection()
+ void runWithContext(context,async()=>{
    const prepared=[]
    let startupFailure=null
    for(const original of items){
@@ -127,6 +138,7 @@ export async function prepareImport(store,input,{source,packagesOnly=false}={}){
    else{job.status='complete';job.message='Review the prepared items. Items needing attention remain inactive.';job.review=store.stage(prepared,preview.credentials)}
    await persist(job)
    // A finished job keeps only its public view; the staged review or snapshot holds the prepared items.
- })().catch(async(e)=>{job.status='failed';job.message=e?.status?e.message:'Preparation failed. Retry the import.';delete job.current;try{await persist(job)}catch{}}).finally(()=>{state.controllers.delete(id);delete job.preparedItems})
+ }).catch((e)=>runWithContext(context,async()=>{job.status='failed';job.message=e?.status?e.message:'Preparation failed. Retry the import.';delete job.current;try{await persist(job)}catch{}})).finally(()=>{state.controllers.delete(id);delete job.preparedItems})
  return publicJob(job)
+ })
 }

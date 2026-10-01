@@ -12,7 +12,7 @@ import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-image
 import { PROJECT_LABEL, templateSession, isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
-import { checkGateway, onboardingInfo } from './onboarding.js'
+import { createRemoteConnections } from './remote-gateway.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, createInGroups, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
@@ -370,6 +370,13 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     }
     return next
   }
+  const remoteConnections = security.config.mode === 'local' ? createRemoteConnections({
+    onSelected: activate,
+    onDeselected: () => {
+      if (active) { active.hub.contextChanged(); active.hub.stop(); active = null }
+    },
+    logger,
+  }) : null
   const start = () => { if (!closed && (security.config.mode !== 'local' || contextConfigured())) activate(initialContext) }
   const upgrade = async (req, socket, head) => {
     if (closed) { socket.destroy(); return }
@@ -394,7 +401,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     for (const socket of sockets) socket.destroy()
     stopSweeper?.()
     for (const runtime of runtimes.values()) { runtime.hub.stop(); runtime.stopOrgSweeper() }
-    const drain = [...pending, ...[...responses].filter((res) => !res.destroyed && !res.writableFinished)
+    const drain = [remoteConnections?.close(), ...pending, ...[...responses].filter((res) => !res.destroyed && !res.writableFinished)
       .map((res) => new Promise((resolve) => res.once('close', resolve)))]
     closing = Promise.allSettled(drain).then(() => {
       for (const runtime of runtimes.values()) { runtime.delivery.stop(); runtime.store.close() }
@@ -418,27 +425,41 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           const url = new URL(req.url, 'http://local')
           const parts = url.pathname.slice('/api/os'.length).split('/').filter(Boolean)
           assertCloudOperation(parts)
-          if (security.config.mode !== 'local' && (parts[0] === 'onboarding' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
+          if (security.config.mode !== 'local' && (parts[0] === 'connections' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
           const requestedContext = req.headers['x-openshell-context'] ?? url.searchParams.get('context')
-          if (requestedContext != null && requestedContext !== contextKey()) return send(res, 409, { error: 'Console context changed. Reload before continuing.' })
-          // Setup reads and probes must not create databases, start background
-          // jobs, or contact the CLI's active gateway on a fresh installation.
+          if (requestedContext != null && requestedContext !== contextKey() && !(req.method === 'GET' && parts[0] === 'connections')) return send(res, 409, { error: 'Console context changed. Reload before continuing.' })
+          // Connection discovery is available before any gateway is selected.
+          // Job reads remain available after that job changes the context.
+          if (parts[0] === 'connections') {
+            if (req.method === 'GET' && parts.length === 1) return send(res, 200, await remoteConnections.overview())
+            if (req.method === 'GET' && parts.length === 3 && parts[1] === 'jobs') return send(res, 200, remoteConnections.job(parts[2]))
+            if (req.method === 'POST' && parts.length === 4 && parts[1] === 'jobs' && parts[3] === 'package') {
+              if (req.headers.origin !== security.originFor(req) || req.headers['content-type'] !== 'application/octet-stream' || req.headers['x-openshell-console'] !== '1') return send(res, 403, { error: 'Request rejected' })
+              return send(res, 200, await remoteConnections.upload(parts[2], req))
+            }
+            if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
+            const input = await body(req)
+            if (parts.length === 2 && parts[1] === 'connect') return send(res, 200, remoteConnections.begin(input))
+            if (parts.length === 2 && parts[1] === 'disconnect') return send(res, 200, await remoteConnections.disconnect())
+            if (parts.length === 4 && parts[1] === 'jobs' && parts[3] === 'docker') return send(res, 200, remoteConnections.installDocker(parts[2], input.approve))
+            if (parts.length === 4 && parts[1] === 'jobs' && parts[3] === 'install') {
+              if (input.method !== 'download') throw fail('Choose remote download or upload a runtime package.')
+              return send(res, 200, remoteConnections.download(parts[2]))
+            }
+            return send(res, 404, { error: 'Not found' })
+          }
           if (req.method === 'GET' && parts.length === 1) {
             if (parts[0] === 'context') return send(res, 200, { ...await consoleContext(), ...(security.config.mode !== 'local' ? { configured: true } : {}) })
-            if (parts[0] === 'onboarding') return send(res, 200, onboardingInfo())
           }
           if (isMutation(req, security)) {
-            if (parts[0] === 'onboarding' && parts[1] === 'check' && parts.length === 2) {
-              const input = await body(req)
-              return send(res, 200, await checkGateway(input.gateway))
-            }
             if (parts[0] === 'context' && parts.length === 1) {
+              if (remoteConnections.changing()) throw fail('Wait for the connection operation before changing workspace.', 409)
               const result = await selectConsoleContext(await body(req))
               activate({ gateway: result.gateway, workspace: result.workspace })
               return send(res, 200, result)
             }
           }
-          if (security.config.mode === 'local' && !contextConfigured()) return send(res, 428, { error: 'Set up a connection and choose Use gateway before accessing sandboxes.', setupRequired: true })
+          if (security.config.mode === 'local' && !contextConfigured()) return send(res, 428, { error: 'Choose Local or an SSH host and connect before accessing sandboxes.', setupRequired: true })
           const { store, delivery, hub } = runtimeFor(contextSelection())
           if (req.method === 'GET') {
             if (parts[0] === 'stream') {

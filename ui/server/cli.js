@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util'
 
 const HELP = `Usage: openshell-console [--host 127.0.0.1] [--port 4600] [--open | --no-open]
 
-Serve the OpenShell Console locally using your existing OpenShell registrations.
+Serve the OpenShell Console locally for local sandboxes or configured SSH hosts.
 
   --host <host>  Loopback only: 127.0.0.1, localhost, or ::1
   --port <port>  HTTP port from 1 to 65535 (default: 4600)
@@ -20,7 +20,9 @@ Serve the OpenShell Console locally using your existing OpenShell registrations.
 
 Mutable data: OPENSHELL_CONSOLE_DATA_DIR, or
   $XDG_STATE_HOME/openshell-console (~/.local/state/openshell-console).
-Requires Node.js >=22.13.0 and a registered OpenShell gateway.
+Requires Node.js >=22.13.0. SSH hosts need local OpenSSH and OpenSSL,
+plus a running Docker Engine on the remote Linux host. A missing local
+gateway executable is downloaded and checksum-verified on supported platforms.
 `
 
 export function parseOptions(args = process.argv.slice(2)) {

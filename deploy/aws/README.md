@@ -1,6 +1,6 @@
 # Private AWS evaluation
 
-**Optional administrator-run evaluation, not the default getting-started path.** If you already have a gateway, use the [console connection guide](../../README.md#set-up-a-connection) instead. The console's **Set up connection** dialog does not deploy AWS/Kubernetes resources or run any commands on this page. An administrator creates this environment and sandbox and supplies approved access; the console user registers, checks, and explicitly activates the connection.
+**Archived administrator-run evaluation, not the normal connection flow.** The [console connection guide](../../README.md#set-up-a-connection) now uses SSH hosts and a second local gateway. The console does not deploy AWS/Kubernetes resources or run commands on this page. These existing evaluation files remain available for explicit administrator use.
 
 These files preserve the configuration used for the AWS SSH smoke: EKS 1.35, one `t3.large` AL2023 worker, VPC CNI network-policy enforcement, encrypted gp3 storage, Agent Sandbox 1.0.4, and OpenShell 0.1.2. They create billable resources in `eu-central-1`. This is a single-node evaluation, not a highly available production platform.
 
@@ -42,7 +42,7 @@ kubectl --context openshell-remote -n openshell port-forward \
   --address 127.0.0.1 svc/openshell 18080:8080
 ```
 
-If you already have this evaluation's valid `aws-eks` registration, skip registration and proceed to **Check connection** below. Do not overwrite an unrelated registration.
+If you already have this evaluation's valid `aws-eks` registration, skip registration and proceed to the environment-pinned console launch below. Do not overwrite an unrelated registration.
 
 The following administrator-run block reads the chart's client bundle once into a private temporary directory without printing secrets, installs it before registration, then restores that **same original bundle** afterward—even if the CLI exits unsuccessfully. It refuses an existing registration directory (including a symlink). Run it in another terminal with the same AWS profile:
 
@@ -91,7 +91,7 @@ PY
 
 The second copy is intentional: **OpenShell 0.1.2 registration was observed replacing the preinstalled bundle**. Do not omit restoration or disable TLS verification. A failed registration may leave a partial directory; inspect it rather than bypassing the guard. `--local` describes the tunnel endpoint, not where the workload executes. This step writes `metadata.json` and mode-0600 files in `gateways/aws-eks/mtls/` under `$XDG_CONFIG_HOME/openshell` (otherwise `~/.config/openshell`) and may change the CLI's active gateway. It does not select the console context. Non-loopback remote registrations use the administrator's existing CLI workflow, not this tunnel command or an invented `--mtls` flag.
 
-A console user without Kubernetes Secret access should receive the approved bundle from the administrator through a secure channel and use the [generic private-bundle registration procedure](../../README.md#register-a-new-gateway), not broaden their cluster privileges to run this extraction.
+A console user without Kubernetes Secret access should receive an approved registration from the administrator through a secure channel, not broaden their cluster privileges to run this extraction.
 
 ## Create and validate a sandbox
 
@@ -105,9 +105,9 @@ openshell --gateway aws-eks --workspace default sandbox create \
 kubectl --context openshell-remote -n openshell get pods
 ```
 
-Run the console using [the source or locally built tarball instructions](../../README.md#run-from-source) (Node 22.13+, OpenSSH for native SSH; no Docker required to connect). In **Set up connection**, choose `aws-eks`, click **Check connection**, and select the returned `default` workspace. The check reads local certificates and calls list-workspaces only: it does not save selection, start collection, or execute in the pod. If the tunnel is closed or AWS login has expired, restore it and retry the check.
+The simplified connection picker no longer contains Kubernetes registration/check steps. To inspect this existing evaluation explicitly, keep its tunnel running and launch the console with `OPENSHELL_GATEWAY=aws-eks OPENSHELL_WORKSPACE=default npm start` from `ui/`, after building it as described in [the source instructions](../../README.md#run-from-source). This environment-pinned mode activates immediately; it is not a read-only connection check. Restore the tunnel or cloud login if connectivity fails.
 
-Click **Use gateway** to activate. This saves `console-context.json`, starts activity collection, and enables automatic reconnect on later restarts. Existing configured delivery workers and service-close deadlines can resume; organization-policy sweeping stays off unless `OPENSHELL_CONSOLE_SWEEP=1`. Read the [persistent-effects summary](../../README.md#what-is-saved-and-what-runs).
+Activation starts activity collection. Existing configured delivery workers and service-close deadlines can resume; organization-policy sweeping stays off unless `OPENSHELL_CONSOLE_SWEEP=1`. Read the [persistent-effects summary](../../README.md#what-is-saved-and-what-runs).
 
 Open `aws-ssh-test` once it is **Ready**, then choose **SSH shell → Open SSH in terminal**. Run `hostname` and `pwd`; for this evaluation they should be `default--aws-ssh-test` and `/sandbox`. Exit normally and verify temporary SSH config cleanup; direct SSH does not write `~/.ssh/config`. The uncustomized Ubuntu image may lack a passwd entry for the runtime's UID 10001, producing `I have no name!` or `whoami` warnings. This does not indicate an SSH transport failure; use an image with the intended runtime identity for normal development.
 

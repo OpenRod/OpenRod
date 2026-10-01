@@ -1,10 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { packageLaunch, resolvePackage } from './setup-packages.js'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { artifactFile, packageLaunch, resolvePackage } from './setup-packages.js'
 import { normalizeMcp, publicItem } from './setup-discovery.js'
-import { runtimeRequirements, clearPreparationIssues } from './setup-preparation.js'
+import { runtimeRequirements, clearPreparationIssues, preparationStatus } from './setup-preparation.js'
 import { usableSetup } from './setups.js'
 import { oauthFetch, publicHTTPS } from './setup-http.js'
+import { runWithContext } from './gateway.js'
+import { scopedStateDirectory } from './paths.js'
 
 test('package adapter pins supported npx launchers and rejects shell, arbitrary URLs and secret args', async () => {
   const launch = packageLaunch('npx', ['-y', '@magicuidesign/mcp@latest'])
@@ -124,4 +130,39 @@ test('gateway execution failures halt preparation and cancellation stays cancell
   const controller=new AbortController();controller.abort()
   await assert.rejects(checkPreparationRegistry(client,'builder',controller.signal),error=>error===controller.signal.reason)
   await assert.rejects(installPackage(client,'builder',{},controller.signal),error=>error===controller.signal.reason)
+})
+
+test('preparation manifests and package artifacts are available only in their originating context', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'setup-preparation-scope-'))
+  const previous = process.env.OPENSHELL_CONSOLE_DATA_DIR
+  process.env.OPENSHELL_CONSOLE_DATA_DIR = root
+  t.after(async () => {
+    if (previous === undefined) delete process.env.OPENSHELL_CONSOLE_DATA_DIR
+    else process.env.OPENSHELL_CONSOLE_DATA_DIR = previous
+    await fs.rm(root, { recursive: true, force: true })
+  })
+  const origin = { gateway: 'preparation-origin', workspace: 'alpha' }
+  const others = [{ ...origin, workspace: 'beta' }, { ...origin, gateway: 'preparation-other' }]
+  const id = randomUUID(), data = Buffer.from('prepared package bytes')
+  const artifact = { digest: createHash('sha256').update(data).digest('hex') }
+  const job = { id, status: 'complete', setup: { id: 'saved-setup' }, items: [] }
+  await runWithContext(origin, async () => {
+    const dir = scopedStateDirectory()
+    await fs.mkdir(path.join(dir, 'setup-preparations'), { recursive: true })
+    await fs.mkdir(path.join(dir, 'setup-artifacts'), { recursive: true })
+    await fs.writeFile(path.join(dir, 'setup-preparations', id + '.json'), JSON.stringify(job))
+    await fs.writeFile(path.join(dir, 'setup-artifacts', artifact.digest + '.tar.gz'), data)
+    assert.deepEqual(await preparationStatus(id), job)
+    assert.deepEqual((await artifactFile(artifact)).data, data)
+  })
+  for (const context of others) {
+    await runWithContext(context, async () => {
+      await assert.rejects(preparationStatus(id), { status: 404 })
+      await assert.rejects(artifactFile(artifact), { code: 'ENOENT' })
+    })
+  }
+  await runWithContext(origin, async () => {
+    assert.deepEqual(await preparationStatus(id), job)
+    assert.deepEqual((await artifactFile(artifact)).data, data)
+  })
 })
