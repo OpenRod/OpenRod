@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowRight, Check, ChevronRight, Network, Plus, Search, ShieldCheck, ShieldOff, Trash2, Users, X } from "lucide-react"
+import { ArrowRight, Check, ChevronRight, Network, Plus, ShieldCheck, ShieldOff, Trash2, Users, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { Label } from "@/components/ui/label"
 import { GroupPicker } from "@/components/group-picker"
 import { Spinner } from "@/components/ui/spinner"
@@ -403,10 +404,7 @@ export function GroupsView({ onNavigate }) {
             {sandboxes.length - grouped > 0 && <span className="text-[11px] text-muted-foreground">· {sandboxes.length - grouped} not in a group</span>}
           </button>
           {showSandboxes && (
-            <div className="relative ml-auto w-full sm:w-56">
-              <Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search sandbox or group…" aria-label="Search sandboxes" className="h-9 pl-9 text-xs" />
-            </div>
+            <SearchInput value={query} onValueChange={setQuery} placeholder="Search sandbox or group…" aria-label="Search sandboxes" className="ml-auto w-full sm:w-56" />
           )}
         </div>
         {showSandboxes && <>

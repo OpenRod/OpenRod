@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, HardDrive, ListFilter, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, HardDrive, ListFilter, Plus, RefreshCw, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { createApi } from "@/lib/api"
 import { useCompute } from "@/lib/compute"
@@ -12,7 +12,7 @@ import { PlacementBadge, PlacementPill } from "@/components/placement-badge"
 import { PLACEMENTS, placementOf } from "@/lib/placement"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { BoxCountChart, bucketBoxes } from "@/components/box-count-chart"
 import { NumberTicker } from "@/components/ui/number-ticker"
@@ -282,10 +282,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
         {locations.filter((location) => !location.connected).map((location) => <LocationReconnect key={locationKey(location)} location={location} onReconnected={inventory.refresh} />)}
         {live.demo && <p className="border-b border-border px-6 py-2 text-xs text-amber-700">Preview · synthetic sandbox data</p>}
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
-          <div className="relative mr-auto w-full sm:w-64"><Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-            <Input ref={search} value={query} onChange={(e) => { setQuery(e.target.value) }} placeholder="Search name, owner, image…" aria-label="Search sandboxes" className="h-9 pl-9 pr-8 text-xs" />
-            {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
-          </div>
+          <SearchInput ref={search} value={query} onValueChange={setQuery} placeholder="Search name, owner, image…" aria-label="Search sandboxes" className="mr-auto w-full sm:w-64" />
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={inventory.refresh}><RefreshCw className="size-3.5" /></Button>
           <Button size="sm" disabled={!availableLocation && !canConnect} onClick={beginCreation} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
@@ -306,7 +303,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
             : <table aria-label="Sandboxes" aria-rowcount={ordered.length + 1} className="w-full min-w-[1040px] table-fixed border-separate border-spacing-0 text-xs">
               <colgroup><col style={{ width: 48 }} />{COLUMNS.map((column) => <col key={column.id} style={{ width: column.width }} />)}</colgroup>
               <thead className="sticky top-0 z-10 bg-muted"><tr aria-rowindex={1}>
-                <th scope="col" className="h-9 border-b border-border px-4"><SelectionCheckbox label="Select all matching sandboxes" checked={allMatchingSelected} mixed={matchingSelected > 0 && !allMatchingSelected} disabled={deleting || !selectable.length} onChange={toggleMatching} /></th>
+                <th scope="col" className="h-9 border-b border-border px-4 sm:pl-6"><SelectionCheckbox label="Select all matching sandboxes" checked={allMatchingSelected} mixed={matchingSelected > 0 && !allMatchingSelected} disabled={deleting || !selectable.length} onChange={toggleMatching} /></th>
                 {COLUMNS.map((column) => <th key={column.id} scope="col" aria-sort={sort.key === column.id ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="group/column h-9 border-b border-border px-4 text-left font-medium text-muted-foreground first:pl-6">
                   <div className="flex h-9 items-center gap-1">
                     <button onClick={() => setSort((current) => ({key: column.id, direction: current.key === column.id && current.direction === "asc" ? "desc" : "asc"}))} className="flex h-9 min-w-0 items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="truncate">{column.label}</span>{sort.key === column.id && (sort.direction === "asc" ? <ArrowUp className="size-3 shrink-0" /> : <ArrowDown className="size-3 shrink-0" />)}</button>
@@ -348,7 +345,7 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
   const disconnected = !sandbox.location?.connected
   const label = `${sandbox.name} at ${locationLabel(sandbox.location)}`
   return <tr aria-rowindex={index} aria-disabled={disconnected || undefined} onClick={() => { if (!disconnected) onOpen(sandbox) }} className={`group transition-colors ${disconnected ? "opacity-60" : "cursor-pointer hover:bg-muted/60 focus-within:bg-muted/60"} ${selected ? "bg-accent/40" : "bg-card"}`}>
-    <td className={cell} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${label}`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
+    <td className={`${cell} sm:pl-6`} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${label}`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
     <td className={`${cell} pl-6`}><button disabled={disconnected} aria-haspopup="dialog" aria-label={`Open ${label}`} onClick={(event) => { event.stopPropagation(); if (!disconnected) onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
     <td className={cell}><PlacementBadge location={sandbox.location} /></td>
     <td className={cell}><span className="flex items-center gap-1.5 whitespace-nowrap"><span className={`size-1.5 shrink-0 rounded-full ${styleOf(sandbox.phase).bar}`} />{PHASE_LABEL[sandbox.phase] ?? "Unknown"}</span></td>

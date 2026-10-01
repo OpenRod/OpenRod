@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowDown, ArrowUp, ArrowUpRight, CalendarClock, KeyRound, Link2, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpRight, CalendarClock, KeyRound, Link2, Plus, RefreshCw, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -250,7 +251,7 @@ function ScopedSecretsView() {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
-        <div className="relative mr-auto w-full sm:w-72"><Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" /><Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, sandbox, host…" aria-label="Search secrets" className="h-9 pl-9 pr-8 text-xs" />{query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}</div>
+        <SearchInput ref={search} value={query} onValueChange={setQuery} placeholder="Search name, sandbox, host…" aria-label="Search secrets" className="mr-auto w-full sm:w-72" />
         <select aria-label="Filter by service" value={service} onChange={(e) => setService(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs"><option value="">All services</option>{services.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
         <select aria-label="Filter by expiry" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="h-8 rounded-md border border-border bg-card px-2 text-xs"><option value="">Any expiry</option>{Object.entries(EXPIRY_LABEL).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
         {filtering && <Button variant="ghost" size="sm" onClick={clear}><X />Clear</Button>}

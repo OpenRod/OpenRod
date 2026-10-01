@@ -10,6 +10,7 @@ import { NumberTicker } from "@/components/ui/number-ticker"
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
 import { Notice } from "@/components/notice"
 import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -419,11 +420,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
         {total > enforced && <span className="flex-1 bg-amber-400/70" />}
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
-        <div className="relative mr-auto w-full sm:w-64">
-          <Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-          <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={view === "sandboxes" ? "Search sandbox…" : view === "rules" ? "Search rule, destination…" : "Search destination, sandbox, rule…"} aria-label="Search egress" className="h-9 pr-8 pl-9 text-xs" />
-          {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
-        </div>
+        <SearchInput ref={search} value={query} onValueChange={setQuery} placeholder={view === "sandboxes" ? "Search sandbox…" : view === "rules" ? "Search rule, destination…" : "Search destination, sandbox, rule…"} aria-label="Search egress" className="mr-auto w-full sm:w-64" />
         {view === "destinations" && <select aria-label="Filter by source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{sourceOptions.map((o) => <option key={o.id} value={o.id}>{o.id === "all" ? "All sources" : o.label}</option>)}</select>}
         {filtering && <Button variant="ghost" size="sm" onClick={clear}><X className="size-3" />Clear</Button>}
         {forSandbox && view === "rules" && <>
