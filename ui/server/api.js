@@ -7,9 +7,8 @@ import { createActivityDelivery } from './activity-delivery.js'
 import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
-import { execFile, spawn } from 'node:child_process'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { PROJECT_LABEL, SESSION_LABEL, templateSession, isSession, sessionCommand, sessionLaunch } from '../src/lib/sandbox-session.js'
+import { PROJECT_LABEL, templateSession, isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
 import { policyRoute } from './policy.js'
@@ -18,10 +17,10 @@ import { expose, ingressRoute, startSweeper } from './ingress.js'
 import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
 import { editorRoute } from './editor.js'
 import { terminalRoute, terminalUpgrade } from './terminal.js'
-import { macTerminalScript, terminalLaunchError } from './local-terminal.js'
 import { assertPackagesPrepared } from '../shared/setup-launch.js'
 import { setupRoute, resolveSetups } from './setups.js'
 import { deploymentRoute, startSetupInstall, launchSetupAccess, setupJobsForSandbox } from './setup-deployment.js'
+import { sshRoute } from './ssh.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
 
@@ -217,27 +216,6 @@ async function lifecycle(name, action) {
   return { ok: true }
 }
 
-// Open the attach command in a new window. The command is
-// rebuilt from the gateway's record, never taken from the browser.
-async function openTerminal(name) {
-  const { client } = await gateway()
-  const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
-  if (sandbox.phase !== 'ready' || !(sandbox.tty || sandbox.labels?.[SESSION_LABEL])) throw fail('This sandbox has no interactive session to open.', 409)
-  const command = sessionCommand(sandbox)
-  if (process.platform === 'darwin') {
-    await new Promise((resolve, reject) => execFile('osascript', ['-e', macTerminalScript(command)], { timeout: 15000 },
-      (error, stdout, stderr) => error ? reject(fail(terminalLaunchError(error, stderr), 502)) : resolve()))
-  } else if (process.platform === 'linux') {
-    // The emulator lives as long as the session, so detach instead of waiting.
-    await new Promise((resolve, reject) => {
-      const child = spawn('x-terminal-emulator', ['-e', 'sh', '-c', command], { detached: true, stdio: 'ignore' })
-      child.once('error', () => reject(fail('No terminal emulator found. Copy the command instead.', 501)))
-      child.once('spawn', () => { child.unref(); resolve() })
-    })
-  } else throw fail('Opening a terminal is supported on macOS and Linux only.', 501)
-  return { ok: true }
-}
-
 // ---- live stream ------------------------------------------------------------
 
 // One upstream watch per sandbox, shared by every open browser tab. The list
@@ -404,7 +382,7 @@ export function openshellApi() {
               return send(res, 200, store.query(options))
             }
             if (parts[0] === 'downloads' && parts.length === 2) return serveDownload(res, parts[1])
-            const routed = (await setupRoute('GET', parts)) ?? (await deploymentRoute('GET', parts)) ?? (await editorRoute('GET', parts)) ?? (await filesRoute('GET', parts, undefined, url)) ?? (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
+            const routed = (await sshRoute('GET', parts)) ?? (await setupRoute('GET', parts)) ?? (await deploymentRoute('GET', parts)) ?? (await editorRoute('GET', parts)) ?? (await filesRoute('GET', parts, undefined, url)) ?? (await imageTemplateRoute('GET', parts)) ?? (await ingressRoute('GET', parts)) ?? (await orgRoute('GET', parts)) ?? (await policyRoute('GET', parts))
             if (routed !== undefined) return send(res, 200, routed)
             return send(res, 404, { error: 'Not found' })
           }
@@ -429,11 +407,10 @@ export function openshellApi() {
             if (parts.length === 3) return send(res, 200, parts[2] === 'test' ? await delivery.test(parts[1]) : delivery.change(parts[1], parts[2]))
           }
           if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await createSandbox(input))
-          if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && parts[2] === 'terminal') return send(res, 200, await openTerminal(parts[1]))
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          const routed = (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await sshRoute('POST', parts, input)) ?? (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
         } catch (error) {

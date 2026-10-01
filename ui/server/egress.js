@@ -65,14 +65,14 @@ function validateAdvanced(input) {
 
 export function validatePolicy(input) {
   const name = String(input?.name ?? '').trim().slice(0, 80)
-  if (!name) throw fail('Give the policy a name.')
+  if (!name) throw fail('Give the rule a name.')
   const id = String(input?.id ?? '').trim()
-  if (!ID.test(id)) throw fail('Policy ids use lowercase letters, digits and dashes (up to 40).')
+  if (!ID.test(id)) throw fail('Rule ids use lowercase letters, digits and dashes (up to 40).')
   const action = input?.action === 'block' ? 'block' : input?.action === 'allow' ? 'allow' : null
   if (!action) throw fail('Choose allow or block.')
   const destinations = uniq(list(input.destinations).map((h) => String(h).trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))
   if (!destinations.length) throw fail('Add at least one destination.')
-  if (destinations.length > 200) throw fail('Too many destinations. Split them into several policies.')
+  if (destinations.length > 200) throw fail('Too many destinations. Split them into several rules.')
   for (const h of destinations) {
     if (h === '*' || h === '**') throw fail('"All destinations" needs OpenShell support that does not exist yet. List the hosts instead.')
     if (!HOST.test(h)) throw fail(`"${h}" is not a host (wildcards: *.example.com or **.example.com).`)
@@ -109,7 +109,7 @@ export async function writePolicy(policy) {
 }
 
 export async function removePolicy(id) {
-  if (!ID.test(String(id))) throw fail('Unknown policy.')
+  if (!ID.test(String(id))) throw fail('Unknown rule.')
   await fs.rm(path.join(DIR, `${id}.json`), { force: true })
 }
 

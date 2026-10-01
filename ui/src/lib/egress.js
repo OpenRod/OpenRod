@@ -1,5 +1,5 @@
-// Egress policy helpers shared by the server (server/egress.js, server/org.js)
-// and the Egress page, so coverage shown in the browser matches what the
+// Network rule helpers shared by the server (server/egress.js, server/org.js)
+// and the Network page, so coverage shown in the browser matches what the
 // server writes into each sandbox.
 
 // A policy reaches every sandbox, the sandboxes in its groups, or named ones.
