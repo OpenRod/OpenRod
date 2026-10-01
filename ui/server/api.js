@@ -12,7 +12,7 @@ import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { PROJECT_LABEL, templateSession, isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
+import { PROJECT_LABEL, templateSession, isSession, sessionLaunch, persistentTerminalPolicy, persistentGateway } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
 import { createRemoteConnections } from './remote-gateway.js'
@@ -178,7 +178,7 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
     labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels(), ...(seed?.project ? { [PROJECT_LABEL]: seed.project } : {}) }
     await enforcePolicyOnly(client)
     const spec = {
-      policy: plan.policy,
+      policy: persistentGateway(target) ? persistentTerminalPolicy(plan.policy) : plan.policy,
       labels,
       name,
       providers,
@@ -492,6 +492,15 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           }
           if (req.method === 'GET' && parts.length === 1 && parts[0] === 'inventory') return send(res, 200, await inventory.refresh())
           if (isMutation(req, security)) {
+            if (parts[0] === 'local-catalog' && parts.length === 1) {
+              if (!remoteConnections) throw fail('Local catalogs are available only through a local SSH console.', 403)
+              const snapshot = await remoteConnections.locationSnapshot()
+              if (snapshot.remote?.status !== 'connected' || snapshot.remote.gateway !== owner.gateway) throw fail('Connect the SSH destination before loading local settings.', 409)
+              const { syncLocalCatalog } = await import('./local-catalog.js')
+              const architecture = remoteConnections.architecture()
+              if (!architecture) throw fail('Reconnect the SSH destination before loading local settings.', 409)
+              return send(res, 200, await syncLocalCatalog(snapshot.returnContext, { architecture: architecture === 'amd64' ? 'x64' : 'arm64' }))
+            }
             if (parts[0] === 'context' && parts.length === 1) {
               if (remoteConnections.changing()) throw fail('Wait for the connection operation before changing workspace.', 409)
               const input = await body(req)

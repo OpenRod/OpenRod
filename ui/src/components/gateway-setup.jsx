@@ -140,7 +140,7 @@ export function GatewaySetup({ open, onOpenChange, initialMode = "local" }) {
     <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>Connect sandbox location</DialogTitle>
-        <DialogDescription>Use a local gateway or run sandboxes on an SSH host. The remote-work gateway is prepared automatically on this computer. Any existing local gateway stays untouched.</DialogDescription>
+        <DialogDescription>Use a local gateway or run sandboxes on an SSH host. A persistent gateway is prepared on the remote machine so work can continue while your computer sleeps.</DialogDescription>
       </DialogHeader>
       <div className="grid gap-4 text-xs">
         <div className="grid gap-1.5">
@@ -174,7 +174,7 @@ export function GatewaySetup({ open, onOpenChange, initialMode = "local" }) {
           <p>Requires a reachable Linux host and trusted key-based SSH access. Working Docker is reused; existing Docker must be accessible to the SSH user without an interactive password or sudo prompt. If Docker is missing on a supported Ubuntu or Debian host, you will be asked before it is installed. Other distributions require manual Docker setup.</p>
           <p>Run <code>ssh {selection || "my-host"}</code> once in your terminal to verify the host key and key-based login. SSH errors below are not retried automatically.</p>
           <p>Connect only to a trusted host. Docker access gives host-administrator authority; the remote supervisor receives credentials for the separate remote-work gateway, never your original gateway.</p>
-          <p>The local gateway executable is installed automatically if missing, using the checksum-verified OpenShell release. No sudo or changes to your existing gateway are needed.</p>
+          <p>The remote gateway uses the pinned OpenShell Docker image and stays running after disconnect. Python 3 is required on the SSH host. Your existing local gateway keeps its own settings.</p>
           {missingTools && <p role="alert" className="text-destructive">OpenSSH (ssh) is missing on this computer. Install it, then refresh.</p>}
         </div>}
         <Button type="button" variant="outline" size="sm" className="justify-self-start" disabled={Boolean(busy) || refreshing} onClick={() => setRevision((value) => value + 1)}>{refreshing ? "Reading connections…" : "Refresh hosts and status"}</Button>
@@ -201,7 +201,7 @@ export function GatewaySetup({ open, onOpenChange, initialMode = "local" }) {
           </>}
         </div>}
         {job?.status === "needs-install" && <div className="grid gap-3 rounded-md border p-3">
-          <p>Install the pinned OpenShell runtime images on <strong>{job.host}</strong>. This does not install a remote gateway.</p>
+          <p>Install the pinned OpenShell runtime images on <strong>{job.host}</strong>. The persistent gateway image is also required; include gateway:0.1.2 in offline packages.</p>
           <Button type="button" variant="outline" disabled={locked} onClick={() => run("download", () => api.installConnectionRuntime(job.id))}>{busy === "download" ? "Starting download…" : "Download on remote"}</Button>
           <p className="text-muted-foreground">Or upload a trusted <code>docker save</code> .tar archive containing the required runtime images for this host’s architecture and pinned version. The archive is streamed to the remote Docker engine.</p>
           <Label htmlFor={`${prefix}-package`}>Docker-save package (.tar)</Label>
@@ -217,10 +217,10 @@ export function GatewaySetup({ open, onOpenChange, initialMode = "local" }) {
         {connections?.active && <div className="grid gap-2 rounded-md border p-3">
           <p>Remote connection: <strong>{connections.active.host}</strong> — {connections.active.status}</p>
           {connections.active.error && <p role="alert" className="whitespace-pre-wrap break-words text-destructive">{connections.active.error}</p>}
-          <Button type="button" variant="outline" size="sm" disabled={locked} onClick={disconnect}>Disconnect remote gateway</Button>
-          <p className="text-muted-foreground">Stops its local gateway process and SSH tunnels, not remote workloads or saved state.</p>
+          <Button type="button" variant="outline" size="sm" disabled={locked} onClick={disconnect}>Disconnect from remote</Button>
+          <p className="text-muted-foreground">Closes your SSH tunnels. The remote gateway and persistent agent sessions keep running.</p>
         </div>}
-        <p className="text-muted-foreground">Closing the console server disconnects the remote gateway. Closing this dialog does not disconnect it. Connecting selects the gateway and reloads the console.</p>
+        <p className="text-muted-foreground">Closing the console or putting your computer to sleep disconnects your viewer. Remote work keeps running. Reconnect to the same host to reattach.</p>
       </div>
       <DialogFooter>
         <Button type="button" variant="ghost" disabled={Boolean(busy)} onClick={() => onOpenChange(false)}>Close</Button>

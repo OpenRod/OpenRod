@@ -68,7 +68,7 @@ function terminalFromLocation() {
   if (!match) return null
   const params = new URLSearchParams(match[2] ?? "")
   const gateway = params.get("gateway"), workspace = params.get("workspace")
-  const location = gateway && workspace ? { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, target: new URLSearchParams(window.location.search).get("target") ?? undefined } : null
+  const location = gateway && workspace ? { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, remote: params.get('remote') === '1', target: new URLSearchParams(window.location.search).get("target") ?? undefined } : null
   return { name: match[1], session: params.get("session") || undefined, setupLogin: params.get("setupLogin") || undefined, mcp: params.get("mcp") || undefined, location }
 }
 
@@ -97,16 +97,16 @@ function ConnectionGate({ onSetup, children }) {
     <section aria-labelledby="setup-heading" className="mx-auto my-12 w-full max-w-2xl space-y-6 px-6">
       <div className="space-y-2">
         <h2 id="setup-heading" className="text-2xl font-semibold">Choose where to run your sandboxes</h2>
-        <p className="text-sm text-muted-foreground">Use your existing local gateway, or connect a remote Linux Docker host through an alias in your local SSH configuration. Both gateways run on this computer; your existing local gateway stays untouched.</p>
+        <p className="text-sm text-muted-foreground">Use your existing local gateway, or connect a remote Linux Docker host through an alias in your local SSH configuration. The remote gateway runs on the SSH host so work can continue while your computer sleeps.</p>
       </div>
       <ol className="list-decimal space-y-3 pl-5 text-sm">
         <li>Choose a local gateway or a concrete Host alias from <code>~/.ssh/config</code>.</li>
         <li>For a remote host, verify trusted key-based SSH access and a running Linux Docker engine. The console checks the required OpenShell runtime images.</li>
-        <li>Missing OpenShell runtime images download automatically, or choose Upload package to provide a Docker-save archive. Docker must already be running; no gateway is installed remotely.</li>
+        <li>Missing OpenShell runtime images download automatically, or choose Upload package to provide a Docker-save archive. The persistent gateway is installed on the remote host.</li>
         <li>Create a sandbox, or choose a ready sandbox and <strong>Open SSH in terminal</strong>.</li>
       </ol>
       <Button onClick={onSetup}><Monitor aria-hidden="true" className="size-4" />Connect machine</Button>
-      <p className="text-xs text-muted-foreground">Connecting selects the gateway and reloads the console. Closing the console server disconnects the remote gateway and SSH tunnels; remote workloads and state are not deleted.</p>
+      <p className="text-xs text-muted-foreground">Connecting selects the gateway and reloads the console. Closing the console server disconnects your viewer. The remote gateway and persistent agent sessions keep running.</p>
     </section>
   )
 }

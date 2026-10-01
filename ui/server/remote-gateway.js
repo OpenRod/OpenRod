@@ -14,6 +14,7 @@ import { fail, findExecutable, runCli, sshBinary } from './openshell-cli.js'
 import { listSshHosts, probeHost, installDocker as installHostDocker, installRuntime, sshArgs } from './remote-hosts.js'
 import { prepareGatewayState, registerManagedGateway } from './remote-gateway-state.js'
 import { ensureGateway } from './gateway-install.js'
+import { startRemoteRuntime } from './remote-runtime.js'
 
 const PACKAGE_LIMIT = 4 * 1024 ** 3
 const localGateways = () => listGateways().filter(target => target.name !== 'aws-eks' && target.supported && !target.remote && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(target.endpoint).hostname))
@@ -169,8 +170,8 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     const directory = temporary, release = unlock
     temporary = null; unlock = null
     if (active) active.status = 'disconnected'
-    // Stop the gateway before closing its transport to avoid reconciliation
-    // against an unavailable Docker engine.
+    // Only local transports are owned here. The remote Docker gateway and
+    // workloads deliberately survive console shutdown and workstation sleep.
     for (const child of stopping.reverse()) await child.stop()
     if (directory) await fs.rm(directory, { recursive: true, force: true })
     if (release) await release()
@@ -204,26 +205,25 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
   }
   async function startGateway(value) {
     checkOpen()
-    value.stage = 'Starting the local remote-work gateway'
+    value.stage = 'Starting the persistent gateway on the SSH host'
     await stopRemote()
     unlock = await acquireLock()
     try {
       temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'os-ssh-'))
       const socket = path.join(temporary, 'docker.sock')
       const state = await prepareGatewayState(value.host, value.probe, socket)
-      active = { host: value.host, gateway: state.name, status: 'connecting', error: null }
+      active = { host: value.host, gateway: state.name, architecture: value.probe.arch, status: 'connecting', error: null }
+      await startRemoteRuntime(value.host, value.probe, state, { signal, download: value.runtimeInstallation !== 'upload' })
       const args = sshArgs(value.host)
-      args.splice(args.length - 2, 0, '-N', '-o', 'ExitOnForwardFailure=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'StreamLocalBindMask=0177', '-L', `${socket}:${value.probe.dockerSocket}`, '-R', `127.0.0.1:${state.port}:127.0.0.1:${state.port}`)
+      args.splice(args.length - 2, 0, '-N', '-o', 'ExitOnForwardFailure=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'StreamLocalBindMask=0177', '-L', `${socket}:${value.probe.dockerSocket}`, '-L', `127.0.0.1:${state.port}:127.0.0.1:${state.port}`)
       const tunnel = ownedProcess(sshBinary(), args, process.env, exited)
       processes.push(tunnel)
       await waitReady(() => pingDocker(socket), [tunnel], signal, 'The SSH Docker tunnel did not become ready')
       signal.throwIfAborted()
-      const daemon = ownedProcess(gatewayExecutable, ['--config', state.configFile], state.env, exited)
-      processes.push(daemon)
       await registerManagedGateway(state, value.host)
-      await waitReady(() => gatewayWorkspaces(state.name), [tunnel, daemon], signal, 'The local remote-work gateway did not become ready')
+      await waitReady(() => gatewayWorkspaces(state.name), [tunnel], signal, 'The remote gateway did not become ready')
       await select(state.name)
-      tunnel.check(); daemon.check()
+      tunnel.check()
       active.status = 'connected'
       lastRemote = { host: active.host, gateway: active.gateway, workspace: active.workspace, status: 'disconnected', error: null }
       await saveHistory()
@@ -309,6 +309,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
       return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')) } }
     },
     changing: () => disconnecting || job?.status === 'working',
+    architecture: () => active?.status === 'connected' ? active.architecture : null,
     begin,
     job: id => view(getJob(id)),
     installDocker(id, approve) {
