@@ -32,7 +32,6 @@ export function LocalReturn({children}) {
  },[state])
  if(state==='normal'||state==='done')return <>{message&&<Notice id="local-return" tone={state==='done'?'success':'warning'} title={state==='done'?'Workspace continued locally':'Workspace copy didn’t finish'} onDismiss={()=>setMessage('')}>{message}</Notice>}{children}</>
  return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-md text-center">
-  <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10"/>
   <h1 className="text-2xl font-semibold">Continuing your workspace locally…</h1>
   <p className="mt-3 text-sm text-muted-foreground">Keep the cloud tab open while your files are copied and your template is rebuilt for this computer.</p>
   {message&&<p role="alert" className="mt-4 text-sm text-destructive">{message}</p>}

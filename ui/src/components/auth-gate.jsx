@@ -64,17 +64,16 @@ export function AuthGate({ children }) {
     try { await authRequest('logout', {}) } catch (e) { setError(e.message) }
     finally { setUser(null) }
   }
-  if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading OpenRod…</div>
+  if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading ShellOS…</div>
   if (config?.mode === 'local') return <LocalReturn>{children}</LocalReturn>
   if (user) return <AuthContext.Provider value={{ user, logout }}><CloudMachine key={user.uid} logout={logout}>{children}</CloudMachine></AuthContext.Provider>
   return <main className="grid min-h-screen place-items-center bg-background px-6">
     <section className="w-full max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
-      <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10" />
       <h1 className="text-2xl font-semibold tracking-tight">Your workspace, in the cloud.</h1>
       <p className="mt-3 text-sm text-muted-foreground">Sign in or create your account with Google. Your workspace runs on your own private machine.</p>
       {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
       <button disabled={busy || !config} onClick={login} className="mt-6 w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? 'Signing in…' : 'Continue with Google'}</button>
-      <p className="mt-5 text-xs text-muted-foreground">Running OpenRod locally? No account required.</p>
+      <p className="mt-5 text-xs text-muted-foreground">Running ShellOS locally? No account required.</p>
     </section>
   </main>
 }

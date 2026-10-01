@@ -57,7 +57,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const port = Number(process.env.OPENROD_PORT ?? 4600)
     if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('OPENROD_PORT must be between 1024 and 65535')
     const address = process.env.OPENROD_MODE === 'worker' ? '0.0.0.0' : '127.0.0.1'
-    server.listen(port, address, () => console.info(`OpenRod ${process.env.OPENROD_MODE ?? 'local'} console listening on ${address}:${port}`))
+    server.listen(port, address, () => console.info(`ShellOS ${process.env.OPENROD_MODE ?? 'local'} console listening on ${address}:${port}`))
     for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { server.closeAllConnections(); server.close(() => process.exit(0)); setTimeout(() => process.exit(1), 5000).unref() })
   } catch (error) { console.error(error.message); process.exitCode = 1 }
 }

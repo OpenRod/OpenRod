@@ -51,7 +51,7 @@ export function createSecurity(config, auth, revocations = { has: () => false, a
   const member = async decoded => {
     const user = await auth.getUser(decoded.uid)
     const claims = user.customClaims ?? {}
-    if (user.disabled || !user.emailVerified || !user.providerData?.some(p => p.providerId === 'google.com')) throw fail('Sign in with a verified Google account. Disabled accounts cannot access OpenRod Cloud.', 403)
+    if (user.disabled || !user.emailVerified || !user.providerData?.some(p => p.providerId === 'google.com')) throw fail('Sign in with a verified Google account. Disabled accounts cannot access ShellOS Cloud.', 403)
     return { uid: user.uid, email: user.email, org: config.org, role: claims.openrod_org === config.org && claims.openrod_role === 'admin' ? 'admin' : 'member', expires: decoded.exp * 1000 }
   }
   const authenticate = async req => {
@@ -63,7 +63,7 @@ export function createSecurity(config, auth, revocations = { has: () => false, a
       return identity
     }
     const cookie = cookieOf(req)
-    if (!cookie || cookie.length > 10000 || revocations.has(cookie)) throw fail('Sign in to OpenRod Cloud', 401)
+    if (!cookie || cookie.length > 10000 || revocations.has(cookie)) throw fail('Sign in to ShellOS Cloud', 401)
     let decoded
     try { decoded = await auth.verifySessionCookie(cookie, true) } catch { throw fail('Session expired. Sign in again.', 401) }
     const identity = await member(decoded)
@@ -134,5 +134,5 @@ export function createSecurity(config, auth, revocations = { has: () => false, a
 }
 export function assertCloudOperation(parts, input = {}) {
   if (!identityContext.getStore()) return
-  if (parts[0] === 'local-folder' || parts[0] === 'editors' || (parts[0] === 'sandboxes' && ['editor', 'terminal'].includes(parts[2])) || (parts[0] === 'sandboxes' && parts.length === 1 && input?.folder)) throw fail('Host-local actions are unavailable in OpenRod Cloud. Use the browser terminal or upload files.', 403)
+  if (parts[0] === 'local-folder' || parts[0] === 'editors' || (parts[0] === 'sandboxes' && ['editor', 'terminal'].includes(parts[2])) || (parts[0] === 'sandboxes' && parts.length === 1 && input?.folder)) throw fail('Host-local actions are unavailable in ShellOS Cloud. Use the browser terminal or upload files.', 403)
 }
