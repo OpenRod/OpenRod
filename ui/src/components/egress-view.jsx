@@ -20,7 +20,7 @@ import {
 import { RuleEditor } from "@/components/rule-editor"
 import { BlockedHostsDialog, PolicyDialog, appliesTo, appliesToText, blockPatterns, newPolicy } from "@/components/egress-policies"
 import { HostTile } from "@/components/perimeter"
-import { api } from "@/lib/api"
+import { useApi, useLocation } from "@/lib/location-context"
 import { deleteNetworkPolicies } from "@/lib/delete-network-policies"
 import { useLive } from "@/lib/live"
 import { relativeTime, absoluteTime } from "@/lib/format"
@@ -271,6 +271,7 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMember
 }
 
 function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
+  const api = useApi()
   const [selected, setSelected] = React.useState(() => new Set())
   const [deleteTargets, setDeleteTargets] = React.useState(null)
   const [deleting, setDeleting] = React.useState(false)
@@ -643,12 +644,13 @@ function RevisionDots({ revisions, onOpen }) {
 }
 
 function RevisionSheet({ sandbox, version, latest, onClose, onRestore }) {
+  const api = useApi()
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
     setData(null)
     if (version == null) return
     api.revision(sandbox, version).then(setData).catch((e) => setData({ error: e.message }))
-  }, [sandbox, version])
+  }, [sandbox, version, api])
   return (
     <Sheet open={version != null} onOpenChange={(open) => { if (!open) onClose() }}>
       <SheetContent className="w-full! overflow-y-auto sm:max-w-[460px]!">
@@ -679,9 +681,10 @@ function BackLink({ onClick }) {
 }
 
 function GlobalPanel({ onBack }) {
+  const api = useApi()
   const [data, setData] = React.useState(null)
   const [confirm, setConfirm] = React.useState(false)
-  const load = React.useCallback(() => api.globalPolicy().then(setData).catch((e) => setData({ error: e.message })), [])
+  const load = React.useCallback(() => api.globalPolicy().then(setData).catch((e) => setData({ error: e.message })), [api])
   React.useEffect(() => { load() }, [load])
   return (
     <div className="space-y-6 px-4 py-5 sm:px-6">
@@ -729,6 +732,8 @@ function GlobalPanel({ onBack }) {
 const FILTERS = [{ id: "all", label: "All" }, ...SOURCE_ORDER.map((s) => ({ id: s, label: SOURCE[s].label }))]
 
 function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, onOpenGlobal, reloadSignal }) {
+  const api = useApi()
+  const location = useLocation()
   const [policy, setPolicy] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [deleting, setDeleting] = React.useState(null)
@@ -737,7 +742,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onE
 
   const load = React.useCallback(async () => {
     try { const p = await api.policy(name); setPolicy(p); return p } catch (e) { setPolicy({ error: e.message }) }
-  }, [name])
+  }, [name, api])
   React.useEffect(() => { setPolicy(null); load() }, [load])
   React.useEffect(() => { if (reloadSignal) load() }, [reloadSignal]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -813,7 +818,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onE
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" className="rounded-lg" onClick={() => { try { sessionStorage.setItem("gateway-box", name) } catch { /* optional */ } onNavigate("sandboxes") }}>
+              <Button variant="outline" className="rounded-lg" onClick={() => { try { sessionStorage.setItem("gateway-box", location ? JSON.stringify({ name, location }) : name) } catch { /* optional */ } onNavigate("sandboxes") }}>
                 <Network />View sandbox
               </Button>
               <Button className="rounded-lg bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" disabled={busy || globalActive} onClick={() => onDraft(null, follow)}>
@@ -913,7 +918,15 @@ const takePolicyHandoff = () => {
   try { const d = JSON.parse(sessionStorage.getItem(POLICY_HANDOFF) ?? "null"); sessionStorage.removeItem(POLICY_HANDOFF); return d } catch { return null }
 }
 
-export function EgressView({ onNavigate }) {
+export function EgressView(props) {
+  const location = useLocation()
+  return <ScopedEgressView key={location?.context ?? "default"} {...props} />
+}
+
+function ScopedEgressView({ onNavigate: navigate }) {
+  const api = useApi()
+  const location = useLocation()
+  const onNavigate = (view) => navigate(view, location)
   const live = useLive()
   const [scope, setScope] = React.useState(null)
   const [showGlobal, setShowGlobal] = React.useState(false)
@@ -933,7 +946,7 @@ export function EgressView({ onNavigate }) {
   const loadFleet = React.useCallback(async () => {
     try { setFleet(await api.fleetPolicy()) } catch (e) { setFleet({ error: e.message, sandboxes: [] }) }
     try { setOrg(await api.org()) } catch { setOrg(null) }
-  }, [])
+  }, [api])
   React.useEffect(() => { loadFleet() }, [loadFleet])
 
   // The Groups page hands over a rule to add for a group, or one to edit.

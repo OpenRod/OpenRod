@@ -35,6 +35,7 @@ export const contextConfigured = () => configured
 
 const requestContext = new AsyncLocalStorage()
 export const contextSelection = () => ({ ...(requestContext.getStore() ?? selected) })
+export const defaultContextSelection = () => ({ ...selected })
 export const contextKey = (context = contextSelection()) => JSON.stringify([context.gateway ?? context.target?.name, context.workspace])
 export const runWithContext = (context, task) => requestContext.run(Object.freeze({ gateway: context.gateway ?? context.target?.name, workspace: context.workspace }), task)
 
@@ -164,12 +165,12 @@ export async function gateway(context = contextSelection()) {
   return { ...connection, workspace: current.workspace, workspaceScope: workspaceScope(current.workspace) }
 }
 
-export async function consoleContext() {
+export async function consoleContext({ probe = true } = {}) {
   const current = contextSelection()
   const gateways = listGateways()
   let workspaces = []
   let workspaceError = null
-  if (configured) {
+  if (configured && probe) {
     try { workspaces = await gatewayWorkspaces(current.gateway) } catch (error) { workspaceError = error.message }
   }
   return {

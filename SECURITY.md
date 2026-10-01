@@ -30,12 +30,13 @@ A fresh console with no saved selection or gateway pin does not collect automati
 
 - Gateway TLS keys stay under `$XDG_CONFIG_HOME/openshell` (otherwise `~/.config/openshell`) in `gateways/NAME/mtls/{ca.crt,tls.crt,tls.key}` and are loaded only by the server. The CLI and console share this path convention. Metadata is in the adjacent `metadata.json`. Do not commit these files or place them in the frontend/public directory. Keep credential directories at mode 0700 and files at 0600.
 - Browser terminal tickets are one-use, short-lived, and pinned to the gateway/workspace captured at issuance.
-- Browser requests carry a context identifier. Stale-context mutations are rejected rather than targeting another same-named sandbox. Read-only connection/job status remains available after activation changes the context.
+- Browser requests carry a context identifier. Default selected-context requests reject stale contexts. Explicit resource-location requests are validated against the original local gateway/workspace and connected managed SSH location before routing; arbitrary or disconnected owners are rejected. OpenRod Cloud retains selected-context-only authorization.
 - Native SSH uses OpenShell's generated ProxyCommand and session authentication. The console does not expose pod port 22 or implement its own SSH authentication.
 - OpenShell-generated SSH configs disable conventional host-key persistence/checking; gateway TLS and the OpenShell relay are the trust path. Review the generated config before use outside this console.
 - Temporary SSH configs use owner-only permissions and are removed on normal session exit or terminal-launch failure. Process termination with SIGKILL, an abandoned terminal launch, or a machine crash can leave files under the OS temporary directory. They must not contain private keys or relay tokens.
 - Direct **SSH shell** uses real OpenSSH and does not edit `~/.ssh/config`. The separate editor integration may install OpenShell-managed SSH configuration. **Open in browser** is SDK-backed exec, not OpenSSH.
 - `console-context.json` in the configuration directory stores the console selection, separately from the CLI's `active_gateway`. Gateway precedence is environment pin, saved selection, then CLI/default suggestions; workspace precedence is environment pin, saved workspace, then `default`. `OPENSHELL_WORKSPACE` alone does not activate a fresh console.
+- Combined inventories retain remote sandbox/template metadata and recipes in private `remote-gateways/last-inventory.json`, alongside `last-location.json`, under the console state directory. Snapshots are not proof of current remote availability: disconnected or failed remote inventory sources disable actions, and reconnect/polling revalidates the owner. These files do not contain gateway TLS keys; protect them as potentially sensitive workload metadata.
 
 ## Remote Kubernetes authentication
 

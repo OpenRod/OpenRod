@@ -56,16 +56,24 @@ Use `OPENSHELL_BIN` if the CLI is not on `PATH`.
 
 ## Set up a connection
 
-1. On **Sandboxes**, click **Connect machine** beside **New sandbox**. The toolbar shows the active sandbox location; the sidebar no longer contains connection setup.
+1. On **Sandboxes**, click **Connect machine** beside **New sandbox**. The location filter starts at **All locations**.
 2. Choose an SSH alias, or switch to **Local registered gateway** to return to your existing gateway.
 3. Leave **Missing OpenShell runtime → Download automatically** selected, or choose **Upload package** for an offline Docker-save archive.
 4. Click **Connect**. SSH uses your configuration, keys, agent and jump host, with strict host-key verification. The console detects the runtime, reuses existing images, and downloads missing images automatically. Upload mode instead waits for your package. Simply listing hosts does not install anything.
    If Docker is missing, review the proposed system changes and approve installation, or close without installing. After approval, a fresh SSH session verifies access before runtime preparation continues in your chosen download/upload mode. Failed installation can leave package, service, or group changes on the host.
-5. Once ready, the console selects that location and reloads its inventory. Click **New sandbox** to create there, or select an existing sandbox, wait for **Ready**, and open its browser terminal, native SSH shell, or editor.
+5. Once ready, the console selects the connection and reloads. **Sandboxes** and **Templates** show both your local gateway and the SSH machine. **New sandbox** chooses its location explicitly; **Use template** inherits the template's location.
 
 Aliases in `Include` files are discovered too. Wildcard and negated `Host` patterns are not selectable destinations. Host settings are resolved by OpenSSH, not translated into a separate connection form.
 
 The second gateway has its own database, certificates, providers and sandbox inventory. An SSH tunnel carries its Docker API connection, and a reverse loopback tunnel lets remote supervisors reach it. Only one remote host is connected at a time; switching remote hosts disconnects the previous remote gateway. Local and remote configuration are not automatically copied between gateways.
+
+### Local and remote inventories
+
+- Rows are marked **Local** or **SSH · host-alias**. Filter either inventory by location; identical names on different gateways remain separate resources.
+- Details, terminals, files, policy changes, template builds and bulk actions use each resource's owning gateway/workspace, not the most recently selected connection.
+- Creation lists only the templates, providers, groups and Setups available at its chosen location. Templates are not implicitly copied between gateways.
+- After disconnect, the last remote inventory remains visible with **Disconnected** markers and disabled actions. Local resources remain usable. Reconnect to refresh remote state; cached status is not a live health check.
+- Other standalone pages keep the selected connection. Navigation from a resource's details preserves its location for related Network, Activity and Secrets pages.
 
 ### Uploading a runtime package
 
@@ -126,6 +134,7 @@ Both the OpenShell CLI and console use `CONFIG_DIR = $XDG_CONFIG_HOME/openshell`
 | **Connect → SSH** | Probes the selected host. Once runtime images are available, creates isolated state under `STATE_DIR/remote-gateways/console-ssh-<hash>/`, registers a distinct local mTLS endpoint under `CONFIG_DIR/gateways/`, and starts the second gateway and SSH tunnels. |
 | Runtime installation | **Connect** downloads missing runtime images by default; **Upload package** instead waits for a trusted Docker-save archive. Uploaded packages are temporary. No remote gateway, cloud cluster, or privileged Docker installation. |
 | Activity and policies | Stored per gateway/workspace in `STATE_DIR/contexts/<scope-hash>/`: `activity.sqlite`, `activity-delivery.sqlite`, and `policies/` (including organization rules and memberships). SQLite companion files can exist alongside databases. |
+| Remote inventory cache | `STATE_DIR/remote-gateways/last-location.json` remembers local/SSH locations; `last-inventory.json` retains the last remote sandbox/template metadata and recipes. These private snapshots survive disconnect/restart but do not restart SSH or authorize disconnected actions. |
 | Retention and delivery | Activity has no automatic expiry. No webhook destination is created automatically. Previously configured enabled deliveries may resume on activation/restart and continue sending their original context's pending events after switching. Credentials in the delivery database are not encrypted at rest. |
 | Service auto-close | Previously configured deadlines in `STATE_DIR/ingress.json` can resume on activation/restart and close services in their originating context. Switching contexts does not cancel them. |
 | Legacy checkout policies | A one-time copy into scoped state is allowed only for the original local loopback `openshell/default` registration. Other registrations do not inherit them. Legacy `ui/.state` activity databases remain untouched, not reassigned. Installed packages exclude checkout policies and runtime databases. |

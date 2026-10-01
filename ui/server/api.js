@@ -13,6 +13,7 @@ import { PROJECT_LABEL, templateSession, isSession, sessionLaunch } from '../src
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
 import { createRemoteConnections } from './remote-gateway.js'
+import { createLocationInventory } from './location-inventory.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, createInGroups, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
@@ -377,7 +378,18 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     },
     logger,
   }) : null
-  const start = () => { if (!closed && (security.config.mode !== 'local' || contextConfigured())) activate(initialContext) }
+  const inventory = createLocationInventory({
+    connections: remoteConnections, listSandboxes, listTemplates: listImageTemplates, logger,
+    defaultLabel: security.config.mode === 'local' ? 'Local' : 'Cloud',
+  })
+  const start = async () => {
+    if (closed || (security.config.mode === 'local' && !contextConfigured())) return
+    if (remoteConnections && /^console-ssh-[a-f0-9]{24}$/.test(initialContext.gateway)) {
+      const remote = (await remoteConnections.locationSnapshot()).remote
+      if (remote?.gateway !== initialContext.gateway || remote.status !== 'connected') return
+    }
+    if (!closed) activate(initialContext)
+  }
   const upgrade = async (req, socket, head) => {
     if (closed) { socket.destroy(); return }
     try {
@@ -385,7 +397,12 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
       const identity = await security.authenticate(req)
       if (socket.destroyed || closed) { socket.destroy(); return }
       if (identity) security.watch(req, socket, identity)
-      if (terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid)) {
+      const locations = remoteConnections ? await inventory.locations() : null
+      if (socket.destroyed || closed) { socket.destroy(); return }
+      const allowContext = plan => locations
+        ? locations.some(location => location.connected && location.context === contextKey(plan))
+        : contextKey(plan) === contextKey()
+      if (terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid, allowContext)) {
         sockets.add(socket)
         socket.once('close', () => sockets.delete(socket))
       }
@@ -427,7 +444,11 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           assertCloudOperation(parts)
           if (security.config.mode !== 'local' && (parts[0] === 'connections' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
           const requestedContext = req.headers['x-openshell-context'] ?? url.searchParams.get('context')
-          if (requestedContext != null && requestedContext !== contextKey() && !(req.method === 'GET' && parts[0] === 'connections')) return send(res, 409, { error: 'Console context changed. Reload before continuing.' })
+          let owner = contextSelection()
+          const explicitLocation = req.headers['x-openshell-location'] === '1' || url.searchParams.get('location') === '1'
+          if (explicitLocation && security.config.mode === 'local') owner = await inventory.resolve(requestedContext)
+          else if (requestedContext != null && requestedContext !== contextKey() && !(req.method === 'GET' && parts[0] === 'connections')) return send(res, 409, { error: 'Console context changed. Reload before continuing.' })
+          return await runWithContext(owner, async () => {
           // Connection discovery is available before any gateway is selected.
           // Job reads remain available after that job changes the context.
           if (parts[0] === 'connections') {
@@ -449,17 +470,34 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
             return send(res, 404, { error: 'Not found' })
           }
           if (req.method === 'GET' && parts.length === 1) {
-            if (parts[0] === 'context') return send(res, 200, { ...await consoleContext(), ...(security.config.mode !== 'local' ? { configured: true } : {}) })
+            if (parts[0] === 'context') {
+              const remote = remoteConnections ? (await remoteConnections.locationSnapshot()).remote : null
+              const disconnected = remote?.gateway === contextSelection().gateway && remote.status !== 'connected'
+              return send(res, 200, {
+                ...await consoleContext({ probe: !disconnected }),
+                ...(disconnected ? { workspaceError: remote.error || 'This SSH location is disconnected.' } : {}),
+                ...(security.config.mode !== 'local' ? { configured: true } : {}),
+              })
+            }
           }
+          if (req.method === 'GET' && parts.length === 1 && parts[0] === 'inventory') return send(res, 200, await inventory.refresh())
           if (isMutation(req, security)) {
             if (parts[0] === 'context' && parts.length === 1) {
               if (remoteConnections.changing()) throw fail('Wait for the connection operation before changing workspace.', 409)
-              const result = await selectConsoleContext(await body(req))
+              const input = await body(req)
+              const remote = (await remoteConnections.locationSnapshot()).remote
+              if (remote?.gateway === (input.gateway ?? contextSelection().gateway)) await inventory.resolve(contextKey(remote))
+              const result = await selectConsoleContext(input)
+              await remoteConnections.locationSnapshot()
               activate({ gateway: result.gateway, workspace: result.workspace })
               return send(res, 200, result)
             }
           }
-          if (security.config.mode === 'local' && !contextConfigured()) return send(res, 428, { error: 'Choose Local or an SSH host and connect before accessing sandboxes.', setupRequired: true })
+          if (security.config.mode === 'local' && !contextConfigured() && !explicitLocation) return send(res, 428, { error: 'Choose Local or an SSH host and connect before accessing sandboxes.', setupRequired: true })
+          if (remoteConnections && !explicitLocation && !['context', 'connections'].includes(parts[0])) {
+            const remote = (await remoteConnections.locationSnapshot()).remote
+            if (remote?.gateway === contextSelection().gateway) await inventory.resolve(contextKey())
+          }
           const { store, delivery, hub } = runtimeFor(contextSelection())
           if (req.method === 'GET') {
             if (parts[0] === 'stream') {
@@ -539,6 +577,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           const routed = (await sshRoute('POST', parts, input)) ?? (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
+          })
         } catch (error) {
           // Gateway errors carry a readable message; nothing here includes credentials.
           if (res.headersSent) res.destroy(error)

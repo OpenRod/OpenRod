@@ -10,17 +10,28 @@ async function fixture(t, saved) {
   const source = path.resolve(import.meta.dirname, '..')
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-setup-identity-')))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
-  const previousData = process.env.OPENSHELL_CONSOLE_DATA_DIR
-  process.env.OPENSHELL_CONSOLE_DATA_DIR = path.join(root, 'state')
+  const environment = {
+    OPENSHELL_CONSOLE_DATA_DIR: path.join(root, '.state'),
+    OPENSHELL_GATEWAY: 'setup-members-fixture',
+    OPENSHELL_WORKSPACE: 'default',
+  }
+  const previous = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]))
+  Object.assign(process.env, environment)
   t.after(() => {
-    if (previousData === undefined) delete process.env.OPENSHELL_CONSOLE_DATA_DIR
-    else process.env.OPENSHELL_CONSOLE_DATA_DIR = previousData
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
   })
   for (const dir of ['server', 'shared', 'src']) await fs.cp(path.join(source, dir), path.join(root, dir), { recursive: true })
   await fs.copyFile(path.join(source, 'package.json'), path.join(root, 'package.json'))
   await fs.symlink(path.join(source, 'node_modules'), path.join(root, 'node_modules'), 'dir')
-  const gatewayPath = path.join(root, 'server/gateway.js'), original = await fs.readFile(gatewayPath, 'utf8')
-  await fs.writeFile(gatewayPath, original.replace('export async function gateway(', 'async function unusedLiveGateway(') + `
+  const write = async (file, value) => { const dest = path.resolve(root, file); await fs.mkdir(path.dirname(dest), { recursive: true }); await fs.writeFile(dest, JSON.stringify(value)) }
+  const gatewayPath = path.join(root, 'server/gateway.js')
+  await fs.rename(gatewayPath, path.join(root, 'server/gateway-original.js'))
+  await fs.writeFile(gatewayPath, `
+export * from './gateway-original.js'
+import { contextSelection, workspaceScope } from './gateway-original.js'
 export const setupIdentityState = { endpoint: 'https://gateway-a', id: 'box-original', rules: {}, updates: [], staged: null, failApply: false, created: [] }
 const record = () => ({ metadata: { id: setupIdentityState.id, name: 'web' }, status: { phase: 2 } })
 const client = { raw: {
@@ -49,19 +60,20 @@ const client = { raw: {
     return { exitCode: 0, stdout: Buffer.from(JSON.stringify({ status: request.operation === 'remove' ? 'removed' : 'installed' })) }
   }
 } }
-export async function gateway() { return { client, target: { endpoint: setupIdentityState.endpoint } } }
+export async function gateway(context = contextSelection()) {
+  return { client, target: { name: context.gateway, endpoint: setupIdentityState.endpoint }, workspace: context.workspace, workspaceScope: workspaceScope(context.workspace) }
+}
 `)
-  const { policyDirectory, scopedStateDirectory } = await import(pathToFileURL(path.join(root, 'server/paths.js')))
-  const policyDir = await policyDirectory(), stateDir = scopedStateDirectory()
-  const write = async (file, value) => { const dest = file.startsWith('policies/') ? path.join(policyDir, file.slice(9)) : file.startsWith('.state/') ? path.join(stateDir, file.slice(7)) : path.join(root, file); await fs.mkdir(path.dirname(dest), { recursive: true }); await fs.writeFile(dest, JSON.stringify(value)) }
-  await write('.state/setup-members.json', saved)
-  await write(`policies/egress/setup-${SETUP}.json`, { id: `setup-${SETUP}`, name: 'Setup access', action: 'allow', destinations: ['setup.example.com'], appliesTo: { setups: [SETUP] } })
   const org = await import(pathToFileURL(path.join(root, 'server/org.js')))
   const gateway = await import(pathToFileURL(gatewayPath))
+  const { scopedStateDirectory, policyDirectory } = await import(pathToFileURL(path.join(root, 'server/paths.js')))
+  const stateDir = scopedStateDirectory(), policyDir = await policyDirectory()
+  await write(path.join(stateDir, 'setup-members.json'), saved)
+  await write(path.join(policyDir, 'egress', `setup-${SETUP}.json`), { id: `setup-${SETUP}`, name: 'Setup access', action: 'allow', destinations: ['setup.example.com'], appliesTo: { setups: [SETUP] } })
   const members = await import(pathToFileURL(path.join(root, 'server/setup-members.js')))
   const deployment = await import(pathToFileURL(path.join(root, 'server/setup-deployment.js')))
   const setups = await import(pathToFileURL(path.join(root, 'server/setups.js')))
-  return { ...org, ...members, ...gateway, ...deployment, ...setups, setupStore: setups.getSetupStore(), root, stateDir, write }
+  return { ...org, ...members, ...gateway, ...deployment, ...setups, root, stateDir, policyDir, write }
 }
 
 test('actual sync and overview never grant legacy name-only setup membership', async t => {
@@ -95,8 +107,9 @@ test('actual sync, port edits and overview bind setup access to the sandbox and 
 const OTHER_SETUP = 'b'.repeat(24)
 const currentIdentity = state => ({ name: 'web', id: state.id, gateway: state.endpoint })
 const saveSkill = async h => {
-  const review = h.setupStore.stage([{ id: 'skill-review', name: 'review', kind: 'skill', issues: [], requirements: [], files: [{ path: 'SKILL.md', content: '# Review' }] }])
-  return h.setupStore.save(review.token, 'Review skills', true)
+  const store = h.getSetupStore()
+  const review = store.stage([{ id: 'skill-review', name: 'review', kind: 'skill', issues: [], requirements: [], files: [{ path: 'SKILL.md', content: '# Review' }] }])
+  return store.save(review.token, 'Review skills', true)
 }
 
 test('actual enabling, rollback and removal preserve unrelated identities and existing setup memberships', async t => {
@@ -130,8 +143,8 @@ test('actual creation records only the new sandbox identity returned by the gate
   const h = await fixture(t, {}), state = h.setupIdentityState, setup = await saveSkill(h)
   const old = currentIdentity(state)
   await h.setSandboxSetups(old, [OTHER_SETUP])
-  await h.write('policies/org/groups/tools.json', { id: 'tools', name: 'Tools' })
-  await h.write('policies/egress/tools.json', { id: 'tools', name: 'Tools', action: 'allow', destinations: ['example.com'], appliesTo: { groups: ['tools'] } })
+  await h.write(path.join(h.policyDir, 'org/groups/tools.json'), { id: 'tools', name: 'Tools' })
+  await h.write(path.join(h.policyDir, 'egress/tools.json'), { id: 'tools', name: 'Tools', action: 'allow', destinations: ['example.com'], appliesTo: { groups: ['tools'] } })
   const { createSandbox } = await import(pathToFileURL(path.join(h.root, 'server/api.js')))
   await createSandbox({ name: 'web', image: 'test/image', groups: ['tools'], setups: [setup.id], setupTargets: ['claude'] })
   assert.equal(state.id, 'box-created')
@@ -210,10 +223,11 @@ for (const change of ['sandbox', 'gateway']) test(`creation installation rejects
 
 test('a concurrent setup-policy revocation cannot be reopened by enabling its setup', async t => {
  const h=await fixture(t,{}), current=h.setupIdentityState
- const review=h.setupStore.stage([{id:'remote-mcp',name:'Remote MCP',kind:'mcp',issues:[],requirements:[{phase:'runtime',host:'keep.example.com',port:443}],config:{url:'https://keep.example.com/mcp'}}])
- const setup=await h.setupStore.save(review.token,'Network tools',true)
+ const store=h.getSetupStore()
+ const review=store.stage([{id:'remote-mcp',name:'Remote MCP',kind:'mcp',issues:[],requirements:[{phase:'runtime',host:'keep.example.com',port:443}],config:{url:'https://keep.example.com/mcp'}}])
+ const setup=await store.save(review.token,'Network tools',true)
  const {syncSetupPolicy}=await import(pathToFileURL(path.join(h.root,'server/setup-egress.js')))
- await syncSetupPolicy(await h.setupStore.get(setup.id))
+ await syncSetupPolicy(await store.get(setup.id))
  const policy=(await h.orgRoute('GET',['org'])).policies.find(p=>p.setup?.id===setup.id)
  const {policy:before}=await h.orgRoute('POST',['egress','policies'],{...policy,destinations:[...policy.destinations,'old.example.com']})
  const {client}=await h.gateway(), status=client.raw.getSandboxPolicyStatus

@@ -5,7 +5,8 @@ import "@xterm/xterm/css/xterm.css"
 import { ChevronDown, RotateCcw, Terminal as TerminalIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { api } from "@/lib/api"
+import { useApi, useLocation } from "@/lib/location-context"
+import { LocationBadge } from "@/components/location-badge"
 import { defaultSession, sessionChoices, sessionName, terminalHref } from "@/lib/sandbox-session"
 
 // The terminal itself is always dark, whatever the console's theme.
@@ -26,6 +27,8 @@ const STATUS = {
 // streams keystrokes and output over a WebSocket; closing the tab ends the
 // session, like closing a terminal window.
 export function TerminalView({ name, session: requested, setupLogin, mcp }) {
+  const api = useApi()
+  const location = useLocation()
   const [sandbox, setSandbox] = React.useState(null)
   const [loadError, setLoadError] = React.useState(null)
   const [context, setContext] = React.useState(null)
@@ -36,13 +39,14 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
 
   React.useEffect(() => {
     let current = true
+    setSandbox(null); setContext(null); setLoadError(null)
     Promise.all([api.sandbox(name), api.contextKey()]).then(([record, key]) => {
       if (!current) return
       const [gateway, workspace] = JSON.parse(key)
       setSandbox(record); setContext({ gateway, workspace })
     }).catch((error) => { if (current) setLoadError(error.message) })
     return () => { current = false }
-  }, [name])
+  }, [name, api])
   React.useEffect(() => {
     const previous = document.title
     document.title = `${name} · ${session ? sessionName(session) : "Terminal"}`
@@ -103,7 +107,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
       }
     })()
     return () => { closed = true; observer.disconnect(); socket?.close(); term.dispose() }
-  }, [name, session, attempt, setupLogin, mcp])
+  }, [name, session, attempt, setupLogin, mcp, api])
 
   const status = STATUS[state.status]
   const choices = sandbox ? sessionChoices(sandbox) : []
@@ -114,6 +118,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
       <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border bg-card px-3 text-xs">
         <TerminalIcon className="size-4 text-muted-foreground" aria-hidden="true" />
         <span className="font-medium">{name}</span>
+        <LocationBadge location={location} />
         {session && <span className="text-muted-foreground">{sessionName(session)}</span>}
         <span className="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground" role="status">
           <span className={`size-1.5 shrink-0 rounded-full ${status.dot}`} aria-hidden="true" />

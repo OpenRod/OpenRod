@@ -1,7 +1,8 @@
 import * as React from 'react'
-import { api } from '@/lib/api'
+import { useApi } from '@/lib/location-context'
 
 export function useActivityHistory(options, { paused, demo, activityRevision }) {
+  const api = useApi()
   const pausedRef = React.useRef(paused)
   pausedRef.current = paused
   const query = JSON.stringify(options)
@@ -31,7 +32,7 @@ export function useActivityHistory(options, { paused, demo, activityRevision }) 
     fetchPage()
     const timer = setInterval(() => { if (!pausedRef.current) fetchPage(true) }, 5000)
     return () => { alive = false; clearInterval(timer) }
-  }, [query, demo, revision, activityRevision])
+  }, [query, demo, revision, activityRevision, api])
   const goToPage = async (nextPage) => {
     if (loading || nextPage < 0 || nextPage >= Math.ceil(result.total / options.limit)) return
     const version = generation.current
