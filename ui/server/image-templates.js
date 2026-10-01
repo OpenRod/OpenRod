@@ -3,6 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
+import { IMAGE_TEMPLATE_NAME } from '../src/lib/sandbox-images.js'
 import { resolveSetups, usableSetup } from './setups.js'
 import { artifactFile } from './setup-packages.js'
 import { WORKSPACE, gateway, resolveGateway, iso } from './gateway.js'
@@ -221,6 +222,23 @@ async function saveTemplate(client, recipe, image, previous) {
   }
 }
 
+// Read every page before allowing deletion; unavailable usage must fail closed.
+export async function imageTemplateUsage(client, name, image) {
+  const sandboxes = []
+  let imageInUse = false, pageToken = ''
+  do {
+    const page = await client.raw.listSandboxes({ workspaceScope: WORKSPACE, pageSize: 1000, pageToken })
+    for (const sandbox of page.sandboxes) {
+      const sameImage = Boolean(image && sandbox.spec?.template?.image === image)
+      imageInUse ||= sameImage
+      const source = sandbox.createdFromWorkloadTemplate?.name || sandbox.metadata?.labels?.[IMAGE_TEMPLATE_NAME]
+      if (source ? source === name : sameImage) sandboxes.push({ name: sandbox.metadata?.name })
+    }
+    pageToken = page.nextPageToken
+  } while (pageToken)
+  return { sandboxes, imageInUse }
+}
+
 // Remove the exact image reference, never force removal or prune unrelated data.
 // Keep the template on Docker failure so the same action can be retried.
 export async function deleteImageTemplate(client, name, { getEngine = localEngine, docker = run } = {}) {
@@ -231,17 +249,15 @@ export async function deleteImageTemplate(client, name, { getEngine = localEngin
     await client.sandboxTemplates.delete(name, { allowMissing: true })
     return { ok: true, imageCleanup: cleanup }
   }
-  if (!image) return removeRecord({ status: 'absent' })
-  return locked(`image:${image}`, async () => {
-    // Include stopped sandboxes: they may need the image on their next start.
-    let pageToken = ''
-    do {
-      const page = await client.raw.listSandboxes({ workspaceScope: WORKSPACE, pageSize: 1000, pageToken })
-      if (page.sandboxes.some((sandbox) => sandbox.spec?.template?.image === image)) {
-        return removeRecord({ status: 'retained', image, reason: 'Docker image kept because an existing sandbox still uses it.' })
-      }
-      pageToken = page.nextPageToken
-    } while (pageToken)
+  return locked(`image:${image || name}`, async () => {
+    const usage = await imageTemplateUsage(client, name, image)
+    if (usage.sandboxes.length) {
+      throw Object.assign(fail('This template cannot be deleted while sandboxes use it. Delete the sandboxes first.', 409), {
+        code: 'TEMPLATE_IN_USE', sandboxes: usage.sandboxes,
+      })
+    }
+    if (!image) return removeRecord({ status: 'absent' })
+    if (usage.imageInUse) return removeRecord({ status: 'retained', image, reason: 'Docker image kept because an existing sandbox still uses it.' })
     const templates = await client.sandboxTemplates.listAll()
     if (templates.some((t) => t.metadata?.name !== name && t.spec?.workload?.image === image)) {
       return removeRecord({ status: 'retained', image, reason: 'Docker image kept because another template still uses it.' })
@@ -263,6 +279,13 @@ export async function imageTemplateRoute(method, parts, input) {
   if (method === 'GET') {
     if (!name) return listImageTemplates()
     if (name === 'local-images') return inventory()
+    if (action === 'usage') {
+      checkName(name)
+      const { client } = await gateway()
+      let template
+      try { template = await client.sandboxTemplates.get(name) } catch (e) { if (!missing(e)) throw e }
+      return imageTemplateUsage(client, name, template?.spec?.workload?.image)
+    }
     return undefined
   }
   if (!name) return locked(String(input?.recipe?.name ?? ''), () => start(input))

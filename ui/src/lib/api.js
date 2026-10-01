@@ -8,7 +8,7 @@ async function request(path, { method = "GET", body } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.error ?? `Request failed (${response.status})`)
+  if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes })
   return payload
 }
 
@@ -71,6 +71,7 @@ export const api = {
   buildImageTemplate: (recipe, replace = false) => request("/image-templates", { method: "POST", body: { recipe, replace } }),
   cancelImageBuild: (name) => request(`/image-templates/${encodeURIComponent(name)}/cancel`, { method: "POST", body: {} }),
   dismissImageBuild: (name) => request(`/image-templates/${encodeURIComponent(name)}/dismiss`, { method: "POST", body: {} }),
+  imageTemplateUsage: (name) => request(`/image-templates/${encodeURIComponent(name)}/usage`),
   deleteImageTemplate: (name) => request(`/image-templates/${encodeURIComponent(name)}/delete`, { method: "POST", body: {} }),
   org: () => request("/org"),
   saveOrg: (org) => request("/org", { method: "POST", body: org }),

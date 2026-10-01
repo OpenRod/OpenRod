@@ -414,7 +414,7 @@ export function openshellApi() {
           return send(res, 404, { error: 'Not found' })
         } catch (error) {
           // Gateway errors carry a readable message; nothing here includes credentials.
-          send(res, error.status ?? 502, { error: error.rawMessage ?? error.message ?? 'Gateway request failed' })
+          send(res, error.status ?? 502, { error: error.rawMessage ?? error.message ?? 'Gateway request failed', ...(error.code === 'TEMPLATE_IN_USE' ? { code: error.code, sandboxes: error.sandboxes } : {}) })
         }
       })
     },
