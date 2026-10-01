@@ -1,3 +1,4 @@
+import { saveComputeRecipe } from '@/lib/compute-target'
 import * as React from 'react'
 import { Check, ChevronDown, Download, FileCode2, Info, Package, Plus, ShieldCheck, Terminal, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -11,7 +12,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { Spinner } from '@/components/ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { SetupPicker } from '@/components/setups-view'
-import { api } from '@/lib/api'
+import { useApi } from "@/lib/compute"
 import { buildTemplateWithSetups } from '@/lib/setup-template-build'
 import { AGENTS, BASES, PENDING_RECIPE_KEY, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
 
@@ -27,6 +28,7 @@ function Toggle({ selected, onClick, children, disabled = false }) {
 // One page: the few choices a team needs to start an agent on its repo, with
 // everything else behind Advanced. `replace` edits an existing template.
 export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
+  const api = useApi()
   const [recipe, setRecipe] = React.useState(() => newRecipe(initial?.recipe))
   const replace = Boolean(initial?.replace)
   const [baseline] = React.useState(() => initial?.baseline ?? JSON.stringify(newRecipe(initial?.recipe)))
@@ -50,7 +52,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
   const dirty = JSON.stringify(recipe) !== baseline
   const errors = recipeErrors(recipe)
   React.useEffect(() => {
-    try { sessionStorage.setItem(PENDING_RECIPE_KEY, JSON.stringify({ recipe, replace, baseline, advanced })) } catch { /* recovery is best effort */ }
+    try { saveComputeRecipe(PENDING_RECIPE_KEY, { recipe, replace, baseline, advanced }, sessionStorage) } catch { /* recovery is best effort */ }
   }, [recipe, replace, baseline, advanced])
   React.useEffect(() => { api.localImages().then(setLocal).catch((e) => setLocal({ images: [], error: e.message })) }, [])
   React.useEffect(() => {

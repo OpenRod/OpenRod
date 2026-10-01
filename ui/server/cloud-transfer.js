@@ -13,7 +13,7 @@ export const CLOUD_TRANSFER_LIMIT = 25 * 1024 * 1024
 export const CLOUD_TRANSFER_BODY_LIMIT = 36 * 1024 * 1024
 const MAX_FILES = 2000
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
-const excludedDirectories = ['.git', 'node_modules', '.cache', '__pycache__', '.venv', 'venv', '.ssh', '.aws', '.azure', '.config', '.local', '.npm', '.npm-global', '.claude', '.codex', '.cursor', '.opencode', '.kiro', '.docker', '.gnupg', '.kube', '.terraform', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.turbo']
+const excludedDirectories = ['.git', '.openshell', 'node_modules', '.cache', '__pycache__', '.venv', 'venv', '.ssh', '.aws', '.azure', '.config', '.local', '.npm', '.npm-global', '.claude', '.codex', '.cursor', '.opencode', '.kiro', '.docker', '.gnupg', '.kube', '.terraform', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.turbo']
 const excluded = new Set(excludedDirectories)
 const secretName = /^(?:\.env(?:\..*)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|\.npmrc|\.pypirc|\.netrc|credentials(?:\..*)?|secrets?(?:\..*)?|auth\.json|\.claude\.json|\.git-credentials|\.(?:bash|zsh|python|sqlite)_history|.+\.(?:pem|key|p12|pfx|jks|keystore|tfstate)(?:\.backup)?)$/i
 const privateKey = /-----BEGIN (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----/
@@ -92,12 +92,15 @@ export async function exportTransfer(input, options = {}) {
   if (templateName) {
     let template
     try { template = templateView(await client.sandboxTemplates.get(templateName)) } catch (error) { if (error.code !== 'not_found') throw error }
-    if (template?.managed && template.recipe.source === 'build') recipe = { ...template.recipe, environment: [], command: isSession(template.recipe.command) ? template.recipe.command : '' }
+    if (template?.managed && template.recipe.source === 'build') {
+      recipe = { ...template.recipe, environment: [], command: isSession(template.recipe.command) ? template.recipe.command : '', setups: [], setupRevisions: {} }
+      if (template.recipe.setups?.length) warning = 'Workspace and image recipe copied. Reconnect saved MCP and skill Setups, and agent credentials on the destination.'
+    }
     else warning = 'Files copied into a fresh Ubuntu shell. Reinstall your custom image tools and reconnect credentials at the destination.'
   }
   const localImage = !sandbox.image || sandbox.image.startsWith('openshell-template/') || !sandbox.image.includes('/') && !/^(ubuntu|debian|alpine|node|python|busybox)(:|$)/.test(sandbox.image)
   if (!recipe && localImage) warning ??= 'Files copied into a fresh Ubuntu shell. Rebuild your custom image and reconnect credentials at the destination.'
-  const value = { version: 1, launch: { name: sandbox.name, image: recipe || warning ? 'ubuntu:24.04' : sandbox.image, session: warning ? 'shell' : defaultSession(sandbox) }, files, ...(recipe ? { recipe } : {}) }
+  const value = { version: 1, launch: { name: sandbox.name, image: recipe || warning ? 'ubuntu:24.04' : sandbox.image, session: warning && !recipe ? 'shell' : defaultSession(sandbox) }, files, ...(recipe ? { recipe } : {}) }
   validateTransfer(value)
   return { bundle: value, ...(warning ? { warning } : {}) }
 }

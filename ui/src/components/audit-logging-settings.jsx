@@ -3,7 +3,7 @@ import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 
 import { Spinner } from "@/components/ui/spinner"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { useLive } from "@/lib/live"
 
 // The gateway's registered settings that change how policy is enforced,
@@ -36,6 +36,7 @@ function Control({ spec, value, onChange, disabled, busy, compact }) {
 }
 
 export function AuditLoggingSettings() {
+  const api = useApi()
   const live = useLive()
   const sandboxes = (live.sandboxes ?? []).filter((s) => s.phase !== "deleting")
   const [global, setGlobal] = React.useState(null)

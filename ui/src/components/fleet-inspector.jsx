@@ -7,7 +7,7 @@ import { AuditLine } from "@/components/audit-line"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { agentsOf, agentInventoryLabel } from "@/lib/agents"
 import { Perimeter } from "@/components/perimeter"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { hostOf, isIp, portOf, sourceOf } from "@/lib/policy-sources"
 import { rankHosts } from "@/lib/fleet"
 import { PHASE_LABEL, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
@@ -195,6 +195,7 @@ export function BoxPanel({ sandbox, stats, events, onOpen, onGraph, onClose, onN
 // out on the right, what the proxy refused on the left. Allowing a blocked host
 // is a policy change, so it hands off to Egress rather than happening here.
 export function PerimeterDialog({ sandbox, events, onClose, onNavigate }) {
+  const api = useApi()
   const [rules, setRules] = React.useState(null)
   const [inventory, setInventory] = React.useState(null)
   const name = sandbox?.name

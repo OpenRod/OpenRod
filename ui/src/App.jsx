@@ -1,3 +1,4 @@
+import { useApi, useCompute } from '@/lib/compute'
 import * as React from "react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
 import { AppSidebar } from "@/components/app-sidebar"
@@ -63,6 +64,8 @@ function viewFromLocation() {
 }
 
 export function App() {
+  const api = useApi()
+  const compute = useCompute()
   const [view, setView] = React.useState(viewFromLocation)
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
   React.useEffect(() => {
@@ -76,7 +79,7 @@ export function App() {
   }, [])
 
   function navigate(next) {
-    if (!TITLES[next]) return
+    if (api.signal?.aborted || !TITLES[next]) return
     setView(next)
     window.history.pushState(null, "", next === "sandboxes" ? window.location.pathname : `#${next}`)
   }
@@ -85,7 +88,7 @@ export function App() {
     return (
       <>
         <React.Suspense fallback={null}>
-          <TerminalView key={`${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} setupLogin={terminal.setupLogin} mcp={terminal.mcp} />
+          <TerminalView key={`${compute?.target} ${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} setupLogin={terminal.setupLogin} mcp={terminal.mcp} />
         </React.Suspense>
         <Toaster position="bottom-right" />
       </>

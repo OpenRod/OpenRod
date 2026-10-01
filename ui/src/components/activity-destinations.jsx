@@ -3,12 +3,13 @@ import * as React from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { api } from '@/lib/api'
+import { useApi } from "@/lib/compute"
 
 const fresh = () => ({ name: '', url: '', format: 'ocsf', auth: 'none', token: '', sandboxes: '', category: '', verdict: '' })
 const select = 'h-9 w-full rounded-md border border-border bg-card px-2 text-xs'
 const date = (value) => value ? new Date(value).toLocaleString() : 'Never'
 export function ActivityDestinations() {
+  const api = useApi()
   const [items, setItems] = React.useState([])
   const [draft, setDraft] = React.useState(fresh)
   const [adding, setAdding] = React.useState(false)

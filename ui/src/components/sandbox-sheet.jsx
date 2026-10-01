@@ -16,7 +16,7 @@ import { AuditLine } from "@/components/audit-line"
 import { CopyCommand } from "@/components/copy-command"
 import { ContinueInCloud, ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
-import { api } from "@/lib/api"
+import { useApi, useCompute } from "@/lib/compute"
 import { useLive } from "@/lib/live"
 import { defaultSession, sessionName, terminalHref } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
@@ -42,28 +42,30 @@ function Section({ title, icon: Icon, children, aside, className }) {
 
 // Installed editors don't change while the console is open, so ask once, and
 // keep retrying while the sheet is open if that first request fails.
-let editorsRequest
 function useEditors() {
-  const cloud = useCloudMode()
+  const api = useApi()
+  const nativeActions = useCompute()?.nativeActions
+  const editorsRequest = React.useRef(null)
   const [editors, setEditors] = React.useState([])
   React.useEffect(() => {
-    if (cloud) return
+    if (!nativeActions) return
     let cancelled = false
     let timer
     const load = () => {
-      editorsRequest ??= api.editors().then((list) => list.filter((editor) => editor.installed))
-      editorsRequest.then((list) => { if (!cancelled) setEditors(list) })
-        .catch(() => { editorsRequest = undefined; if (!cancelled) timer = setTimeout(load, 3000) })
+      editorsRequest.current ??= api.editors().then((list) => list.filter((editor) => editor.installed))
+      editorsRequest.current.then((list) => { if (!cancelled) setEditors(list) })
+        .catch(() => { editorsRequest.current = null; if (!cancelled) timer = setTimeout(load, 3000) })
     }
     load()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [cloud])
+  }, [nativeActions, api])
   return editors
 }
 
 // Same as `openshell sandbox connect --editor`: OpenShell adds its SSH config
 // and the editor connects over Remote-SSH, so files open in place.
 function OpenInEditor({ name, editors }) {
+  const api = useApi()
   const [opening, setOpening] = React.useState(null)
   async function open(editor) {
     setOpening(editor.id)
@@ -103,6 +105,7 @@ function OpenWebTerminal({ name }) {
 }
 
 function NativeSsh({ name }) {
+  const api = useApi()
   const [connection, setConnection] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [mode, setMode] = React.useState("exec")
@@ -195,6 +198,7 @@ const ACCESS_LABEL = { "read-only": "read-only", "read-write": "read-write", ful
 const RULE_TAG = { secret: "from provider", policy: "network rule", org: "blocked everywhere", group: "inherited", agent: "agent defaults", own: "rule" }
 
 export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
+  const api = useApi()
   const context = useLive()
   const live = liveData ?? context
   const [minutes, setMinutes] = React.useState(15)
@@ -205,6 +209,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const [busy, setBusy] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const cloud = useCloudMode()
+  const compute = useCompute()
   const editors = useEditors()
   const summary = live.sandboxes?.find((s) => s.name === name)
 
@@ -314,11 +319,11 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                         <div className="space-y-2">
                           {!live.demo && <OpenInEditor name={name} editors={editors} />}
                           {!live.demo && <OpenWebTerminal name={name} sandbox={sandbox} />}
-                          {!live.demo && !cloud && <NativeSsh name={name} />}
+                          {!live.demo && compute?.nativeActions && <NativeSsh name={name} />}
                         </div>
                       </Section>
                     )}
-                    {!live.demo && phase === "ready" && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
+                    {!live.demo && phase === "ready" && (!compute?.localViewer ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : !cloud ? <ContinueInCloud key={name} name={name} sandbox={sandbox} /> : null)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}

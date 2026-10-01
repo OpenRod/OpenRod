@@ -13,9 +13,9 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/
 import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
 import { terminalHref } from '@/lib/sandbox-session'
-import { api } from '@/lib/api'
+import { useApi } from "@/lib/compute"
 import { importNeedsAttention } from '@/lib/import-setup'
-import { setupImports } from '@/lib/setup-imports'
+import { importsForApi } from '@/lib/setup-imports'
 import { canPrepareAtLaunch, launchableItem, launchRequirements } from '../../shared/setup-launch.js'
 
 const SOURCES = [{ id: 'codex', name: 'Codex', logo: 'codex' }, { id: 'claude', name: 'Claude Code', logo: 'claudecode' }, { id: 'cursor', name: 'Cursor', logo: 'cursor' }]
@@ -49,6 +49,8 @@ function SetupItemTabs({ items, children }) {
 }
 
 export function SetupsView({ sandbox = null, setupIds = [] }) {
+  const api = useApi()
+  const setupImports = importsForApi(api)
   const [setups, setSetups] = React.useState(null)
   const [error, setError] = React.useState('')
   const [importing, setImporting] = React.useState(false)
@@ -135,6 +137,8 @@ export function SetupsView({ sandbox = null, setupIds = [] }) {
 }
 
 export function SetupImportNotifications() {
+  const api = useApi()
+  const setupImports = importsForApi(api)
   const jobs = React.useSyncExternalStore(setupImports.subscribe, setupImports.getSnapshot)
   const [reviewing, setReviewing] = React.useState(null)
   return <>
@@ -151,6 +155,8 @@ export function SetupImportNotifications() {
 }
 
 function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My setup", initialJob = null }) {
+  const api = useApi()
+  const setupImports = importsForApi(api)
   const [sources, setSources] = React.useState([])
   const [scan, setScan] = React.useState(null)
   const [ids, setIds] = React.useState([])
@@ -287,6 +293,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
 }
 
 function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
+  const api = useApi()
   const [sandboxes, setSandboxes] = React.useState([])
   const [destination, setDestination] = React.useState(sandbox || '')
   const [targets, setTargets] = React.useState([])
@@ -358,6 +365,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
 }
 
 export function SetupPicker({ value = [], onChange, inherited = [], accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox' }) {
+  const api = useApi()
   const [items, setItems] = React.useState([])
   const [error, setError] = React.useState('')
   React.useEffect(() => { api.setups().then(setItems).catch((e) => setError(e.message)) }, [])

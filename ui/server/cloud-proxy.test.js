@@ -38,3 +38,17 @@ test('cloud handoff ticket is single-use, expired tickets fail, and a second tic
  assert.equal(results.filter(r=>r.status==='fulfilled').length,1)
  const third=await handoffs.issue(identity,name);now+=300001;await assert.rejects(handoffs.consume(third),{status:401})
 })
+test('local connection authorization requires the console cookie and relay uses the grant owner',async t=>{
+ const identity={uid:'alice',email:'alice@example.com',org:'pilot',role:'member',expires:Date.now()+3600000}
+ const security=createSecurity(config,{verifySessionCookie:async()=>({uid:'alice',exp:Math.floor(identity.expires/1000)}),getUser:async()=>({uid:'alice',emailVerified:true,providerData:[{providerId:'google.com'}]})})
+ const events=[],connections={authorize:async(id,bound,hash)=>{events.push({id,bound,hash});return 'code'},redeem:async()=>({token:'grant',expires:identity.expires,user:{uid:'alice'}}),authenticate:async token=>{if(token!=='grant')throw Object.assign(Error('unauthorized'),{status:401});return identity},revoke:async()=>{}}
+ const machines={status:async id=>({status:'ready',owner:id.uid})},routes=cloudRouter(security,machines,{},null,{connections})
+ const server=http.createServer((req,res)=>routes.publicRoutes(req,res,()=>security.middleware(req,res,()=>routes.protectedRoutes(req,res,()=>res.writeHead(404).end())))),port=await listen(t,server)
+ const request=(path,{cookie,token,body}={})=>new Promise(resolve=>{const q=http.request({host:'127.0.0.1',port,path,method:body?'POST':'GET',headers:{host:config.host,origin:config.origin,'x-openshell-console':'1','content-type':'application/json',...(cookie?{cookie:'__Host-openrod_session='+cookie}:{}),...(token?{authorization:'Bearer '+token}:{})}},r=>{let data='';r.on('data',c=>data+=c);r.on('end',()=>resolve({status:r.statusCode,data:data?JSON.parse(data):{}}))});q.end(body?JSON.stringify(body):undefined)})
+ assert.equal((await request('/api/cloud/local-connect/authorize',{body:{}})).status,401)
+ assert.equal((await request('/api/cloud/local-connect/authorize',{cookie:'alice',body:{origin:'http://127.0.0.1:4600'}})).data.code,'code')
+ assert.equal(events[0].id.uid,'alice');assert.match(events[0].hash,/^[a-f0-9]{64}$/)
+ assert.equal((await request('/api/cloud/local-connect/machine')).status,401)
+ assert.equal((await request('/api/cloud/local-connect/machine',{token:'grant'})).data.owner,'alice')
+ assert.equal((await request('/api/cloud/local-connect/exchange',{body:{code:'code',verifier:'v',nonce:'n'}})).data.token,'grant')
+})

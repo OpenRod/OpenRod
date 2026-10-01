@@ -4,7 +4,7 @@ import { Check, Plus, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { groupId } from "@/lib/groups"
 import { cn } from "@/lib/utils"
 
@@ -22,6 +22,7 @@ function GroupChip({ pressed, onClick, children, count, muted }) {
 
 // Creates a group in place, so nobody has to leave a form to make one.
 function NewGroup({ onCreated, existing }) {
+  const api = useApi()
   const [open, setOpen] = React.useState(false)
   const [name, setName] = React.useState("")
   const [busy, setBusy] = React.useState(false)

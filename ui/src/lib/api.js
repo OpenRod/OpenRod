@@ -1,19 +1,30 @@
+import { computeApiPath, currentComputeTarget } from './compute-target.js'
+
 // Browser side of the console API. Every call is same-origin; the server
 // holds the gateway certificate, so nothing here carries a credential.
 
-async function request(path, { method = "GET", body } = {}) {
-  const response = await fetch(`/api/os${path}`, {
+async function send(target, signal, path, { method = "GET", body } = {}) {
+  signal?.throwIfAborted()
+  const response = await fetch(computeApiPath(target, path), {
+    signal,
     method,
     headers: method === "GET" ? undefined : { "content-type": "application/json", "x-openshell-console": "1" },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const payload = await response.json().catch(() => ({}))
+  signal?.throwIfAborted()
   if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
   if (!response.ok) throw new Error(payload.error ?? `Request failed (${response.status})`)
   return payload
 }
 
-export const api = {
+export function createApi(target, signal) {
+ const selected = () => target ?? currentComputeTarget()
+ const request = (path, options) => send(selected(), signal, path, options)
+ return {
+  target,
+  signal,
+  path: (path) => computeApiPath(selected(), path),
   setups: () => request('/setups'),
   discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
   reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),
@@ -91,13 +102,16 @@ export const api = {
   retrySeed: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/seed/retry`, { method: "POST", body: {} }),
   prepareDownload: (sandbox, path) => request(`/files/${encodeURIComponent(sandbox)}/download`, { method: "POST", body: { path } }),
   startUpload: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/uploads`, { method: "POST", body: {} }),
-  uploadFile: async (sandbox, id, path, file, signal) => {
-    const response = await fetch(`/api/os/files/${encodeURIComponent(sandbox)}/uploads/${id}?path=${encodeURIComponent(path)}`, {
-      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1" }, body: file, signal,
+  uploadFile: async (sandbox, id, path, file, uploadSignal) => {
+    signal?.throwIfAborted()
+    const requestSignal = signal && uploadSignal ? AbortSignal.any([signal, uploadSignal]) : signal ?? uploadSignal
+    const response = await fetch(computeApiPath(selected(), `/files/${encodeURIComponent(sandbox)}/uploads/${id}?path=${encodeURIComponent(path)}`), {
+      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1" }, body: file, signal: requestSignal,
     })
     const payload = await response.json().catch(() => ({}))
+    requestSignal?.throwIfAborted()
     if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
-  if (!response.ok) throw new Error(payload.error ?? `Upload failed (${response.status})`)
+    if (!response.ok) throw new Error(payload.error ?? `Upload failed (${response.status})`)
     return payload
   },
   commitUpload: (sandbox, id, dir) => request(`/files/${encodeURIComponent(sandbox)}/uploads/${id}/commit`, { method: "POST", body: { dir } }),
@@ -109,3 +123,6 @@ export const api = {
   closeService: (service) => request("/ingress/close", { method: "POST", body: { sandbox: service.sandbox, name: service.name } }),
   extendService: (service, closeAfterMinutes) => request("/ingress/extend", { method: "POST", body: { sandbox: service.sandbox, name: service.name, closeAfterMinutes } }),
 }
+
+}
+export const api = createApi()

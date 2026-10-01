@@ -1,3 +1,6 @@
+import {createLocalCloudNative} from './local-cloud-native.js'
+import {cloudSshRoute,cloudSshUpgrade} from './cloud-ssh.js'
+import {createLocalCloud} from './local-cloud.js'
 import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.js'
 import { localTransfer, importTransfer, exportTransfer } from './cloud-transfer.js'
 import path from 'node:path'
@@ -313,6 +316,12 @@ export function openshellApi(security = createSecurity(cloudConfig())) {
   return {
     name: 'openshell-console-api',
     configureServer(server) {
+      if(security.config.mode==='local'){
+        const localCloud=createLocalCloud({native:createLocalCloudNative()})
+        server.middlewares.use(localCloud.middleware)
+        server.httpServer?.on('upgrade',(req,socket,head)=>localCloud.upgrade(req,socket,head))
+        server.httpServer?.once('close',localCloud.close)
+      }
       server.middlewares.use(security.middleware)
       const store = createActivityStore(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity.sqlite'))
       const delivery = createActivityDelivery(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity-delivery.sqlite'), store)
@@ -330,11 +339,12 @@ export function openshellApi(security = createSecurity(cloudConfig())) {
       // Browser terminals arrive as WebSocket upgrades, which skip the middleware.
       server.httpServer?.on('upgrade', async (req, socket, head) => {
         try {
-          if (requestPath(req) !== '/api/os/terminal') return
+          if (!['/api/os/terminal','/api/os/ssh'].includes(requestPath(req))) return
           const identity = await security.authenticate(req)
           if (socket.destroyed) return
           if (identity) security.watch(req, socket, identity)
-          terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid)
+          if(requestPath(req)==='/api/os/ssh')cloudSshUpgrade(req,socket,head,security.isAllowed,identity)
+          else terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid)
         } catch (error) { socket.end(`HTTP/1.1 ${error.status === 400 ? '400 Bad Request' : '403 Forbidden'}\r\nConnection: close\r\n\r\n`) }
       })
       server.middlewares.use('/api/os', async (req, res) => {
@@ -417,7 +427,7 @@ export function openshellApi(security = createSecurity(cloudConfig())) {
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          const routed = (await sshRoute('POST', parts, input)) ?? (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await cloudSshRoute('POST',parts,input)) ?? (await sshRoute('POST', parts, input)) ?? (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
         } catch (error) {

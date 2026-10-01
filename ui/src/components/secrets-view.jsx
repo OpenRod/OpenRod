@@ -15,7 +15,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { useVirtualRows } from "@/hooks/use-virtual-rows"
 import { indexSecrets, filterSecrets } from "@/lib/secret-inventory"
 import { NumberTicker } from "@/components/ui/number-ticker"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 import { useLive } from "@/lib/live"
 import { absoluteTime } from "@/lib/format"
 import { serviceOf } from "@/lib/services"
@@ -45,6 +45,7 @@ function SecretField({ id, label, hint, value, onChange, required }) {
 }
 
 function RotateDialog({ secret, onClose, onDone }) {
+  const api = useApi()
   const [values, setValues] = React.useState({})
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
@@ -79,6 +80,7 @@ function RotateDialog({ secret, onClose, onDone }) {
 }
 
 function ExpiryControl({ secret, keyName, onDone }) {
+  const api = useApi()
   const current = secret.expires?.[keyName]
   const [editing, setEditing] = React.useState(false)
   const [date, setDate] = React.useState("")
@@ -103,6 +105,7 @@ function ExpiryControl({ secret, keyName, onDone }) {
 }
 
 function SecretDetails({ secret, profile, sandboxes, onRotate, onDelete, onDone }) {
+  const api = useApi()
   const [busy, setBusy] = React.useState(false)
   const free = sandboxes.filter((s) => !secret.attachedTo.includes(s.name))
   async function attach(sandbox, on) {
@@ -181,6 +184,7 @@ const COLUMNS = [
 const EXPIRY_LABEL = { none: "No expiry", expired: "Expired", expiring: "Within 7 days", scheduled: "Scheduled" }
 
 export function SecretsView() {
+  const api = useApi()
   const live = useLive()
   const [data, setData] = React.useState(null)
   const [error, setError] = React.useState(null)

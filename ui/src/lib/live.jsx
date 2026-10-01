@@ -1,6 +1,6 @@
 import * as React from "react"
 import { activityKey as eventKey } from "@/lib/activity-inventory"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/compute"
 
 // One live picture of the gateway for every page: sandboxes and the audit
 // trail arrive over one event stream; gateway facts are
@@ -10,6 +10,7 @@ const MAX_EVENTS = 2000
 
 
 export function LiveProvider({ children }) {
+  const api = useApi()
   const [sandboxes, setSandboxes] = React.useState(null)
   const [overview, setOverview] = React.useState(null)
   const [events, setEvents] = React.useState([])
@@ -47,7 +48,7 @@ export function LiveProvider({ children }) {
 
   React.useEffect(() => {
     loadOverview(); loadHistory()
-    const source = new EventSource("/api/os/stream")
+    const source = new EventSource(api.path("/stream"))
     const resetHistory = () => {
       cacheEpoch.current++
       seen.current.clear(); setEvents([]); setActivityRevision((n) => n + 1)

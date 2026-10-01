@@ -225,3 +225,7 @@ test('image builds select the inspected engine and native platform despite an in
     else process.env.DOCKER_DEFAULT_PLATFORM = previous
   }
 })
+
+test('package index failures fail the image build with the original download error',()=>{
+ assert.match(dockerfileFor(newRecipe({name:'dns-check'})),/RUN apt-get update --error-on=any && apt-get install/)
+})
