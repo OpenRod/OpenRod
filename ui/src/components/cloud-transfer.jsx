@@ -1,8 +1,9 @@
 import * as React from 'react'
-import { Cloud, Laptop } from 'lucide-react'
+import { Cloud, Info, Laptop } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useApi, useLocation } from '@/lib/location-context'
 import { CLOUD_ORIGIN, LOCAL_ORIGIN, cloudHandoffUrl, localHandoffUrl, isCloudReadyMessage, isLocalHandoffMessage } from '@/lib/cloud-transfer'
 
@@ -44,8 +45,8 @@ export function ContinueInCloud({ name, sandbox }) {
 
   if (sandbox?.phase !== 'ready') return null
   return (
-    <div className="space-y-1.5">
-      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
+    <div className="flex items-center gap-1">
+      <Button variant="outline" size="sm" className="flex-1 justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
         const nonce = crypto.randomUUID()
         // The opener is required for the origin-checked one-use ticket exchange.
         const popup = window.open(cloudHandoffUrl(window.location.origin, nonce), '_blank')
@@ -56,7 +57,14 @@ export function ContinueInCloud({ name, sandbox }) {
         {stage ? <Spinner className="size-3.5" /> : <Cloud className="size-3.5" aria-hidden="true" />}
         {stage === 'signin' ? 'Sign in to cloud…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue in cloud'}
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">Copies workspace files and rebuilds saved templates. Secrets stay local; reconnect agents in cloud.</p>
+      <TooltipProvider delay={200}>
+        <Tooltip>
+          <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="What this does" className="text-muted-foreground" />}>
+            <Info className="size-3.5" aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-60">Copies workspace files and rebuilds saved templates. Secrets stay local; reconnect agents in cloud.</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   )
 }
@@ -108,8 +116,8 @@ export function ContinueLocally({ name, sandbox }) {
 
   if (sandbox?.phase !== 'ready') return null
   return (
-    <div className="space-y-1.5">
-      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
+    <div className="flex items-center gap-1">
+      <Button variant="outline" size="sm" className="flex-1 justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
         const nonce = crypto.randomUUID()
         const popup = window.open(localHandoffUrl(nonce), '_blank')
         if (!popup) { toast.error('Allow popups to continue locally.'); return }
@@ -119,7 +127,14 @@ export function ContinueLocally({ name, sandbox }) {
         {stage ? <Spinner className="size-3.5" /> : <Laptop className="size-3.5" aria-hidden="true" />}
         {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue locally'}
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">Open OpenRod on this computer first. Copies files and rebuilds saved templates; reconnect agents locally.</p>
+      <TooltipProvider delay={200}>
+        <Tooltip>
+          <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="What this does" className="text-muted-foreground" />}>
+            <Info className="size-3.5" aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-60">Open OpenRod on this computer first. Copies files and rebuilds saved templates; reconnect agents locally.</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   )
 }
