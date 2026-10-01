@@ -1,11 +1,12 @@
 import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ArrowLeft, ArrowUpRight, Check, Lock, Search } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, Check, Lock } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { Spinner } from "@/components/ui/spinner"
 import { ServiceLogo } from "@/components/service-logo"
 import { credentialFields, setupIssue, validateSecretCredentials } from "../../shared/secret-fields"
@@ -20,10 +21,7 @@ function ServiceGrid({ query, setQuery, have, onPick, picking }) {
   const groups = SERVICE_GROUPS.map((g) => ({ ...g, items: SERVICES.filter((s) => s.group === g.id && match(s)) })).filter((g) => g.items.length)
   return (
     <div className="space-y-3">
-      <div className="relative">
-        <Search className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" aria-hidden="true" />
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} className="h-9 pl-9 text-xs" placeholder="Search services" aria-label="Search services" autoFocus />
-      </div>
+      <SearchInput value={query} onValueChange={setQuery} placeholder="Search services" aria-label="Search services" autoFocus />
       <div className="-mx-1 max-h-[60svh] space-y-3 overflow-y-auto px-1 pt-1">
         {groups.map((g) => (
           <section key={g.id}>

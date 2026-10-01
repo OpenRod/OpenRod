@@ -1,6 +1,6 @@
 import { SETUP_AGENTS, setupTarget } from '../../shared/setup-targets.js'
 import * as React from 'react'
-import { ArrowDown, ArrowUp, Check, ChevronRight, FileText, FolderInput, Package, Plug, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronRight, FileText, FolderInput, Package, Plug, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -14,12 +14,15 @@ import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
 import { terminalHref } from '@/lib/sandbox-session'
 import { LocationProvider, useApi, useLocation } from '@/lib/location-context'
+import { GroupPicker } from '@/components/group-picker'
 import { LocationBadge } from '@/components/location-badge'
+import { Notice } from '@/components/notice'
 import { importNeedsAttention, inactiveItems, providedCredentials } from '@/lib/import-setup'
 import { POLICY_HANDOFF } from '@/components/egress-view'
 import { setupImports } from '@/lib/setup-imports'
 import { inSetupPolicy, policyRows, setupAccess } from '@/lib/setup-network'
 import { canPrepareAtLaunch, cannotRun, isPackagePending, launchableItem, launchRequirements } from '../../shared/setup-launch.js'
+import { SearchInput } from "@/components/ui/search-input"
 
 const SOURCES = [{ id: 'codex', name: 'Codex', logo: 'codex' }, { id: 'claude', name: 'Claude Code', logo: 'claudecode' }, { id: 'cursor', name: 'Cursor', logo: 'cursor' }]
 const count = (setup, kind) => setup.items.filter((item) => item.kind === kind).length
@@ -102,11 +105,8 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
   }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }) * (descending ? -1 : 1)), [setups, query, status, descending, sandbox, setupIds])
   const filtering = Boolean(query || status !== 'all')
   return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
-      <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
-        <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
-        <Input aria-label="Search setups" placeholder="Search…" value={query} onChange={e => setQuery(e.target.value)} className="h-8 bg-card pl-8 text-xs" />
-      </div>
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-6">
+      <SearchInput aria-label="Search setups" placeholder="Search…" value={query} onValueChange={setQuery} className="mr-auto min-w-32 flex-1 sm:max-w-60" />
       <SelectField aria-label="Filter setups by status" value={status} onChange={e => setStatus(e.target.value)} className="h-8 w-36 bg-card text-xs">
         <option value="all">All statuses</option><option value="imported">Imported</option><option value="review">Needs review</option>
       </SelectField>
@@ -114,7 +114,7 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
       <Button variant="ghost" size="icon-sm" aria-label="Refresh setups" disabled={refreshing} onClick={refresh}>{refreshing ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}</Button>
       <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => setImporting(true)}><Plus />Bring my setup</Button>
     </div>
-    {error && <div className="space-y-2 border-b px-4 py-3 sm:px-8"><ErrorMessage>{error}</ErrorMessage><Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>Try again</Button></div>}
+    {error && <div className="space-y-2 border-b px-4 py-3 sm:px-6"><ErrorMessage>{error}</ErrorMessage><Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>Try again</Button></div>}
     <div className="flex-1">
       {!setups && !error ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground"><Spinner />Loading setups…</div>
         : setups && !shown.length ? <div className="px-4 py-16 text-center">
@@ -126,14 +126,14 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
         : setups && <BlurFade duration={0.15} offset={0} blur="0px">
           <Table aria-label="MCPs & Skills" className="min-w-[740px] text-xs">
             <TableHeader><TableRow className="hover:bg-transparent">
-              <TableHead scope="col" aria-sort={descending ? 'descending' : 'ascending'} className="h-9 px-4 text-[11px] font-normal text-muted-foreground sm:pl-8"><button className="flex items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDescending(value => !value)}>Name{descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}</button></TableHead>
+              <TableHead scope="col" aria-sort={descending ? 'descending' : 'ascending'} className="h-9 px-4 text-[11px] font-normal text-muted-foreground sm:pl-6"><button className="flex items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDescending(value => !value)}>Name{descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}</button></TableHead>
               {['Source agents', 'MCPs', 'Skills', 'Created'].map(label => <TableHead key={label} scope="col" className="h-9 px-4 text-[11px] font-normal text-muted-foreground">{label}</TableHead>)}
               <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
             </TableRow></TableHeader>
             <TableBody>{shown.map(setup => {
               const sources = SOURCES.filter(source => setup.items.some(item => item.sources?.includes(source.id)))
               return <TableRow key={setup.id} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelected(setup)}>
-                <TableCell className="max-w-72 px-4 py-2 sm:pl-8"><button aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <TableCell className="max-w-72 px-4 py-2 sm:pl-6"><button aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><Package className="size-3.5" strokeWidth={1.5} /></span>
                   <span className="truncate font-mono text-xs font-medium group-hover:underline">{setup.name}</span>
                 </button></TableCell>
@@ -141,13 +141,13 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
                 <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><Plug aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'mcp')}</span></TableCell>
                 <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><FileText aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'skill')}</span></TableCell>
                 <TableCell className="px-4 py-2 text-[11px] text-muted-foreground">{setup.createdAt ? absoluteTime(setup.createdAt) : 'Not reported'}</TableCell>
-                <TableCell className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
+                <TableCell className="px-4 py-2 text-right sm:pr-6"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
               </TableRow>
             })}</TableBody>
           </Table>
         </BlurFade>}
     </div>
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-8"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Saved locally · Available in templates and sandboxes</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-6"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Saved locally · Available in templates and sandboxes</span></div>
     {deleting && <Dialog open onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null) }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Delete “{deleting.name}”?</DialogTitle><DialogDescription>This deletes the setup and its egress policy. MCPs already installed in sandboxes stay, but lose access to the websites that policy allowed. Templates that use this setup need another setup before reuse.</DialogDescription></DialogHeader><ErrorMessage>{deleteError}</ErrorMessage><div className="flex justify-end gap-2"><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={deleteBusy} onClick={async () => {
       setDeleteBusy(true); setDeleteError('')
       try {
@@ -168,16 +168,18 @@ export function SetupImportNotifications() {
   const [reviewing, setReviewing] = React.useState(null)
   const [network, setNetwork] = React.useState(null)
   return <>
-    {jobs.length > 0 && <div aria-label="Import notifications" className="shrink-0 divide-y border-b bg-muted/30">
-      {jobs.map(job => <div key={job.id} role={job.status === 'failed' || job.status === 'needs-attention' ? 'alert' : 'status'} className="flex items-center gap-3 px-4 py-3 text-xs sm:px-8">
-        {job.status === 'importing' ? <Spinner /> : job.status === 'saved' ? <Check className="size-4 shrink-0 text-emerald-600" /> : <ShieldCheck className="size-4 shrink-0 text-amber-600" />}
-        <div className="min-w-0 flex-1"><p className="font-medium">{job.name} · {job.status === 'importing' ? 'Importing' : job.status === 'saved' ? 'Imported' : job.status === 'cancelled' ? 'Import cancelled' : job.status === 'failed' ? 'Import failed' : 'Import needs attention'}</p><p className="mt-0.5 break-words text-muted-foreground">{job.message}</p></div>
+    {jobs.map(job => <Notice key={job.id} id={`setup-import:${job.id}`}
+      tone={job.status === 'importing' ? 'progress' : job.status === 'saved' ? 'success' : job.status === 'failed' ? 'error' : 'warning'}
+      title={<>{job.name} · {job.status === 'importing' ? 'Importing' : job.status === 'saved' ? 'Imported' : job.status === 'cancelled' ? 'Import cancelled' : job.status === 'failed' ? 'Import failed' : 'Import needs attention'}</>}
+      actions={<>
         <LocationBadge location={job.location} />
-        {!['importing', 'saved'].includes(job.status) && <Button size="sm" variant="outline" onClick={() => setReviewing(job)}>Review import</Button>}
-        {job.status === 'saved' && networkOutcome(job.setup) && <Button size="sm" variant="outline" onClick={() => setNetwork({ policy: networkOutcome(job.setup), location: job.location })}>View egress policy</Button>}
-        {job.status !== 'importing' && <Button size="sm" variant="ghost" aria-label={`Dismiss import notification for ${job.name}`} onClick={() => setupImports.dismiss(job.id)}>Dismiss</Button>}
-      </div>)}
-    </div>}
+        {!['importing', 'saved'].includes(job.status) && <Button size="xs" variant="outline" onClick={() => setReviewing(job)}>Review import</Button>}
+        {job.status === 'saved' && networkOutcome(job.setup) && <Button size="xs" variant="outline" onClick={() => setNetwork({ policy: networkOutcome(job.setup), location: job.location })}>View egress policy</Button>}
+      </>}
+      onDismiss={job.status === 'importing' ? undefined : () => setupImports.dismiss(job.id)}
+      dismissLabel={`Dismiss import notification for ${job.name}`}>
+      {job.message}
+    </Notice>)}
     {reviewing && <LocationProvider location={reviewing.location}><ImportSetup key={reviewing.id} initialJob={reviewing} initialReview={reviewing.review} initialName={reviewing.name} onClose={() => setReviewing(null)} onSaved={(saved) => { setNetwork({ policy: networkOutcome(saved), location: reviewing.location }); setReviewing(null) }} /></LocationProvider>}
     {network?.policy && <LocationProvider location={network.location}><SetupNetworkDialog policy={network.policy} onClose={() => setNetwork(null)} /></LocationProvider>}
   </>
@@ -185,7 +187,31 @@ export function SetupImportNotifications() {
 
 // Saving a setup creates or updates its egress policy; this says what it allows.
 function SetupNetworkDialog({ policy, onClose }) {
+  const api = useApi()
   const location = useLocation()
+  // The policy reaches sandboxes that use the setup; groups are what let it follow other sandboxes too.
+  const [groups, setGroups] = React.useState([])
+  const [stored, setStored] = React.useState(null)
+  const [known, setKnown] = React.useState([])
+  const [saving, setSaving] = React.useState(false)
+  const [groupError, setGroupError] = React.useState('')
+  const [applied, setApplied] = React.useState(false)
+  React.useEffect(() => {
+    if (policy.error) return
+    let current = true
+    api.org().then(org => {
+      if (!current) return
+      const found = (org.policies ?? []).find(p => p.id === policy.id)
+      setKnown(org.groups ?? []); setStored(found ?? null); setGroups(found?.appliesTo?.groups ?? [])
+    }).catch(e => { if (current) setGroupError(`Could not load groups: ${e.message}`) })
+    return () => { current = false }
+  }, [api, policy.id, policy.error])
+  const saveGroups = async () => {
+    setSaving(true); setGroupError('')
+    try { await api.savePolicy({ ...stored, appliesTo: { ...stored.appliesTo, everyone: false, groups }, isNew: false }); setStored({ ...stored, appliesTo: { ...stored.appliesTo, groups } }); setApplied(true) }
+    catch (e) { setGroupError(e.message) } finally { setSaving(false) }
+  }
+  const groupsChanged = stored && (groups.length !== stored.appliesTo.groups.length || groups.some(id => !stored.appliesTo.groups.includes(id)))
   const rows = policyRows(policy)
   const openInEgress = () => {
     try { sessionStorage.setItem(POLICY_HANDOFF, JSON.stringify({ edit: policy.id })) } catch { /* optional */ }
@@ -205,8 +231,16 @@ function SetupNetworkDialog({ policy, onClose }) {
     {policy.blocked?.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400">Not allowed because your organization blocks them: {policy.blocked.join(', ')}.</p>}
     {policy.approval?.length > 0 && <p className="text-xs text-muted-foreground">Not in this policy, because an MCP sends credentials there or names it as its sign-in service: {policy.approval.map(a => `${a.host} (${a.items.join(', ')})`).join(', ')}. You approve these for each sandbox when you enable the setup there.</p>}
     {(policy.sync?.error || policy.sync?.failed?.length > 0) && <p className="text-xs text-muted-foreground">The policy is saved, but some sandboxes that use this setup weren’t updated yet. The console keeps retrying in the background.</p>}
+    {stored && <fieldset className="grid gap-1.5 text-xs">
+      <legend className="font-medium">Assign to groups</legend>
+      <p className="text-[11px] text-muted-foreground">Sandboxes in these groups get this policy, whether or not they use the setup.</p>
+      <GroupPicker multiple groups={known} value={groups} onChange={ids => { setApplied(false); setGroups(ids) }} onCreated={group => setKnown(old => [...old, group])} />
+      {groupError && <p role="alert" className="text-[11px] text-red-700">{groupError}</p>}
+      {applied && !groupsChanged && <p role="status" className="text-[11px] text-muted-foreground">Groups saved.</p>}
+    </fieldset>}
+    {!stored && groupError && <p role="alert" className="text-[11px] text-red-700">{groupError}</p>}
     <p className="text-[11px] text-muted-foreground">To let an MCP reach another website, add it to this policy in Network › Egress.</p>
-    <div className="flex justify-end gap-2"><Button variant="outline" onClick={openInEgress}>Edit policy</Button><Button onClick={onClose}>Done</Button></div>
+    <div className="flex justify-end gap-2"><Button variant="outline" onClick={openInEgress}>Edit policy</Button>{groupsChanged && <Button disabled={saving} onClick={saveGroups}>{saving && <Spinner />}Save groups</Button>}<Button variant={groupsChanged ? 'ghost' : 'default'} disabled={saving} onClick={onClose}>{groupsChanged ? 'Skip' : 'Done'}</Button></div>
   </DialogContent></Dialog>
 }
 
@@ -334,7 +368,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
         <div className="grid gap-2 sm:grid-cols-3">{SOURCES.map((s) => <button key={s.id} type="button" aria-pressed={sources.includes(s.id)} onClick={() => setSources((v) => v.includes(s.id) ? v.filter((x) => x !== s.id) : [...v, s.id])} className={`flex items-center gap-2 rounded-xl border px-3 py-4 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring ${sources.includes(s.id) ? 'border-ring bg-muted' : 'bg-card'}`}><span className="flex size-7 items-center justify-center rounded-lg border bg-muted/30"><img src={`/logos/agents/${s.logo}.svg`} alt="" className="size-4" /></span>{s.name}{sources.includes(s.id) && <Check className="ml-auto size-3.5" />}</button>)}</div>
       </>}
       {scan && !review && <>
-        <div className="relative"><Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" /><Input aria-label="Search discovered tools" className="pl-9 text-xs" placeholder="Search MCPs and Skills…" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+        <SearchInput aria-label="Search discovered tools" placeholder="Search MCPs and Skills…" value={query} onValueChange={setQuery} />
         <div className="flex items-center justify-between gap-3">
           <p role="status" className="text-xs text-muted-foreground">{ids.length} of {scan.items.length} selected{query.trim() ? ` · ${items.length} matching` : ''}</p>
           <Button size="sm" variant="outline" disabled={busy || !items.length} onClick={() => selectItems(items, !allVisibleSelected)}>{allVisibleSelected ? (query.trim() ? 'Clear results' : 'Clear all') : (query.trim() ? 'Select all results' : 'Select all')}</Button>
@@ -539,7 +573,6 @@ function ScopedSetupPicker({ value = [], onChange, inherited = [], accessReview,
       <p className="font-medium">{selected.length > 1 ? 'Allowed by the setups’ egress policies' : 'Allowed by the setup’s egress policy'}</p>
       <ul className="divide-y text-[11px] text-muted-foreground">{access.covered.map(host => <li key={host} className="break-all py-1">{host}</li>)}</ul>
     </div>}
-    {!items.length && <p className="text-[11px] text-muted-foreground">Import tools from the MCPs &amp; Skills page to reuse them here.</p>}
     <ErrorMessage>{error}</ErrorMessage>
     {needsSignIn && <p className="text-[11px] text-muted-foreground">{preparationContext === 'template' ? 'Sign in after launching the sandbox.' : 'Sign in inside the sandbox after installation.'}</p>}
   </div>

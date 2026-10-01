@@ -1,13 +1,13 @@
 import { PolicyEditor } from '@/components/policy-editor'
 import { BUILTIN_TEMPLATES, composeTemplate } from '../../shared/policy-templates.js'
 import * as React from "react"
-import { Copy, Pencil, Plus, Search, Trash2 } from "lucide-react"
+import { Copy, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { SelectField } from "@/components/ui/select-field"
-import { Input } from "@/components/ui/input"
+import { SearchInput } from "@/components/ui/search-input"
 import { Spinner } from "@/components/ui/spinner"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { RuleLine } from "@/components/rule-editor"
@@ -106,11 +106,8 @@ export function PoliciesView() {
   }
   return (
     <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
-        <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
-          <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
-          <Input aria-label="Search policies" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
-        </div>
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-6">
+        <SearchInput aria-label="Search policies" value={query} onValueChange={setQuery} placeholder="Search…" className="mr-auto min-w-32 flex-1 sm:max-w-60" />
         {sandboxes.length > 0 && <SelectField value="" onChange={(e) => e.target.value && fromSandbox(e.target.value)} aria-label="Capture a sandbox's policy" className="h-8 rounded-md border border-input bg-card px-2 text-xs">
           <option value="">Capture from sandbox…</option>
           {sandboxes.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
@@ -120,12 +117,12 @@ export function PoliciesView() {
           <Plus />New policy
         </Button>
       </div>
-      {checkedItems.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-8">
+      {checkedItems.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-6">
         <span role="status" className="mr-auto text-xs">{checkedItems.length} selected{checkedItems.length > matchingChecked ? ` · ${checkedItems.length - matchingChecked} outside current filters` : ''}</span>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => setChecked(new Set())}>Clear selection</Button>
         <Button variant="destructive" size="sm" disabled={busy} onClick={() => requestDelete(checkedItems)}><Trash2 />Delete selected</Button>
       </div>}
-      {templates?.error ? <div role="alert" className="px-4 py-6 text-xs sm:px-8"><p>{templates.error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>
+      {templates?.error ? <div role="alert" className="px-4 py-6 text-xs sm:px-6"><p>{templates.error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>
         : !templates ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
         : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground"><p>{query ? 'No matching policies.' : 'No policies yet. Create a policy to use for new sandboxes.'}</p>{query && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setQuery('')}>Clear search</Button>}</div>
         : <BlurFade duration={0.15} offset={0} blur="0px">
@@ -133,18 +130,18 @@ export function PoliciesView() {
             <table aria-label="Policies" className="w-full min-w-[580px] text-left">
               <thead className="border-b text-[11px] text-muted-foreground">
                 <tr>
-                  <th className="w-12 py-2 pl-4 sm:pl-8"><PolicyCheckbox label="Select all matching policies" checked={allChecked} mixed={matchingChecked > 0 && !allChecked} disabled={busy} onChange={toggleMatching} /></th>
+                  <th className="w-12 py-2 pl-4 sm:pl-6"><PolicyCheckbox label="Select all matching policies" checked={allChecked} mixed={matchingChecked > 0 && !allChecked} disabled={busy} onChange={toggleMatching} /></th>
                   <th className="px-4 py-2 font-normal">Name</th><th className="px-4 py-2 font-normal">Network access</th><th className="px-4 py-2 font-normal">Type</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y">{shown.map((t) => {
                 const hosts = [...new Set(composeTemplate(t, [], catalog).rules.flatMap((r) => r.endpoints.map((e) => e.host)))]
                 return <tr key={t.id} onClick={() => setSelected(t)} className={`cursor-pointer hover:bg-muted/40 focus-within:bg-muted/40 ${checked.has(t.id) ? 'bg-accent/30' : ''}`}>
-                  <td className="py-2 pl-4 sm:pl-8" onClick={(event) => event.stopPropagation()}><PolicyCheckbox label={`Select ${t.name}`} checked={checked.has(t.id)} disabled={busy} onChange={() => toggle(t.id)} /></td>
+                  <td className="py-2 pl-4 sm:pl-6" onClick={(event) => event.stopPropagation()}><PolicyCheckbox label={`Select ${t.name}`} checked={checked.has(t.id)} disabled={busy} onChange={() => toggle(t.id)} /></td>
                   <td className="max-w-72 px-4 py-2"><button aria-haspopup="dialog" aria-label={`Open ${t.name}`} className="block max-w-full truncate rounded text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(event) => { event.stopPropagation(); setSelected(t) }}>{t.name}</button></td>
                   <td className="px-4 py-2"><span className="block max-w-72 truncate font-mono text-[11px] text-muted-foreground" title={hosts.join(', ') || 'Agent connections and attached secrets'}>{hosts.join(', ') || 'Agent connections & secrets'}</span></td>
                   <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px]"><span className={`size-1.5 rounded-full ${t.builtin ? 'bg-stone-300' : 'bg-emerald-500'}`} />{t.kind === 'access' ? 'Additional access' : t.builtin ? 'Built-in' : 'Custom'}</span></td>
-                  <td className="px-4 py-2 text-right sm:pr-8" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-end gap-1">
+                  <td className="px-4 py-2 text-right sm:pr-6" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-end gap-1">
                     <Button variant="ghost" size="icon-xs" aria-label={`Edit ${t.name}`} onClick={() => edit(t)}><Pencil /></Button>
                     <Button variant="ghost" size="icon-xs" aria-label={`Delete ${t.name}`} disabled={busy} onClick={() => requestDelete([t])}><Trash2 /></Button>
                   </div></td>
