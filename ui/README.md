@@ -105,6 +105,90 @@ redirect a connection.
   editor action follows OpenShell's `sandbox connect --editor` behavior, which
   may install OpenShell's managed SSH config.
 
+#### Connection architecture
+
+```mermaid
+flowchart LR
+    Operator["Operator"]
+
+    subgraph Browser["Browser"]
+        UI["Console UI"]
+        XTerm["xterm.js"]
+    end
+
+    subgraph Host["Operator machine"]
+        Server["Console server"]
+        Terminal["System terminal"]
+        CLI["openshell CLI"]
+        SSH["OpenSSH"]
+        Proxy["openshell ssh-proxy"]
+        Credentials["Gateway mTLS bundle"]
+        Docker["Docker Desktop"]
+    end
+
+    subgraph Gateway["Selected gateway: local or remote"]
+        API["Gateway API"]
+        Relay["SSH relay"]
+        Driver["Compute driver"]
+    end
+
+    subgraph Sandbox["Sandbox"]
+        Supervisor["OpenShell supervisor"]
+        Session["Shell or agent"]
+    end
+
+    Operator --> UI
+    UI -->|"/api/os/*"| Server
+    Credentials -->|"server-side only"| Server
+
+    UI -->|"Open in browser"| XTerm
+    XTerm -->|"WebSocket + one-use ticket"| Server
+    Server -->|"SDK execInteractive over mTLS"| API
+
+    UI -->|"Open or copy gateway-pinned command"| Terminal
+    Terminal -->|"sandbox exec / connect"| CLI
+    CLI -->|"Gateway API"| API
+    CLI -->|"Attach"| SSH
+
+    Terminal -->|"ssh -F config alias"| SSH
+    SSH -->|"ProxyCommand"| Proxy
+    Proxy -->|"mTLS + ephemeral SSH session"| Relay
+
+    API --> Driver
+    Relay --> Supervisor
+    Driver --> Supervisor
+    Supervisor --> Session
+
+    Docker -.->|"Build OCI image only"| Driver
+```
+
+There are three connection paths:
+
+1. **Browser terminal:** the page obtains a one-use ticket, opens a WebSocket to
+   the console server, and the server starts `execInteractive` through the SDK.
+2. **New native session:** the console opens a system terminal with a
+   gateway-pinned `openshell sandbox exec --tty` command.
+3. **Canonical attach or direct OpenSSH:** `sandbox connect`, or an `ssh`
+   command using the generated Host block, runs OpenSSH through
+   `openshell ssh-proxy`. The proxy authenticates to the selected gateway and
+   requests an ephemeral relay session. Sandbox port 22 is never exposed.
+
+**Show SSH config** asks the CLI to render the Host block and returns it to the
+browser. The browser receives the gateway name, host alias, and command, but no
+certificate private key or ephemeral relay token. The action does not write the
+Host block; the operator may save it or use it as a temporary config:
+
+```bash
+openshell sandbox ssh-config codex > /tmp/openshell-codex-ssh-config
+chmod 600 /tmp/openshell-codex-ssh-config
+ssh -F /tmp/openshell-codex-ssh-config openshell-codex.default
+```
+
+Moving from a local gateway to a gateway on GCP or another remote host changes
+only the selected gateway endpoint and its authentication material. The console
+and OpenSSH still connect through the gateway; no sandbox SSH port is opened.
+Docker is used to build local OCI images and is not part of the SSH transport.
+
 Native terminal launch requires the `openshell` CLI and OpenSSH on the console
 machine. Set `OPENSHELL_BIN` to an executable path when the CLI is not on
 `PATH`. Opening a terminal is supported on macOS and Linux; other platforms can
