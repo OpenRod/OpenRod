@@ -171,7 +171,6 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
             <GroupPicker multiple required={!forSetup} groups={groups} counts={counts} value={form.appliesTo.groups}
               onChange={(ids) => setTo({ everyone: false, groups: ids, sandboxes: [] })}
               onCreated={(g) => { setCreated((c) => [...c, g]); onGroupCreated?.(g) }} />
-            {!forSetup && <p className="text-[11px] leading-relaxed text-muted-foreground">Choose one or more groups. Every sandbox in the selected groups inherits this rule, including sandboxes created later.</p>}
             {reached.length > 0 && <p className="text-[11px] text-muted-foreground">{reached.length} {reached.length === 1 ? "sandbox" : "sandboxes"} currently in scope.</p>}
             {(!isNew && !forSetup && (initial.appliesTo.everyone || initial.appliesTo.sandboxes.length || !initial.appliesTo.groups.length)) && <p className="text-[11px] text-amber-700">This rule uses a legacy scope. Choose its groups before saving; saving replaces the previous scope.</p>}
           </fieldset>
