@@ -125,14 +125,14 @@ export function ContinueLocally({ name, sandbox }) {
         setStage('connect')
       }}>
         {stage ? <Spinner className="size-3.5" /> : <Laptop className="size-3.5" aria-hidden="true" />}
-        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue locally'}
+        {stage === 'connect' ? 'Connecting to local ShellOS…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue locally'}
       </Button>
       <TooltipProvider delay={200}>
         <Tooltip>
           <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="What this does" className="text-muted-foreground" />}>
             <Info className="size-3.5" aria-hidden="true" />
           </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-60">Open OpenRod on this computer first. Copies files and rebuilds saved templates; reconnect agents locally.</TooltipContent>
+          <TooltipContent side="bottom" className="max-w-60">Open ShellOS on this computer first. Copies files and rebuilds saved templates; reconnect agents locally.</TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </div>

@@ -8,7 +8,7 @@ npm run dev        # http://127.0.0.1:4600
 # Local production: npm run build && npm run start:local -- --open
 ```
 
-## Local and OpenRod Cloud modes
+## Local and ShellOS Cloud modes
 
 Local use stays account-free and bound to localhost. For a built local server:
 

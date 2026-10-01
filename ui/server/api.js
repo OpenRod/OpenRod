@@ -442,7 +442,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           const url = new URL(req.url, 'http://local')
           const parts = url.pathname.slice('/api/os'.length).split('/').filter(Boolean)
           assertCloudOperation(parts)
-          if (security.config.mode !== 'local' && (parts[0] === 'connections' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
+          if (security.config.mode !== 'local' && (parts[0] === 'connections' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in ShellOS Cloud.', 403)
           const requestedContext = req.headers['x-openshell-context'] ?? url.searchParams.get('context')
           let owner = contextSelection()
           const explicitLocation = req.headers['x-openshell-location'] === '1' || url.searchParams.get('location') === '1'
