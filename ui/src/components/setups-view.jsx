@@ -1,6 +1,6 @@
 import { SETUP_AGENTS, setupTarget } from '../../shared/setup-targets.js'
 import * as React from 'react'
-import { ArrowDown, ArrowUp, Check, ChevronRight, FileText, FolderInput, Package, Plug, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronRight, FileText, FolderInput, Package, Plug, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -22,6 +22,7 @@ import { POLICY_HANDOFF } from '@/components/egress-view'
 import { setupImports } from '@/lib/setup-imports'
 import { inSetupPolicy, policyRows, setupAccess } from '@/lib/setup-network'
 import { canPrepareAtLaunch, cannotRun, isPackagePending, launchableItem, launchRequirements } from '../../shared/setup-launch.js'
+import { SearchInput } from "@/components/ui/search-input"
 
 const SOURCES = [{ id: 'codex', name: 'Codex', logo: 'codex' }, { id: 'claude', name: 'Claude Code', logo: 'claudecode' }, { id: 'cursor', name: 'Cursor', logo: 'cursor' }]
 const count = (setup, kind) => setup.items.filter((item) => item.kind === kind).length
@@ -104,11 +105,8 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
   }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }) * (descending ? -1 : 1)), [setups, query, status, descending, sandbox, setupIds])
   const filtering = Boolean(query || status !== 'all')
   return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
-      <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
-        <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
-        <Input aria-label="Search setups" placeholder="Search…" value={query} onChange={e => setQuery(e.target.value)} className="h-8 bg-card pl-8 text-xs" />
-      </div>
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-6">
+      <SearchInput aria-label="Search setups" placeholder="Search…" value={query} onValueChange={setQuery} className="mr-auto min-w-32 flex-1 sm:max-w-60" />
       <SelectField aria-label="Filter setups by status" value={status} onChange={e => setStatus(e.target.value)} className="h-8 w-36 bg-card text-xs">
         <option value="all">All statuses</option><option value="imported">Imported</option><option value="review">Needs review</option>
       </SelectField>
@@ -116,7 +114,7 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
       <Button variant="ghost" size="icon-sm" aria-label="Refresh setups" disabled={refreshing} onClick={refresh}>{refreshing ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}</Button>
       <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => setImporting(true)}><Plus />Bring my setup</Button>
     </div>
-    {error && <div className="space-y-2 border-b px-4 py-3 sm:px-8"><ErrorMessage>{error}</ErrorMessage><Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>Try again</Button></div>}
+    {error && <div className="space-y-2 border-b px-4 py-3 sm:px-6"><ErrorMessage>{error}</ErrorMessage><Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>Try again</Button></div>}
     <div className="flex-1">
       {!setups && !error ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground"><Spinner />Loading setups…</div>
         : setups && !shown.length ? <div className="px-4 py-16 text-center">
@@ -128,14 +126,14 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
         : setups && <BlurFade duration={0.15} offset={0} blur="0px">
           <Table aria-label="MCPs & Skills" className="min-w-[740px] text-xs">
             <TableHeader><TableRow className="hover:bg-transparent">
-              <TableHead scope="col" aria-sort={descending ? 'descending' : 'ascending'} className="h-9 px-4 text-[11px] font-normal text-muted-foreground sm:pl-8"><button className="flex items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDescending(value => !value)}>Name{descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}</button></TableHead>
+              <TableHead scope="col" aria-sort={descending ? 'descending' : 'ascending'} className="h-9 px-4 text-[11px] font-normal text-muted-foreground sm:pl-6"><button className="flex items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDescending(value => !value)}>Name{descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}</button></TableHead>
               {['Source agents', 'MCPs', 'Skills', 'Created'].map(label => <TableHead key={label} scope="col" className="h-9 px-4 text-[11px] font-normal text-muted-foreground">{label}</TableHead>)}
               <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
             </TableRow></TableHeader>
             <TableBody>{shown.map(setup => {
               const sources = SOURCES.filter(source => setup.items.some(item => item.sources?.includes(source.id)))
               return <TableRow key={setup.id} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelected(setup)}>
-                <TableCell className="max-w-72 px-4 py-2 sm:pl-8"><button aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <TableCell className="max-w-72 px-4 py-2 sm:pl-6"><button aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><Package className="size-3.5" strokeWidth={1.5} /></span>
                   <span className="truncate font-mono text-xs font-medium group-hover:underline">{setup.name}</span>
                 </button></TableCell>
@@ -143,13 +141,13 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
                 <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><Plug aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'mcp')}</span></TableCell>
                 <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><FileText aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'skill')}</span></TableCell>
                 <TableCell className="px-4 py-2 text-[11px] text-muted-foreground">{setup.createdAt ? absoluteTime(setup.createdAt) : 'Not reported'}</TableCell>
-                <TableCell className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
+                <TableCell className="px-4 py-2 text-right sm:pr-6"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
               </TableRow>
             })}</TableBody>
           </Table>
         </BlurFade>}
     </div>
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-8"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Saved locally · Available in templates and sandboxes</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-6"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Saved locally · Available in templates and sandboxes</span></div>
     {deleting && <Dialog open onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null) }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Delete “{deleting.name}”?</DialogTitle><DialogDescription>This deletes the setup and its egress policy. MCPs already installed in sandboxes stay, but lose access to the websites that policy allowed. Templates that use this setup need another setup before reuse.</DialogDescription></DialogHeader><ErrorMessage>{deleteError}</ErrorMessage><div className="flex justify-end gap-2"><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={deleteBusy} onClick={async () => {
       setDeleteBusy(true); setDeleteError('')
       try {
@@ -370,7 +368,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
         <div className="grid gap-2 sm:grid-cols-3">{SOURCES.map((s) => <button key={s.id} type="button" aria-pressed={sources.includes(s.id)} onClick={() => setSources((v) => v.includes(s.id) ? v.filter((x) => x !== s.id) : [...v, s.id])} className={`flex items-center gap-2 rounded-xl border px-3 py-4 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring ${sources.includes(s.id) ? 'border-ring bg-muted' : 'bg-card'}`}><span className="flex size-7 items-center justify-center rounded-lg border bg-muted/30"><img src={`/logos/agents/${s.logo}.svg`} alt="" className="size-4" /></span>{s.name}{sources.includes(s.id) && <Check className="ml-auto size-3.5" />}</button>)}</div>
       </>}
       {scan && !review && <>
-        <div className="relative"><Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" /><Input aria-label="Search discovered tools" className="pl-9 text-xs" placeholder="Search MCPs and Skills…" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+        <SearchInput aria-label="Search discovered tools" placeholder="Search MCPs and Skills…" value={query} onValueChange={setQuery} />
         <div className="flex items-center justify-between gap-3">
           <p role="status" className="text-xs text-muted-foreground">{ids.length} of {scan.items.length} selected{query.trim() ? ` · ${items.length} matching` : ''}</p>
           <Button size="sm" variant="outline" disabled={busy || !items.length} onClick={() => selectItems(items, !allVisibleSelected)}>{allVisibleSelected ? (query.trim() ? 'Clear results' : 'Clear all') : (query.trim() ? 'Select all results' : 'Select all')}</Button>

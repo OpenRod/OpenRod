@@ -149,7 +149,7 @@ export function App() {
       <SidebarProvider>
         <AppSidebar view={view} onNavigate={navigate} />
         <SidebarInset className="min-w-0 bg-background">
-          <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-8">
+          <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-6">
             <SidebarTrigger className="mr-2 md:hidden" />
             <h1 className="text-[18px] font-semibold tracking-tight">{TITLES[view]}</h1>
             {pageLocation && <span className="ml-3"><LocationBadge location={pageLocation} /></span>}

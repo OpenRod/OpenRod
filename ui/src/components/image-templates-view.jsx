@@ -1,9 +1,8 @@
 import * as React from 'react'
-import { ArrowRight, Copy, HardDrive, Pencil, Plus, RotateCw, Search, Trash2, X } from 'lucide-react'
+import { ArrowRight, Copy, HardDrive, Pencil, Plus, RotateCw, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
@@ -16,6 +15,7 @@ import { LocationProvider, useApi } from '@/lib/location-context'
 import { resourceKey, locationLabel } from '@/lib/locations'
 import { LocationBadge } from '@/components/location-badge'
 import { AGENTS, STARTS, pendingRecipe, pendingRecipeKey } from '@/lib/image-templates'
+import { SearchInput } from "@/components/ui/search-input"
 
 const locationKey = (location) => location?.id ?? location?.context
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
@@ -162,24 +162,21 @@ export function TemplatesView() {
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
     {editor && <LocationProvider location={owner(editor)}><ImageTemplateBuilder key={JSON.stringify([locationKey(editor.location), editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></LocationProvider>}
-    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
-      <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
-        <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
-        <Input aria-label="Search image templates" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 bg-card pl-8 text-xs" />
-      </div>
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-6">
+      <SearchInput aria-label="Search image templates" value={query} onValueChange={setQuery} placeholder="Search…" className="mr-auto min-w-32 flex-1 sm:max-w-60" />
       {multipleLocations && <select aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
         <option value="">All locations</option>
         {locations.map((location) => <option key={locationKey(location)} value={locationKey(location)}>{locationLabel(location)}{locationKey(location) === defaultContext ? ' (default)' : ''}{location.connected === false ? ' · disconnected' : ''}</option>)}
       </select>}
       <Button size="sm" className={action} disabled={!locations.some((location) => location.connected)} onClick={() => { setNewLocation(''); setChooseLocation(true) }}><Plus />New template</Button>
     </div>
-    {checkedRecords.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-8">
+    {checkedRecords.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-6">
       <span role="status" className="mr-auto text-xs">{checkedRecords.length} selected{checkedRecords.length > matchingChecked && <span className="text-muted-foreground"> · {checkedRecords.length - matchingChecked} outside current filters</span>}</span>
       <Button variant="ghost" size="sm" disabled={busy} onClick={() => setChecked(new Set())}>Clear selection</Button>
       <Button variant="destructive" size="sm" disabled={busy} onClick={() => askRemove(checkedRecords)}><Trash2 />Delete selected</Button>
     </div>}
-    {error && <div role="alert" className="px-4 py-4 text-xs sm:px-8"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>}
-    {locations.filter((location) => location.connected === false).map((location) => <div key={locationKey(location)} role="status" className="border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-8">{locationLabel(location)} is disconnected. Saved templates are shown; reconnect to use or change them.{location.error && <span className="ml-1">{location.error}</span>}</div>)}
+    {error && <div role="alert" className="px-4 py-4 text-xs sm:px-6"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>}
+    {locations.filter((location) => location.connected === false).map((location) => <div key={locationKey(location)} role="status" className="border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-6">{locationLabel(location)} is disconnected. Saved templates are shown; reconnect to use or change them.{location.error && <span className="ml-1">{location.error}</span>}</div>)}
     {loading && !records.length ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
       : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground">
         <p>{records.length ? 'No matching templates.' : 'No image templates yet.'}</p>
@@ -189,10 +186,10 @@ export function TemplatesView() {
         <div className="overflow-x-auto">
           <table aria-label="Image templates" className="w-full min-w-[580px] text-left">
             <thead className="border-b text-[11px] text-muted-foreground">
-              <tr><th className="w-10 px-4 py-2 sm:pl-8"><Checkbox aria-label="Select all matching templates" checked={allChecked} indeterminate={matchingChecked > 0 && !allChecked} disabled={busy || !selectable.length} onCheckedChange={toggleMatching} /></th><th className="px-4 py-2 font-normal">Name</th>{multipleLocations && <th className="px-4 py-2 font-normal">Location</th>}<th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
+              <tr><th className="w-10 px-4 py-2 sm:pl-6"><Checkbox aria-label="Select all matching templates" checked={allChecked} indeterminate={matchingChecked > 0 && !allChecked} disabled={busy || !selectable.length} onCheckedChange={toggleMatching} /></th><th className="px-4 py-2 font-normal">Name</th>{multipleLocations && <th className="px-4 py-2 font-normal">Location</th>}<th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
             </thead>
             <tbody className="divide-y">{shown.map((t) => <tr key={resourceKey(t)} className={checked.has(resourceKey(t)) ? "bg-accent/40 hover:bg-muted/40" : "hover:bg-muted/40"}>
-              <td className="px-4 py-2 sm:pl-8"><Checkbox aria-label={`Select ${t.name} in ${locationLabel(owner(t))}`} checked={checked.has(resourceKey(t))} disabled={busy || working(t) || !connected(t)} onCheckedChange={() => toggle(resourceKey(t))} /></td>
+              <td className="px-4 py-2 sm:pl-6"><Checkbox aria-label={`Select ${t.name} in ${locationLabel(owner(t))}`} checked={checked.has(resourceKey(t))} disabled={busy || working(t) || !connected(t)} onCheckedChange={() => toggle(resourceKey(t))} /></td>
               <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedKey(resourceKey(t))}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
               </td>
@@ -200,7 +197,7 @@ export function TemplatesView() {
               <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '-' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>
-              <td className="px-4 py-2 text-right sm:pr-8"><div className="flex items-center justify-end gap-1">
+              <td className="px-4 py-2 text-right sm:pr-6"><div className="flex items-center justify-end gap-1">
                 {!working(t) && (t.status === 'failed' || (t.status === 'ready' && t.managed)) && <Button variant="ghost" size="xs" disabled={!connected(t)} aria-label={`Edit ${t.name} in ${locationLabel(owner(t))}`} onClick={() => edit(t, t.recipe, t.status === 'ready' || Boolean(t.exists))}><Pencil />Edit</Button>}
                 <Button variant="ghost" size="xs" disabled={launchable(t) && !connected(t)} onClick={() => launchable(t) ? setLaunch(t) : setSelectedKey(resourceKey(t))}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button>
                 <Button variant="ghost" size="icon-sm" aria-label={`Delete ${t.name} in ${locationLabel(owner(t))}`} title={working(t) ? "Cancel the build before deleting this template" : `Delete ${t.name}`} disabled={busy || working(t) || !connected(t)} onClick={() => askRemove([t])}><Trash2 /></Button>
