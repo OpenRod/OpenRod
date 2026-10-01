@@ -38,10 +38,13 @@ export function PlacementIcon({ type, className = 'size-3.5' }) {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={`shrink-0 overflow-visible transition-transform duration-200 motion-safe:group-hover:-translate-y-px motion-safe:group-hover:-rotate-6 ${className}`}><Icon /></svg>
 }
 
+export function PlacementPill({ type, title }) {
+  return <span title={title} className={`inline-flex shrink-0 items-center gap-1 rounded-full py-0.5 pr-2 pl-1.5 text-[11px] font-medium ring-1 ring-inset ${TONE[type]}`}>
+    <PlacementIcon type={type} />{PLACEMENTS[type].label}
+  </span>
+}
+
 export function PlacementBadge({ location }) {
   const type = placementOf(location)
-  const { label, hint } = PLACEMENTS[type]
-  return <span title={`${hint} · ${locationLabel(location)}`} className={`inline-flex shrink-0 items-center gap-1 rounded-full py-0.5 pr-2 pl-1.5 text-[11px] font-medium ring-1 ring-inset ${TONE[type]}`}>
-    <PlacementIcon type={type} />{label}
-  </span>
+  return <PlacementPill type={type} title={`${PLACEMENTS[type].hint} · ${locationLabel(location)}`} />
 }
