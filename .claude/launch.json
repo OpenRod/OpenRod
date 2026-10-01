@@ -1,0 +1,47 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ui-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "ui"
+      ],
+      "port": 4600,
+      "url": "http://127.0.0.1:4600"
+    },
+    {
+      "name": "ui-dev-4601",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "ui",
+        "--",
+        "--port",
+        "4601"
+      ],
+      "port": 4601,
+      "url": "http://127.0.0.1:4601"
+    },
+    {
+      "name": "ui-dev-4602",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "ui",
+        "--",
+        "--port",
+        "4602"
+      ],
+      "port": 4602,
+      "url": "http://127.0.0.1:4602"
+    }
+  ]
+}

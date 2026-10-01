@@ -15,6 +15,7 @@ import { listSshHosts, probeHost, installDocker as installHostDocker, installRun
 import { prepareGatewayState, registerManagedGateway } from './remote-gateway-state.js'
 import { ensureGateway } from './gateway-install.js'
 import { startRemoteRuntime } from './remote-runtime.js'
+import { reapOrphans } from './orphan-processes.js'
 
 const PACKAGE_LIMIT = 4 * 1024 ** 3
 const localGateways = () => listGateways().filter(target => target.name !== 'aws-eks' && target.supported && !target.remote && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(target.endpoint).hostname))
@@ -203,12 +204,23 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     checkOpen()
     onSelected(result)
   }
+  // With a local gateway already selected, the remote joins as a second
+  // location instead of replacing the console context, so no page reloads.
+  async function attach(gateway) {
+    checkOpen()
+    const workspaces = await gatewayWorkspaces(gateway)
+    const workspace = process.env.OPENSHELL_WORKSPACE || workspaces.find(item => item.name === 'default')?.name || workspaces[0]?.name
+    if (!workspace) throw fail('This gateway returned no accessible workspaces.', 409)
+    if (active?.gateway === gateway) active.workspace = workspace
+  }
+  const keepsLocalSelection = () => contextConfigured() && localGateways().some(target => target.name === contextSelection().gateway)
   async function startGateway(value) {
     checkOpen()
     value.stage = 'Starting the persistent gateway on the SSH host'
     await stopRemote()
     unlock = await acquireLock()
     try {
+      await reapOrphans({ stateRoot: stateDirectory(), logger })
       temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'os-ssh-'))
       const socket = path.join(temporary, 'docker.sock')
       const state = await prepareGatewayState(value.host, value.probe, socket)
@@ -222,7 +234,8 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
       signal.throwIfAborted()
       await registerManagedGateway(state, value.host)
       await waitReady(() => gatewayWorkspaces(state.name), [tunnel], signal, 'The remote gateway did not become ready')
-      await select(state.name)
+      if (keepsLocalSelection()) await attach(state.name)
+      else await select(state.name)
       tunnel.check()
       active.status = 'connected'
       lastRemote = { host: active.host, gateway: active.gateway, workspace: active.workspace, status: 'disconnected', error: null }

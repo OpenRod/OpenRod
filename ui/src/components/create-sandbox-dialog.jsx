@@ -6,7 +6,8 @@ import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
-import { Check, ChevronDown, ChevronRight, Terminal, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Laptop, Server, Terminal } from "lucide-react"
+import { LocationStep, StepTrail } from "@/components/location-step"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -14,13 +15,13 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Spinner } from "@/components/ui/spinner"
 import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
 import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
 import { locationLabel } from "@/lib/locations"
 import { persistentGateway } from "@/lib/sandbox-session"
 import { LocationBadge } from "@/components/location-badge"
+import { sandboxCreations } from "@/lib/sandbox-creations"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
@@ -96,28 +97,34 @@ function FolderSummary({ plan, sandbox }) {
 }
 
 // Which group the sandbox joins, and what network access that brings.
-function GroupField({ org, value, onChange, onCreated, onAddPolicy, setups = [] }) {
+function GroupField({ org, value, onChange, onCreated, onAddPolicy, invalid = false }) {
   const reducedMotion = useReducedMotion()
   const reach = groupNetworkPolicies(org.policies, value)
-  // Setup egress policies come with the selected MCPs & Skills, not the groups.
-  const fromSetups = (org.policies ?? []).filter((p) => (p.appliesTo.setups ?? []).some((id) => setups.includes(id)))
   const counts = Object.fromEntries(org.groups.map((g) => [g.id, org.members?.[g.id]?.length ?? 0]))
   const chosen = org.groups.filter((g) => value.includes(g.id))
   return (
-    <fieldset className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3">
-      <legend className="px-1 text-xs font-medium">Groups <span className="text-muted-foreground">· Required</span></legend>
+    <div id="sandbox-groups" className={`-m-3 rounded-lg p-3 transition-colors ${invalid ? "bg-destructive/5 ring-1 ring-destructive/60" : ""}`}>
+    <fieldset aria-invalid={invalid || undefined} className="grid min-w-0 gap-2.5">
+      <legend className="mb-2.5 text-xs font-medium">Groups <span className={invalid ? "text-destructive" : "text-muted-foreground"}>· Required</span></legend>
       <GroupPicker multiple required groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
-      <motion.p key={value.join(",") || "empty"} initial={reducedMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} aria-live="polite" className="text-[11px] leading-relaxed text-muted-foreground">
+      <motion.p key={value.join(",") || "empty"} initial={reducedMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} aria-live="polite" className={`text-[11px] leading-relaxed ${invalid ? "text-destructive" : "text-muted-foreground"}`}>
         {reach.length
           ? <>Gets {reach.length === 1 ? "this network rule" : `these ${reach.length} network rules`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
           : chosen.length ? <>Add a network rule to at least one selected group before creating a sandbox.</>
-          : org.groups.length ? "Groups let network rules follow sandboxes. Choose one or more. You can change memberships later on the Groups page."
+          : invalid ? (org.groups.length ? "Choose at least one group to create a sandbox." : "Create a group to create a sandbox.")
+          : org.groups.length ? null
           : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
       </motion.p>
-      {fromSetups.length > 0 && <p className="text-[11px] leading-relaxed text-muted-foreground">Its MCPs &amp; Skills add <span className="text-foreground">{fromSetups.map((p) => p.name).join(", ")}</span>.</p>}
       {chosen.length > 0 && !reach.length && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={onAddPolicy}>Add network rule</Button>}
     </fieldset>
+    </div>
   )
+}
+
+// Names in use at this location, counting sandboxes still being created.
+function takenNames(list, location) {
+  const pending = sandboxCreations.getSnapshot().filter((job) => job.status !== "failed" && job.status !== "cancelled" && locationKey(job.location) === locationKey(location))
+  return new Set([...list.map((sandbox) => sandbox.name), ...pending.map((job) => job.name)])
 }
 
 function nextName(taken, prefix = "sandbox") {
@@ -128,7 +135,7 @@ function nextName(taken, prefix = "sandbox") {
   return ""
 }
 
-export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, ...props }) {
+export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, onRefreshLocations, allowRemote = false, ...props }) {
   const inheritedLocation = useLocation()
   const api = useApi()
   const [selectedContext, setSelectedContext] = React.useState(null)
@@ -138,8 +145,13 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
   const location = owner
     ? available.find((item) => locationKey(item) === locationKey(owner)) ?? (locationKey(inheritedLocation) === locationKey(owner) ? inheritedLocation : owner)
     : available.find((item) => locationKey(item) === selectedContext) ?? inheritedLocation ?? available.find((item) => item.target === api.target && item.connected) ?? null
+  // Every new sandbox starts by choosing where it runs, unless a template already decides that.
+  const askWhere = !props.initialImageTemplate && (allowRemote || available.length > 1)
+  const [step, setStep] = React.useState("where")
+  const [pendingGateway, setPendingGateway] = React.useState(null)
   React.useEffect(() => {
     if (!props.open) setSelectedContext(null)
+    setStep("where"); setPendingGateway(null)
   }, [props.open])
   const changeLocation = (context) => {
     const next = available.find((item) => locationKey(item) === context && item.connected)
@@ -147,14 +159,28 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
     setSelectedContext(context)
     onLocationChange?.(next)
   }
+  // A just-connected host appears in the inventory a moment later; continue as soon as it does.
+  React.useEffect(() => {
+    if (!pendingGateway) return
+    const found = available.find((item) => item.gateway === pendingGateway && item.connected)
+    if (found) { setPendingGateway(null); changeLocation(locationKey(found)); setStep("form"); return }
+    const timer = setInterval(() => onRefreshLocations?.(), 1500)
+    return () => clearInterval(timer)
+  }, [pendingGateway, available])
+  const chooser = askWhere && step === "where" ? <LocationStep locations={available} allowRemote={allowRemote} connecting={Boolean(pendingGateway)}
+    onPick={(context) => { changeLocation(context); setStep("form") }}
+    onConnected={(job) => { setPendingGateway(job.gateway); onRefreshLocations?.() }}
+    onCancel={() => props.onOpenChange(false)} /> : null
   return <LocationProvider location={location}>
-    <CreateSandboxForm key={locationKey(location) ?? "default"} {...props} locations={available} onLocationChange={changeLocation} />
+    <CreateSandboxForm key={locationKey(location) ?? "default"} {...props} locations={available} onLocationChange={changeLocation}
+      chooser={chooser} onChangeLocation={askWhere ? () => setStep("where") : undefined} />
   </LocationProvider>
 }
 
-function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate = null, locations, onLocationChange }) {
+function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate = null, locations, onLocationChange, chooser, onChangeLocation }) {
   const api = useApi()
   const location = useLocation()
+  const reduceMotion = useReducedMotion()
   const [sandboxes, setSandboxes] = React.useState([])
   const [providers, setProviders] = React.useState([])
   const [name, setName] = React.useState("")
@@ -167,26 +193,6 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
   const [agentIds, setAgentIds] = React.useState([])
   const [openIn, setOpenIn] = React.useState("shell")
   const [quickProviders, setQuickProviders] = React.useState({})
-  const [progress, setProgress] = React.useState("")
-  const [showBuild, setShowBuild] = React.useState(false)
-  const [build, setBuild] = React.useState(null)
-  const [buildProgress, setBuildProgress] = React.useState("")
-  const buildLogs = React.useRef(null)
-  const followLogs = React.useRef(true)
-  const showBuildButton = React.useRef(null)
-  const closeBuildButton = React.useRef(null)
-  React.useEffect(() => {
-    if (showBuild) closeBuildButton.current?.focus()
-  }, [showBuild])
-  React.useEffect(() => {
-    if (showBuild && followLogs.current && buildLogs.current) buildLogs.current.scrollTop = buildLogs.current.scrollHeight
-  }, [showBuild, build?.logs, buildProgress])
-  function reportProgress(message) { setProgress(message); setBuildProgress(message) }
-  function closeBuild() { setShowBuild(false); showBuildButton.current?.focus() }
-  const [preparing, setPreparing] = React.useState(false)
-  const preparation = React.useRef(null)
-  const buildName = React.useRef(null)
-  const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
   const [start, setStart] = React.useState("empty")
@@ -196,12 +202,12 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
   const [org, setOrg] = React.useState(null)
-  // A prepared Quick-setup snapshot gets the egress policy of the setup it was prepared from.
-  const [setupSources, setSetupSources] = React.useState({})
   const [group, setGroup] = React.useState([])
   const [localCatalog, setLocalCatalog] = React.useState(null)
   const [catalogLoading, setCatalogLoading] = React.useState(false)
   const [catalogAttempt, setCatalogAttempt] = React.useState(0)
+  // Set by pressing Create while something is missing, so the missing fields turn red.
+  const [showMissing, setShowMissing] = React.useState(false)
 
   // A fresh sandbox starts in Quick setup; launching a saved template opens its tab.
   React.useEffect(() => {
@@ -213,21 +219,20 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
       const list = overview.sandboxes ?? []
       const savedProviders = overview.providers ?? []
       setSandboxes(list); setProviders(savedProviders)
-      setName(nextName(new Set(list.map((sandbox) => sandbox.name))))
+      setName(nextName(takenNames(list, location)))
       setChosen(savedProviders.map((provider) => provider.name))
     }).catch((e) => { if (current) setError(e.message) })
     setName("")
     setMode(initialImageTemplate ? "template" : "quick")
-    setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setProgress("")
+    setAgentIds([]); setOpenIn("shell"); setQuickProviders({})
     setSetupIds([])
-    setShowBuild(false); setBuild(null); setBuildProgress(""); followLogs.current = true
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => { if (current) setImages(items.filter((t) => t.status === "ready" || t.exists)) }).catch((e) => { if (current) setError(e.message) })
     setChosen([])
     setError(null); setPolicyDraft(null); setOrg(null)
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
-    setGroup([])
+    setGroup([]); setShowMissing(false)
     setLocalCatalog(null); setCatalogLoading(persistentGateway(location))
     const catalog = persistentGateway(location) ? api.syncLocalCatalog() : Promise.resolve(null)
     catalog.then(async (copied) => {
@@ -262,10 +267,8 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
     setAgentIds(next); setError(null)
     if (next.length !== 1 || !next.includes(openIn)) setOpenIn("shell")
     setQuickProviders((current) => Object.fromEntries(Object.entries(current).filter(([key]) => next.includes(key))))
-    if (/^(sandbox|terminal|claude|codex|cursor|opencode|pi|antigravity|copilot|kiro|droid|aider)-\d+$/.test(name)) setName(nextName(new Set((sandboxes ?? []).map((s) => s.name)), next.length === 1 ? next[0] : "sandbox"))
+    if (/^(sandbox|terminal|claude|codex|cursor|opencode|pi|antigravity|copilot|kiro|droid|aider)-\d+$/.test(name)) setName(nextName(takenNames(sandboxes ?? [], location), next.length === 1 ? next[0] : "sandbox"))
   }
-
-  React.useEffect(() => () => { preparation.current?.abort() }, [])
 
   // The server reads the folder, so it can apply .gitignore and count what it will send.
   React.useEffect(() => {
@@ -286,94 +289,99 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
 
   const filesSummary = start === "folder" ? folder.trim() : start === "repo" ? repository.trim() : ""
 
-  async function submit(event) {
+  // The work runs in the background so the console stays usable; its
+  // progress, build logs and result follow as a notification.
+  function submit(event) {
     event.preventDefault()
-    if (busy || location?.connected === false || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
-    setBusy(true); setError(null); setProgress(""); setBuild(null); setBuildProgress(""); followLogs.current = true
-    const controller = new AbortController()
-    preparation.current = controller
-    buildName.current = null
-    try {
-      const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
-      let environment = chosenImage
-      let launchSetupIds = [], launchAccessReview = null
-      setPreparing(true)
-      if (mode === "quick") {
-        const prepared = await prepareQuickSetups(api, setupIds, setupAccessReview, { signal: controller.signal, onProgress: reportProgress })
-        launchSetupIds = prepared.setups.map(s => s.id)
-        launchAccessReview = prepared.accessReview
-        environment = await prepareQuickTemplate(api, agentIds, {
-          withSetups: setupIds.length > 0, setups: prepared.setups, signal: controller.signal, onProgress: reportProgress,
-          onBuildUpdate: (value) => setBuild((previous) => ({ ...value, logs: value.logs ?? previous?.logs })),
-          onBuild: (value) => {
-            buildName.current = value
-            if (controller.signal.aborted) void api.cancelImageBuild(value).catch(() => {})
-          },
-        })
-      }
-      if (controller.signal.aborted) return
-      setPreparing(false); reportProgress("Creating sandbox…")
-      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, groups: group, ...files })
-      if (api.signal?.aborted || controller.signal.aborted) return
-      toast.success(`Creating ${created.name}`)
+    if (location?.connected === false) return
+    const missing = [!name && "sandbox-name", mode === "template" && !chosenImage && "sandbox-image-template", !groupReady && "sandbox-groups"].find(Boolean)
+    if (missing || !startReady || missingSetupAgent) {
+      setShowMissing(true)
+      if (missing) document.getElementById(missing)?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" })
+      return
+    }
+    const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
+    const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
+    const setups = setupIds, accessReview = setupAccessReview, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
+    sandboxCreations.start({ name: sandboxName, location, task: async ({ signal, progress, build, creating }) => {
+      let environment = template, launchSetupIds = [], launchAccessReview = null, buildName = null
+      const cancelBuild = () => { if (buildName) void api.cancelImageBuild(buildName).catch((e) => toast.error(e.message)) }
+      signal.addEventListener("abort", cancelBuild)
+      try {
+        if (quick) {
+          const prepared = await prepareQuickSetups(api, setups, accessReview, { signal, onProgress: progress })
+          launchSetupIds = prepared.setups.map(s => s.id)
+          launchAccessReview = prepared.accessReview
+          environment = await prepareQuickTemplate(api, agents, {
+            withSetups: setups.length > 0, setups: prepared.setups, signal, onProgress: progress,
+            onBuildUpdate: build,
+            onBuild: (value) => { buildName = value; if (signal.aborted) cancelBuild() },
+          })
+        }
+      } finally { signal.removeEventListener("abort", cancelBuild) }
+      if (signal.aborted) throw new DOMException("Cancelled", "AbortError")
+      creating()
+      const created = await api.create({ name: sandboxName, imageTemplate: environment.name, includeTemplateAccess: !quick, ...session, providers, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets: targets, groups, ...files })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
-      onOpenChange(false)
-      onCreated?.(created.name, { ...created, image: environment.image, providers: attachedProviders, createdAt: new Date().toISOString(), ...(location ? { location } : {}) })
-    } catch (e) {
-      if (e.name !== "AbortError") setError(e.message)
-    } finally {
-      setBusy(false); setPreparing(false); setProgress(""); preparation.current = null; buildName.current = null
-    }
+      return { ...created, image: environment.image, providers, createdAt: new Date().toISOString(), ...(location ? { location } : {}) }
+    } })
+    onOpenChange(false)
+    onStarted?.()
   }
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value) }}>
-      <DialogContent showCloseButton={!busy && !showBuild} className={`max-h-[90svh] gap-4 bg-transparent p-0 ring-0 ${showBuild ? "sm:max-w-md lg:max-w-[960px] lg:grid-cols-[28rem_minmax(0,1fr)]" : "sm:max-w-md"}`}>
-        <form onSubmit={submit} className={`flex min-h-0 min-w-0 flex-col gap-4 rounded-xl bg-popover p-4 ring-1 ring-foreground/10 ${showBuild ? "max-h-[52svh] lg:max-h-[90svh]" : "max-h-[90svh]"}`}>
-          <DialogHeader className="shrink-0">
-            <DialogTitle>New sandbox</DialogTitle>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90svh] gap-4 bg-transparent p-0 ring-0 sm:max-w-4xl">
+        {chooser ?? <>
+        <form onSubmit={submit} className={`@container flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-popover ring-1 ring-foreground/10 max-h-[90svh]`}>
+          <Tabs value={mode} onValueChange={(value) => { setMode(value); setError(null) }} className="contents">
+          <DialogHeader className="shrink-0 gap-3 px-5 pt-5 pb-4 @3xl:px-7 @3xl:pt-6">
+            {onChangeLocation && <div className="pr-8"><StepTrail step={2} /></div>}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pr-8">
+              <DialogTitle>New sandbox</DialogTitle>
+              {onChangeLocation ? <span className="flex items-center gap-1.5 rounded-full border border-border bg-muted/30 py-0.5 pr-1 pl-2.5 text-[11px] text-muted-foreground">
+                {location?.remote ? <Server aria-hidden="true" className="size-3" /> : <Laptop aria-hidden="true" className="size-3" />}
+                <span className="max-w-40 truncate text-foreground">{location?.remote ? locationLabel(location).replace(/^SSH · /, "") : "This computer"}</span>
+                <Button type="button" variant="ghost" size="sm" className="h-5 rounded-full px-2 text-[11px]" onClick={onChangeLocation}>Change</Button>
+              </span> : !initialImageTemplate && locations.length > 0 ? null : <LocationBadge location={location} />}
+              <TabsList className="ml-auto w-fit" aria-label="Sandbox creation method">
+                <TabsTrigger value="quick" className="px-3 text-xs">Quick setup</TabsTrigger>
+                <TabsTrigger value="template" className="px-3 text-xs">From template</TabsTrigger>
+              </TabsList>
+            </div>
+            {!onChangeLocation && locations.length > 0 && !initialImageTemplate && <div className="grid gap-1.5">
+              <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
+              <Select value={locationKey(location) ?? ""} onValueChange={onLocationChange} items={locations.map((item) => ({ value: locationKey(item), label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
+                <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
+                <SelectContent>{locations.map((item) => <SelectItem key={locationKey(item)} value={locationKey(item)} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>}
+            {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to create a sandbox.</p>}
+            {catalogLoading && <p role="status" className="text-xs text-muted-foreground">Loading your local network policies, MCPs &amp; Skills, and Groups…</p>}
+            {localCatalog?.available && <p className="text-xs text-muted-foreground">Your local network policies, MCPs &amp; Skills, and Groups are available here. Existing remote sandboxes keep their settings.</p>}
+            {persistentGateway(location) && !catalogLoading && !org && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => setCatalogAttempt(n => n + 1)}>Retry loading settings</Button>}
           </DialogHeader>
-          {catalogLoading && <p role="status" className="text-xs text-muted-foreground">Loading your local network policies, MCPs &amp; Skills, and Groups…</p>}
-          {localCatalog?.available && <p className="text-xs text-muted-foreground">Your local network policies, MCPs &amp; Skills, and Groups are available here. Existing remote sandboxes keep their settings.</p>}
-          {location?.remote && !catalogLoading && !org && <Button type="button" variant="outline" size="sm" onClick={() => setCatalogAttempt(n => n + 1)}>Retry loading settings</Button>}
-          {locations.length > 0 && !initialImageTemplate ? <div className="grid shrink-0 gap-1.5">
-            <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
-            <Select value={locationKey(location) ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: locationKey(item), label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
-              <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
-              <SelectContent>{locations.map((item) => <SelectItem key={locationKey(item)} value={locationKey(item)} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
-            </Select>
-          </div> : <LocationBadge location={location} />}
-          {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to create a sandbox.</p>}
 
-          <Tabs value={mode} onValueChange={(value) => { if (!busy) { setMode(value); setError(null) } }} className="contents">
-            <TabsList className="w-full shrink-0" aria-label="Sandbox creation method">
-              <TabsTrigger value="quick" disabled={busy}>Quick setup</TabsTrigger>
-              <TabsTrigger value="template" disabled={busy}>From template</TabsTrigger>
-            </TabsList>
-          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto overscroll-contain px-1">
-          <fieldset disabled={busy || location?.connected === false} className="grid min-w-0 gap-4 pb-3">
-
+          <div className="grid min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border @3xl:grid-cols-[minmax(0,1fr)_19rem] @3xl:overflow-hidden">
+          <fieldset disabled={location?.connected === false} className="contents">
+            <motion.div initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              className="grid min-w-0 content-start gap-6 p-5 @3xl:overflow-y-auto @3xl:p-7">
             <div className="grid gap-1.5">
               <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
-              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="font-mono text-xs" required
+              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="h-10 font-mono text-sm" required aria-invalid={(showMissing && !name) || undefined}
                 pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
-
-            {org ? <GroupField org={org} value={group} onChange={setGroup} setups={(mode === "quick" ? setupIds : chosenImage?.recipe?.setups ?? []).flatMap((id) => [id, setupSources[id]].filter(Boolean))}
-              onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
-              onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
-              : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}
 
             <TabsContent value="quick" className="grid gap-4">
               <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-xs font-medium">Agents</legend>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
                   {PRIMARY_QUICK_AGENTS.map((agent) => (
                     <label key={agent.id} className="relative min-w-0">
-                      <input type="checkbox" checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} disabled={busy} className="peer sr-only" />
-                      <span className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
+                      <input type="checkbox" checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} className="peer sr-only" />
+                      <span className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-all hover:-translate-y-px hover:bg-muted/50 hover:shadow-sm motion-reduce:hover:translate-y-0 @3xl:min-h-14 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
                         <img src={agent.logo} alt="" className="size-4 shrink-0 object-contain" />
                         <span className="min-w-0 flex-1">{agent.name}</span>
                         {agentIds.includes(agent.id) && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
@@ -382,13 +390,13 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                   ))}
                 </div>
                 <DropdownMenu>
-                  <DropdownMenuTrigger render={<Button type="button" variant="outline" disabled={busy} className="mt-2 w-full justify-between text-xs" />}>
+                  <DropdownMenuTrigger render={<Button type="button" variant="outline" className="mt-2 w-full justify-between text-xs" />}>
                     <span className="truncate">{OTHER_QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id)).map((agent) => agent.name).join(", ") || "More agents"}</span>
                     <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
                     {OTHER_QUICK_AGENTS.map((agent) => (
-                      <DropdownMenuCheckboxItem key={agent.id} checked={agentIds.includes(agent.id)} onCheckedChange={() => toggleAgent(agent.id)} closeOnClick={false} disabled={busy} className="text-xs">
+                      <DropdownMenuCheckboxItem key={agent.id} checked={agentIds.includes(agent.id)} onCheckedChange={() => toggleAgent(agent.id)} closeOnClick={false} className="text-xs">
                         <img src={agent.logo} alt="" className="size-4 shrink-0 object-contain" />
                         {agent.name}
                       </DropdownMenuCheckboxItem>
@@ -401,7 +409,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                 <div className="grid grid-cols-2 gap-2">
                   {[{ id: "shell", name: "Shell" }, ...(selectedAgents.length === 1 ? selectedAgents : [])].map((option) => (
                     <label key={option.id} className="relative min-w-0">
-                      <input type="radio" name="quick-open-in" value={option.id} checked={openIn === option.id} onChange={() => setOpenIn(option.id)} disabled={busy} className="peer sr-only" />
+                      <input type="radio" name="quick-open-in" value={option.id} checked={openIn === option.id} onChange={() => setOpenIn(option.id)} className="peer sr-only" />
                       <span className="flex min-h-16 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-3 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
                         {option.id === "shell" ? <Terminal className="size-5 shrink-0" aria-hidden="true" /> : <img src={option.logo} alt="" className="size-5 shrink-0 object-contain" />}
                         <span className="min-w-0 flex-1 font-medium">{option.name}</span>
@@ -417,11 +425,11 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                 const connections = compatibleProviders(providers, agent.id)
                 if (!connections.length) return null
                 return <div key={agent.id} className="grid gap-1.5">
-                  <Label htmlFor={`quick-sign-in-${agent.id}`} className="text-xs">{agent.name} sign-in</Label>
-                  <Select value={quickProviders[agent.id] || ""} onValueChange={(value) => setQuickProviders((current) => ({ ...current, [agent.id]: value ?? "" }))} disabled={busy}>
-                    <SelectTrigger id={`quick-sign-in-${agent.id}`} className="w-full text-xs"><SelectValue>{quickProviders[agent.id] || "Set up after creation"}</SelectValue></SelectTrigger>
+                  <Label htmlFor={`quick-sign-in-${agent.id}`} className="text-xs">{agent.name} API key</Label>
+                  <Select value={quickProviders[agent.id] || ""} onValueChange={(value) => setQuickProviders((current) => ({ ...current, [agent.id]: value ?? "" }))}>
+                    <SelectTrigger id={`quick-sign-in-${agent.id}`} className="w-full text-xs"><SelectValue>{quickProviders[agent.id] || "None, I’ll use my subscription"}</SelectValue></SelectTrigger>
                     <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
-                      <SelectItem value="" className="text-xs">Set up after creation</SelectItem>
+                      <SelectItem value="" className="text-xs">None, I’ll use my subscription</SelectItem>
                       {connections.map((provider) => <SelectItem key={provider.name} value={provider.name} className="text-xs">{provider.name}</SelectItem>)}
                     </SelectGroup></SelectContent>
                   </Select>
@@ -431,24 +439,17 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
             <TabsContent value="template" className="grid gap-4">
               <div className="grid gap-1.5">
                 <Label htmlFor="sandbox-image-template" className="text-xs">Environment</Label>
-                <Select value={imageTemplate} onValueChange={(value) => setImageTemplate(value ?? "")} disabled={busy}>
-                  <SelectTrigger id="sandbox-image-template" className="w-full text-xs"><SelectValue>{imageTemplate || "Choose a template"}</SelectValue></SelectTrigger>
+                <Select value={imageTemplate} onValueChange={(value) => setImageTemplate(value ?? "")}>
+                  <SelectTrigger id="sandbox-image-template" aria-invalid={(showMissing && !chosenImage) || undefined} className="w-full text-xs"><SelectValue>{imageTemplate || "Choose a template"}</SelectValue></SelectTrigger>
                   <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
                     {images.map((item) => <SelectItem key={item.name} value={item.name} className="text-xs">{item.name}</SelectItem>)}
                   </SelectGroup></SelectContent>
                 </Select>
-                {!images.length && <p className="text-[11px] text-muted-foreground">No ready templates. Use Quick setup or create one in Templates.</p>}
+                {showMissing && !chosenImage && images.length > 0 && <p className="text-[11px] text-destructive">Choose a template to create a sandbox.</p>}
+                {!images.length && <p className={`text-[11px] ${showMissing ? "text-destructive" : "text-muted-foreground"}`}>No ready templates. Use Quick setup or create one in Templates.</p>}
                 {chosenImage && <p className="text-[11px] text-muted-foreground">{templateAgents ? `Included tools: ${[...templateAgents.map((agent) => agent.name), ...(chosenImage.recipe.customAgents ?? []).map((agent) => agent.name), "Terminal"].join(", ")}` : "Installed tools are not reported by this template."}</p>}
               </div>
             </TabsContent>
-
-            {(mode === "quick" || (hasSetups && (missingSetupAgent || setupAgentIds.includes('aider')))) && <div className="space-y-3 border-t pt-4">
-              {mode === "quick" && !catalogLoading && org && <SetupPicker localCatalog={localCatalog} autoPrepare automaticAccess preparationContext="sandbox" accessReview={setupAccessReview} onAccessReview={setSetupAccessReview} value={setupIds} onChange={setSetupIds} />}
-              {hasSetups && missingSetupAgent && <p role="alert" className="text-xs text-destructive">
-                {setupAgentIds.includes('aider') ? 'Setup installation is unavailable for Aider. Choose another agent.' : mode === "quick" ? 'Choose an agent to use this Setup.' : 'Choose a template with a supported agent to use this Setup.'}
-              </p>}
-              {hasSetups && !missingSetupAgent && setupAgentIds.includes('aider') && <p className="text-xs text-muted-foreground">Setup installation is unavailable for Aider.</p>}
-            </div>}
 
             {mode === "template" && <div className="grid gap-1.5">
               <span className="text-xs font-medium">Providers</span>
@@ -471,7 +472,23 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
 
             </div>}
 
-            <p className="text-[11px] text-muted-foreground">Agent sign-in and service connections are included automatically. Network rules from all selected groups combine. Block rules take precedence.</p>
+            {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
+            </motion.div>
+
+            <motion.aside initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
+              className="grid min-w-0 content-start gap-6 border-t border-border bg-muted/25 p-5 @3xl:overflow-y-auto @3xl:border-t-0 @3xl:border-l @3xl:p-6">
+            {org ? <GroupField org={org} value={group} onChange={setGroup} invalid={showMissing && !groupReady}
+              onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
+              onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
+              : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}
+
+            {(mode === "quick" || (hasSetups && (missingSetupAgent || setupAgentIds.includes('aider')))) && <div className="space-y-3">
+              {mode === "quick" && !catalogLoading && <SetupPicker localCatalog={localCatalog} autoPrepare automaticAccess preparationContext="sandbox" accessReview={setupAccessReview} onAccessReview={setSetupAccessReview} value={setupIds} onChange={setSetupIds} />}
+              {hasSetups && missingSetupAgent && <p role="alert" className="text-xs text-destructive">
+                {setupAgentIds.includes('aider') ? 'Setup installation is unavailable for Aider. Choose another agent.' : mode === "quick" ? 'Choose an agent to use this Setup.' : 'Choose a template with a supported agent to use this Setup.'}
+              </p>}
+              {hasSetups && !missingSetupAgent && setupAgentIds.includes('aider') && <p className="text-xs text-muted-foreground">Setup installation is unavailable for Aider.</p>}
+            </div>}
 
             <div className="grid min-w-0">
               <SetupSection title="Add project files" summary={filesSummary}>
@@ -523,37 +540,17 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
                   </SetupSection>}
 
             </div>
-
-            {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
-
+            </motion.aside>
           </fieldset>
           </div>
 
-          </Tabs>
-          {progress && <p role="status" className="text-xs text-muted-foreground">{progress}</p>}
-          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none bg-popover px-0 pb-0">
-            <Button type="button" variant="ghost" disabled={busy && !preparing} onClick={() => {
-              if (preparing) {
-                preparation.current?.abort()
-                if (buildName.current) void api.cancelImageBuild(buildName.current).catch((e) => toast.error(e.message))
-              } else onOpenChange(false)
-            }}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
-            {mode === "quick" && (preparing || build) && <Button ref={showBuildButton} type="button" variant="outline" aria-expanded={showBuild} aria-controls="quick-build-logs" onClick={() => setShowBuild(true)}>Show build</Button>}
-            <Button type="submit" disabled={busy || location?.connected === false || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
-              {busy && <Spinner aria-hidden="true" />}{busy ? preparing ? "Preparing…" : "Creating…" : "Create sandbox"}
-            </Button>
+          <DialogFooter className="mx-0 mb-0 shrink-0 items-center rounded-none border-t border-border bg-popover px-5 py-4 @3xl:px-7">
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={location?.connected === false} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">Create sandbox</Button>
           </DialogFooter>
+          </Tabs>
         </form>
-        {showBuild && <section id="quick-build-logs" aria-label="Build logs" className="flex h-[32svh] min-h-0 min-w-0 flex-col gap-3 rounded-xl bg-popover p-4 ring-1 ring-foreground/10 lg:h-[min(36rem,90svh)]">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-medium">Build logs</h2>
-            <Button ref={closeBuildButton} type="button" variant="ghost" size="icon-sm" aria-label="Close build logs" onClick={closeBuild}><X /></Button>
-          </div>
-          <p role="status" className="text-xs text-muted-foreground">{build?.status === "failed" ? "Build failed" : build?.status === "ready" ? "Build complete" : buildProgress || "Preparing environment…"}</p>
-          {build?.name && <p className="truncate font-mono text-[11px] text-muted-foreground">{build.name}</p>}
-          <pre ref={buildLogs} tabIndex={0} aria-label="Build output" onScroll={(event) => { const el = event.currentTarget; followLogs.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40 }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/30 p-3 font-mono text-[10px] leading-relaxed">{build?.logs || (build?.status === "ready" ? "Using a ready image template. No build was needed." : "Waiting for build output…")}</pre>
-          {(build?.error || error) && <p role="alert" className="text-xs text-destructive">{build?.error || error}</p>}
-        </section>}
+        </>}
       </DialogContent>
     </Dialog>
     <PolicyDialog open={Boolean(policyDraft)} initial={policyDraft} onOpenChange={(value) => { if (!value) setPolicyDraft(null) }}
