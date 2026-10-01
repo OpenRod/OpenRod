@@ -262,7 +262,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
           {Object.entries(all.status).map(([key, value]) => value > 0 && <span key={key} className={STATUS[key].strip} style={{ width: `${value / all.total * 100}%` }} />)}
         </div>
         {inventory.error && sandboxes.length > 0 && <Notice id="sandboxes:inventory-error" tone="warning" title="Inventory refresh failed" actions={<Button size="xs" variant="outline" onClick={inventory.refresh}>Retry</Button>}>Showing the last reading. {inventory.error}</Notice>}
-        {locations.filter((location) => !location.connected).map((location) => <p key={location.context} role="status" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">{locationLabel(location)} disconnected. Its last inventory is retained; reconnect to use these resources.{location.error ? ` ${location.error}` : ""}</p>)}
+        {locations.filter((location) => !location.connected).map((location) => <LocationReconnect key={location.context} location={location} onReconnected={inventory.refresh} />)}
         {live.demo && <p className="border-b border-border px-6 py-2 text-xs text-amber-700">Preview · synthetic sandbox data</p>}
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
           <div className="relative mr-auto w-full sm:w-64"><Search aria-hidden="true" className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
@@ -341,6 +341,33 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
     <td className={cell}><span className="block truncate tabular-nums" title={sandbox.createdAt || "Not reported"}>{elapsedSince(sandbox.createdAt, now)}{sandbox.createdAt ? " ago" : ""}</span></td>
   </tr>
 })
+
+// Brings a disconnected SSH location back with the connect call the dialog
+// uses. A host that needs Docker or runtime images is left to the dialog.
+function LocationReconnect({ location, onReconnected }) {
+  const [state, setState] = React.useState({ busy: false, error: null })
+  const mounted = React.useRef(true)
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  async function reconnect() {
+    setState({ busy: true, error: null })
+    try {
+      let job = await api.connect({ host: location.host })
+      while (job.status === "working") {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        job = await api.connectionJob(job.id)
+      }
+      if (job.status !== "ready") throw new Error(job.error || `${location.host} needs setup. Use New sandbox → Remote to finish connecting.`)
+      onReconnected()
+      if (mounted.current) setState({ busy: false, error: null })
+    } catch (reason) {
+      if (mounted.current) setState({ busy: false, error: reason.message })
+    }
+  }
+  return <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">
+    <span>{locationLabel(location)} disconnected. Its last inventory is retained; reconnect to use these resources.{location.error ? ` ${location.error}` : ""}{state.error ? ` ${state.error}` : ""}</span>
+    {location.host && <Button size="xs" variant="outline" disabled={state.busy} onClick={reconnect}><RefreshCw className={`size-3 ${state.busy ? "animate-spin motion-reduce:animate-none" : ""}`} />{state.busy ? "Reconnecting…" : "Reconnect"}</Button>}
+  </div>
+}
 
 function SelectionCheckbox({ label, checked, mixed = false, disabled, onChange }) {
   const ref = React.useRef(null)
