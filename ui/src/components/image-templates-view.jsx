@@ -80,7 +80,10 @@ export function TemplatesView() {
                   <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '—' : startsIn(t.recipe.command)}</td>
                   <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
                   <td className="px-4 py-2"><Status record={t} /></td>
-                  <td className="px-4 py-2 text-right sm:pr-8"><Button variant="ghost" size="xs" onClick={() => launchable(t) ? setLaunch(t) : setSelectedName(t.name)}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button></td>
+                  <td className="px-4 py-2 text-right sm:pr-8"><div className="flex items-center justify-end gap-1">
+                    {!working(t) && (t.status === 'failed' || (t.status === 'ready' && t.managed)) && <Button variant="ghost" size="xs" aria-label={`Edit ${t.name}`} onClick={() => edit(t.recipe, t.status === 'ready' || Boolean(t.exists))}><Pencil />Edit</Button>}
+                    <Button variant="ghost" size="xs" onClick={() => launchable(t) ? setLaunch(t) : setSelectedName(t.name)}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button>
+                  </div></td>
                 </tr>)}</tbody>
               </table>
             </div>

@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { setupPython } from './setup-python.js'
 import { AGENTS } from '../src/lib/agents.js'
 
-const resourceProbe = readFileSync(new URL('./agent-resources.py', import.meta.url), 'utf8')
+const resourceProbe = setupPython('./agent-resources.py')
 
 // Inspect executables without starting an agent, reading credentials, or sourcing
 // user profile scripts. The same check finds image contents and later installs.
@@ -31,8 +31,8 @@ fi`).join('\n') + `\npython3 - <<'OPENSHELL_RESOURCES' 2>/dev/null\n${resourcePr
 
 export function createAgentInventory({ now = Date.now, ttl = 20_000 } = {}) {
   const cache = new Map()
-  return async function inventory(client, sandbox, gatewayKey = '') {
-    const key = `${gatewayKey}|${sandbox.workspace}|${sandbox.id || sandbox.name}|${sandbox.createdAt}`
+  return async function inventory(client, sandbox, gatewayKey = '', revision = '') {
+    const key = `${gatewayKey}|${sandbox.workspace}|${sandbox.id || sandbox.name}|${sandbox.createdAt}|${revision}`
     let entry = cache.get(key)
     if (sandbox.phase !== 'ready') {
       if (entry) entry.expires = 0
@@ -58,7 +58,9 @@ export function createAgentInventory({ now = Date.now, ttl = 20_000 } = {}) {
         const resourceLine = lines.find((line) => line.startsWith('openshell-agent-resources:'))
         let resources = null
         try { resources = JSON.parse(resourceLine?.slice('openshell-agent-resources:'.length)) } catch { /* Resource scans can fail independently. */ }
-        entry.result = { status: 'checked', agents, resources, checkedAt: new Date(now()).toISOString() }
+        let installedSetupIds = []
+        try { installedSetupIds = JSON.parse(lines.find(line => line.startsWith('openshell-installed-setups:'))?.slice('openshell-installed-setups:'.length)) ?? [] } catch {}
+        entry.result = { status: 'checked', agents, resources, installedSetupIds, checkedAt: new Date(now()).toISOString() }
       } catch {
         entry.result = { status: 'unavailable', agents: entry.result?.agents ?? null, resources: null, checkedAt: entry.result?.checkedAt ?? null }
       }

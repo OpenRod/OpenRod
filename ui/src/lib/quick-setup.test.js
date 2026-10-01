@@ -137,7 +137,56 @@ test('quick setup attachments require an image with Python without baking privat
     buildImageTemplate: async (recipe) => { built = recipe; return { status: 'building' } },
   }
   await prepareQuickTemplate(api, ['codex'], { withSetups: true, wait: async () => {} })
-  assert.deepEqual(built.runtimes, ['python'])
+  assert.deepEqual(built.runtimes, ['python', 'node'])
   assert.deepEqual(built.setups, [])
   assert.match(dockerfileFor(built), /python3/)
+})
+
+test('Quick setup pins selected Setups into the image and never reuses a different revision', async () => {
+  const setups=[{id:'a'.repeat(24),revision:'b'.repeat(64)}]
+  const recipe=quickRecipe(['codex'],'with-mcp','agent',true,setups)
+  assert.deepEqual(recipe.setups,[setups[0].id])
+  assert.deepEqual(recipe.setupRevisions,{[setups[0].id]:setups[0].revision})
+  assert.match(dockerfileFor(recipe),/COPY --chown=1000:1000 setup-bundles/)
+  assert.deepEqual(recipeErrors(recipe),{})
+  const image=ready(['codex'],{recipe})
+  assert.equal(matchingQuickTemplate([image],['codex'],'agent',true,setups),image)
+  assert.equal(matchingQuickTemplate([image],['codex'],'agent',true,[{...setups[0],revision:'c'.repeat(64)}]),undefined)
+})
+test('package preparation remaps reviewed access to the prepared snapshot and reports progress', async () => {
+  const {prepareQuickSetups}=await import('./quick-setup.js')
+  const source={id:'source',revision:'old',name:'My tools'}, prepared={id:'pinned',revision:'new'}
+  const progress=[]
+  const result=await prepareQuickSetups({
+    setups:async()=>[source],
+    prepareLaunchSetup:async(id,revision)=>{assert.equal(id,'source');assert.equal(revision,'old');return {id:'job',status:'running',message:'Installing shadcn'}},
+    setupPreparation:async()=>({status:'complete',setup:prepared}),
+  },['source'],{source:'old'},{wait:async()=>{},onProgress:s=>progress.push(s)})
+  assert.deepEqual(result,{setups:[prepared],accessReview:{pinned:'new'}})
+  assert.ok(progress.includes('Installing shadcn'))
+})
+test('failed or cancelled MCP preparation cannot proceed to image creation', async () => {
+  const {prepareQuickSetups}=await import('./quick-setup.js')
+  const source={id:'source',revision:'old',name:'My tools'}
+  const base={setups:async()=>[source],prepareLaunchSetup:async()=>({id:'job',status:'running'}),setupPreparation:async()=>({status:'failed',message:'shadcn: registry blocked'})}
+  await assert.rejects(prepareQuickSetups(base,['source'],null,{wait:async()=>{}}),/registry blocked/)
+  const controller=new AbortController();let cancelled
+  await assert.rejects(prepareQuickSetups({...base,cancelSetupPreparation:async id=>{cancelled=id}},['source'],null,{signal:controller.signal,wait:async()=>controller.abort()}),{name:'AbortError'})
+  assert.equal(cancelled,'job')
+  await assert.rejects(prepareQuickSetups(base,['source'],{source:'changed'}),/changed/)
+})
+test('automatic package eligibility excludes credentials, disabled and unsupported dependencies', async () => {
+  const {canPrepareAtLaunch,launchRequirements}=await import('../../shared/setup-launch.js')
+  const item={package:{name:'shadcn'},issues:['Prepare package dependencies in the next step.'],requirements:[]}
+  assert.equal(canPrepareAtLaunch(item),true)
+  assert.equal(canPrepareAtLaunch({...item,issues:['Registry failed'],preparationIssues:['Registry failed']}),true)
+  for(const change of [{disabled:true},{credentialFields:['TOKEN']},{issues:['Local executable needs packaging']},{artifact:{digest:'already-prepared'}}]) assert.equal(canPrepareAtLaunch({...item,...change}),false)
+  assert.ok(launchRequirements(item).some(r=>r.host==='ui.shadcn.com'&&r.phase==='runtime'))
+})
+
+test('launch rejects unprepared packages instead of silently omitting them', async () => {
+ const {assertPackagesPrepared}=await import('../../shared/setup-launch.js')
+ const item={name:'shadcn',package:{name:'shadcn'},issues:['Prepare package dependencies in the next step.']}
+ assert.throws(()=>assertPackagesPrepared([{items:[item]}]),/shadcn.*No sandbox was created/)
+ assert.doesNotThrow(()=>assertPackagesPrepared([{items:[{...item,artifact:{digest:'pinned'},issues:[]}]}]))
 })

@@ -136,3 +136,19 @@ test('resource probe scopes names to each agent without exposing configuration v
     assert.deepEqual(agentsOf({ agentInventory: await inventory(client, sandbox) })[0].resources, resources.Codex)
   } finally { await fs.rm(home, { recursive: true, force: true }) }
 })
+
+test('setup completion refreshes a cached empty resource scan immediately', async () => {
+  const inventory = createAgentInventory({ now: () => 1 })
+  let calls = 0
+  const client = { sandbox: { exec: async () => {
+    calls++
+    return output('codex', `openshell-agent-resources:${JSON.stringify({ Codex: { mcps: { status: 'checked', items: calls > 1 ? [{ name: 'figma' }] : [] } } })}`, 'openshell-installed-setups:["selected-setup"]')
+  } } }
+  const initial = await inventory(client, sandbox, 'gateway', 'waiting')
+  assert.equal(initial.resources.Codex.mcps.items.length, 0)
+  const completed = await inventory(client, sandbox, 'gateway', 'installed')
+  assert.equal(completed.resources.Codex.mcps.items.length, 1)
+  assert.deepEqual(completed.installedSetupIds, ['selected-setup'])
+  await inventory(client, sandbox, 'gateway', 'installed')
+  assert.equal(calls, 2)
+})

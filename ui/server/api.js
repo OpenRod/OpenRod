@@ -1,3 +1,4 @@
+import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -18,8 +19,9 @@ import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from '
 import { editorRoute } from './editor.js'
 import { terminalRoute, terminalUpgrade } from './terminal.js'
 import { macTerminalScript, terminalLaunchError } from './local-terminal.js'
+import { assertPackagesPrepared } from '../shared/setup-launch.js'
 import { setupRoute, resolveSetups } from './setups.js'
-import { deploymentRoute, startSetupInstall } from './setup-deployment.js'
+import { deploymentRoute, startSetupInstall, launchSetupAccess, setupJobsForSandbox } from './setup-deployment.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from './files.js'
 
@@ -109,10 +111,17 @@ async function sandboxDetail(name) {
     client.raw.getSandbox({ name, workspaceScope: WORKSPACE }),
     client.sandbox.getConfig(name).catch(() => null),
   ])
-  const [view] = nameSandboxImages([sandboxView(sandbox.sandbox)], await listImageTemplates().catch(() => []))
+  const templates = await listImageTemplates().catch(() => [])
+  const [view] = nameSandboxImages([sandboxView(sandbox.sandbox)], templates)
+  const setupJobs = setupJobsForSandbox(name, view.createdAt)
+  const inventory = await agentInventory(client, view, target.endpoint, JSON.stringify(setupJobs.map(job => [job.setup, job.status, job.at])))
+  const setupIds = [...new Set([...(templates.find(t => t.name === view.workloadTemplate)?.recipe?.setups ?? []), ...(inventory.installedSetupIds ?? []), ...setupJobs.filter(job => job.status !== 'removed').map(job => job.setup)])]
+  const installing = setupJobs.some(job => job.status === 'waiting')
   return {
     ...view,
-    agentInventory: await agentInventory(client, view, target.endpoint),
+    setupJobs,
+    setupIds,
+    agentInventory: installing ? { ...inventory, resources: null } : inventory,
     policy: policyView(config?.policy),
     policySource: config?.policySource ?? null,
     policyHash: config?.policyHash ?? null,
@@ -139,9 +148,11 @@ async function createSandbox(input) {
     input = { ...input, image: '', session: selectedSession, command: start ? ['/bin/bash', '-lc', start] : [] }
   }
   const setupIds = [...new Set([...(saved?.recipe?.setups ?? []), ...(Array.isArray(input.setups) ? input.setups : [])])]
-  const setupTargets = input.setupTargets ?? (saved?.recipe?.agents ?? []).filter((id) => ['codex', 'claude', 'cursor'].includes(id))
-  await resolveSetups(setupIds)
-  if (setupIds.length && (!Array.isArray(setupTargets) || !setupTargets.length || setupTargets.length > 3 || new Set(setupTargets).size !== setupTargets.length || setupTargets.some((id) => !['codex', 'claude', 'cursor'].includes(id)))) throw fail('Choose a supported agent for the selected Setups.')
+  const setupTargets = input.setupTargets ?? setupTargetsFor(saved?.recipe?.agents ?? [])
+  const selectedSetups = await resolveSetups(setupIds)
+  assertPackagesPrepared(selectedSetups)
+  const approvedSetupRevisions = launchSetupAccess(selectedSetups, saved?.recipe, input.setupAccessReview, input.includeTemplateAccess === true)
+  if (setupIds.length) { try { validateSetupTargets(setupTargets) } catch (error) { throw fail(error.message) } }
   if (setupIds.length) input = { ...input, session: 'shell', command: [] }
   const name = String(input.name ?? '').trim()
   const image = String(input.image ?? '').trim()
@@ -189,7 +200,7 @@ async function createSandbox(input) {
   // Files arrive once the sandbox is ready, as with `sandbox create --upload`.
   // Console sessions start through exec, so an agent opened later finds them.
   if (seed) startSeed(ref.name, seed)
-  if (setupIds.length) await startSetupInstall(ref.name, setupIds, setupTargets, ref.id)
+  if (setupIds.length) await startSetupInstall(ref.name, setupIds, setupTargets, ref.id, approvedSetupRevisions)
   return { name: ref.name, phase: ref.phase, opened, labels, setups: setupIds, seed: seed ? { kind: seed.kind, source: seed.source, dest: seed.dest } : null }
 }
 

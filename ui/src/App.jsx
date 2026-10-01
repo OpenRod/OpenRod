@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SetupsView } from "@/components/setups-view"
+import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
 import { ActivityView } from "@/components/activity-view"
@@ -23,7 +23,7 @@ const TITLES = {
   ingress: "Ingress",
   secrets: "Secrets",
   templates: "Templates",
-  setups: "Setups",
+  setups: "MCPs & Skills",
 }
 
 // One page failing to render must not take the console down with it.
@@ -47,7 +47,8 @@ class PageBoundary extends React.Component {
 function terminalFromLocation() {
   const match = /^#terminal\/([a-z0-9-]{1,63})(?:\?(.*))?$/.exec(window.location.hash)
   if (!match) return null
-  return { name: match[1], session: new URLSearchParams(match[2] ?? "").get("session") || undefined }
+  const params = new URLSearchParams(match[2] ?? "")
+  return { name: match[1], session: params.get("session") || undefined, setupLogin: params.get("setupLogin") || undefined, mcp: params.get("mcp") || undefined }
 }
 
 function viewFromLocation() {
@@ -82,7 +83,7 @@ export function App() {
     return (
       <>
         <React.Suspense fallback={null}>
-          <TerminalView key={`${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} />
+          <TerminalView key={`${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} setupLogin={terminal.setupLogin} mcp={terminal.mcp} />
         </React.Suspense>
         <Toaster position="bottom-right" />
       </>
@@ -98,6 +99,7 @@ export function App() {
             <SidebarTrigger className="mr-2 md:hidden" />
             <h1 className="text-[18px] font-semibold tracking-tight">{TITLES[view]}</h1>
           </header>
+          <SetupImportNotifications />
           <PageBoundary view={view}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} />}
           {view === "activity" && <ActivityView />}

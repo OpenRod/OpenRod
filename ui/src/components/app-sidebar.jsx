@@ -20,7 +20,7 @@ import { useLive } from "@/lib/live"
 const NAV = [
   { label: "Sandboxes", icon: Box, view: "sandboxes" },
   { label: "Templates", icon: Layers3, view: "templates" },
-  { label: "Setups", icon: Package, view: "setups" },
+  { label: "MCPs & Skills", icon: Package, view: "setups" },
   { label: "Activity", icon: Activity, view: "activity" },
 ]
 
