@@ -31,24 +31,32 @@ async function locked(name, task) {
 }
 const checkName = (name) => { if (!NAME_PATTERN.test(name || '')) throw fail('Unknown image template.', 404); return name }
 const missing = (e) => e?.code === 'not_found'
+export { run as runDocker }
 
-function run(args, { job, engine, timeout = 30_000 } = {}) {
+function run(args, { job, engine, timeout = 30_000, spawnProcess = spawn } = {}) {
   return new Promise((resolve, reject) => {
     if (job?.cancelled) return reject(fail('Operation cancelled.'))
     const host = engine?.endpoint
     const env = { ...process.env }
     if (host) { delete env.DOCKER_CONTEXT; delete env.DOCKER_HOST }
-    const child = spawn('docker', host ? ['--host', host, ...args] : args, { env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
-    if (job) job.child = child
-    let output = ''
+    const detached = process.platform !== 'win32'
+    const child = spawnProcess('docker', host ? ['--host', host, ...args] : args, { env, detached, shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
+    // Buildx and credential helpers can inherit these pipes. Stop the isolated
+    // process group so cancellation/timeout cannot wait forever for a helper.
+    const kill = (signal) => {
+      if (detached && child.pid) try { process.kill(-child.pid, signal); return true } catch { /* parent already exited or group unavailable */ }
+      return child.kill(signal)
+    }
+    if (job) job.child = { kill }
+    let output = '', stdout = ''
     let timedOut = false
     const append = (chunk) => {
       const clean = chunk.toString().replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
       output = (output + clean).slice(-100_000)
       if (job) job.logs = (job.logs + clean).slice(-100_000)
     }
-    child.stdout.on('data', append); child.stderr.on('data', append)
-    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, timeout)
+    child.stdout.on('data', chunk => { stdout = (stdout + chunk.toString()).slice(-100_000); append(chunk) }); child.stderr.on('data', append)
+    const timer = setTimeout(() => { timedOut = true; kill('SIGKILL') }, timeout)
     child.once('error', (e) => { clearTimeout(timer); reject(fail(e.code === 'ENOENT' ? 'Docker is not installed on this computer.' : e.message)) })
     child.once('close', (code) => {
       clearTimeout(timer)
@@ -56,7 +64,7 @@ function run(args, { job, engine, timeout = 30_000 } = {}) {
       if (job?.cancelled) reject(fail('Operation cancelled.'))
       else if (timedOut) reject(fail('Docker timed out. Check the engine and retry.'))
       else if (code) reject(fail(output.trim().slice(-1600) || `Docker exited with code ${code}.`))
-      else resolve(output)
+      else resolve(stdout)
     })
   })
 }
@@ -65,10 +73,11 @@ export async function localEngine({ execute = run } = {}) {
     const endpoint = process.env.DOCKER_HOST || JSON.parse(await execute(['context', 'inspect']))[0]?.Endpoints?.docker?.Host
     if (!endpoint?.startsWith('unix://')) throw fail('Select a local Docker context with a Unix socket, then retry.')
     const info = JSON.parse(await execute(['info', '--format', '{{json .}}'], { engine: { endpoint } }))
+    if (info.ServerErrors?.length) throw fail(`Docker is unavailable. Start Docker Desktop and retry. ${info.ServerErrors.join(' ')}`, 503)
     if (info.OSType !== 'linux') throw fail('Switch local Docker to Linux containers, then retry.')
     return { endpoint, architecture: info.Architecture === 'aarch64' ? 'arm64' : info.Architecture === 'x86_64' ? 'amd64' : info.Architecture, engineId: info.ID }
   } catch (e) {
-    throw fail(`Local Docker is required to build images. Install or start Docker on this computer and select a local Docker context. ${e.message}`)
+    throw fail(`Local Docker is required to build images. Install or start Docker on this computer and select a local Docker context. ${e.message}`, e.status ?? 400)
   }
 }
 async function deploymentEngine(target) {

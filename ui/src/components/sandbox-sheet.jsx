@@ -1,5 +1,5 @@
 import { SetupsView } from "@/components/setups-view"
-import { useCloudMode } from "./auth-gate"
+import { useCompute } from "@/lib/compute"
 import * as React from "react"
 import { AlertTriangle, Box, ChevronRight, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -43,10 +43,11 @@ function Section({ title, icon: Icon, children, aside, className }) {
 
 function useEditors() {
   const api = useApi()
-  const cloud = useCloudMode()
+  const compute = useCompute()
+  const nativeActions = Boolean(compute?.nativeActions)
   const [editors, setEditors] = React.useState([])
   React.useEffect(() => {
-    if (cloud) return
+    if (!nativeActions) return
     let cancelled = false
     let timer
     let editorsRequest
@@ -57,7 +58,7 @@ function useEditors() {
     }
     load()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [cloud, api])
+  }, [nativeActions, api])
   return editors
 }
 
@@ -190,7 +191,7 @@ const RULE_TAG = { secret: "from provider", policy: "network rule", org: "blocke
 export function SandboxSheet(props) {
   const location = useLocation()
   return location && !props.liveData?.demo
-    ? <LiveProvider key={location.context}><SandboxSheetContent key={props.name} {...props} scoped /></LiveProvider>
+    ? <LiveProvider key={location.id ?? location.context}><SandboxSheetContent key={props.name} {...props} scoped /></LiveProvider>
     : <SandboxSheetContent key={props.name} {...props} />
 }
 
@@ -207,7 +208,9 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
-  const cloud = useCloudMode()
+  const compute = useCompute()
+  const nativeActions = Boolean(compute?.nativeActions)
+  const cloud = Boolean(location?.cloud || (location?.target ?? compute?.target) === "cloud")
   const editors = useEditors()
   const summary = live.sandboxes?.find((s) => s.name === name) ?? owningSandbox
 
@@ -316,7 +319,7 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && !live.demo && location?.connected !== false && <OpenIn key={name} name={name} editors={editors} cloud={cloud} context={location ? { name: location.gateway, workspace: location.workspace } : live.overview?.gateway} />}
+                    {phase === "ready" && !live.demo && location?.connected !== false && <OpenIn key={name} name={name} editors={editors} cloud={!nativeActions} context={location ? { name: location.gateway, workspace: location.workspace, target: location.target } : { ...live.overview?.gateway, target: compute?.target }} />}
                     {!live.demo && phase === "ready" && location?.connected !== false && cloud && <ContinueLocally key={name} name={name} sandbox={sandbox} />}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">

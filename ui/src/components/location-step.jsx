@@ -151,7 +151,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
           <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-2" : ""}`}>
           <Place index={0} scene="local" live={local?.connected} title="This computer" caption={localCaption} tone={local?.connected ? "live" : "idle"}
             disabled={local ? !local.connected : !locals?.length || localBusy}
-            onClick={() => local ? onPick(local.context) : chooseRegisteredLocal()}
+            onClick={() => local ? onPick(local.id ?? local.context) : chooseRegisteredLocal()}
             trailing={localBusy && <Loader2 className="size-4 animate-spin text-muted-foreground" />} />
           {allowRemote && <Place index={1} scene="remote" live={remote?.connected} title="Remote machine"
             caption={remote?.connected ? `Connected · ${hostOf(remote)}` : remote ? `${hostOf(remote)} · Disconnected` : "Your server, over SSH"}
@@ -164,7 +164,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
         </motion.div> : <motion.div key="remote" {...slide}>
           {connecting ? <div role="status" className="grid place-items-center gap-3 py-16 text-xs text-muted-foreground">
             <Loader2 className="size-5 animate-spin" />Connected. Opening the sandbox form…
-          </div> : <RemoteConnect initialHost={remote ? hostOf(remote) : undefined} connectedHost={remote?.connected ? hostOf(remote) : null} onUseConnected={() => onPick(remote.context)} onConnected={onConnected} onBack={() => setView("choose")} />}
+          </div> : <RemoteConnect initialHost={remote ? hostOf(remote) : undefined} connectedHost={remote?.connected ? hostOf(remote) : null} onUseConnected={() => onPick(remote.id ?? remote.context)} onConnected={onConnected} onBack={() => setView("choose")} />}
         </motion.div>}
       </AnimatePresence>
     </div>

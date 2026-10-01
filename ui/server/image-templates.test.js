@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -513,6 +513,13 @@ test('local Docker discovery is independent of selected SSH compute and unavaila
   }
 })
 
+test('Docker reports server diagnostics before rejecting a malformed engine response', async () => {
+  await assert.rejects(localEngine({ execute: async args => args[0] === 'context'
+    ? JSON.stringify([{ Endpoints: { docker: { Host: 'unix:///local.sock' } } }])
+    : JSON.stringify({ ServerErrors: ['Cannot connect to the Docker daemon.'] }),
+  }), /Cannot connect to the Docker daemon/)
+})
+
 test('a Docker context pointing at the SSH deployment engine cannot be used to build remotely', async () => {
   const fixture = publicationFixture()
   fixture.input.buildEngine = { ...fixture.input.engine, endpoint: 'unix:///other-tunnel-to-same-engine.sock' }
@@ -599,5 +606,40 @@ test('invalid imported setup bases and interrupted builds preserve user tags and
       assert.match(event.args.at(-1), /^openshell-template\/app:base-/)
     }
     await assert.rejects(fs.access(fixture.files.baseArchive), { code: 'ENOENT' })
+  }
+})
+
+test('package index failures fail the image build with the original download error',()=>{
+ assert.match(dockerfileFor(newRecipe({name:'dns-check'})),/RUN apt-get update --error-on=any && apt-get install/)
+})
+
+test('Docker JSON commands keep diagnostic stderr out of successful stdout', async () => {
+  const {runDocker} = await import('./image-templates.js')
+  const {EventEmitter} = await import('node:events'), {PassThrough} = await import('node:stream')
+  const child = new EventEmitter();child.stdout = new PassThrough();child.stderr = new PassThrough();child.kill = () => {}
+  const job = {logs:''}
+  const result = runDocker(['info'], {job,spawnProcess:()=>child})
+  child.stderr.end('Cannot connect to the Docker daemon.\n')
+  child.stdout.end('{"ServerErrors":["Cannot connect to the Docker daemon."]}\n')
+  child.emit('close',0)
+  assert.deepEqual(JSON.parse(await result),{ServerErrors:['Cannot connect to the Docker daemon.']})
+  assert.match(job.logs,/Cannot connect/)
+})
+
+for (const cancellation of [false,true]) test(`Docker ${cancellation ? 'cancellation' : 'timeout'} closes descendant helpers holding its output pipes`, {skip:process.platform === 'win32'}, async () => {
+  const {runDocker} = await import('./image-templates.js')
+  const job = {logs:''}
+  const script = `const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});console.log(child.pid);setInterval(()=>{},1000)`
+  let child, deadline
+  try {
+    const result = runDocker(['build'], {job,timeout:250,spawnProcess:(_command,_args,options)=>{
+      child = spawn(process.execPath,['-e',script],options)
+      if(cancellation) child.stdout.once('data',()=>{job.cancelled=true;job.child.kill('SIGKILL')})
+      return child
+    }})
+    await assert.rejects(Promise.race([result,new Promise((_,reject)=>{deadline=setTimeout(()=>reject(Error('Helper kept the build open')),1500)})]),cancellation ? /Operation cancelled/ : /Docker timed out/)
+  } finally {
+    clearTimeout(deadline)
+    for(const pid of [child?.pid,Number(job.logs.trim())]) if(pid) try {process.kill(pid,'SIGKILL')} catch {}
   }
 })

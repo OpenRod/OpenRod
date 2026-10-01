@@ -80,7 +80,7 @@ function SeedStatus({ seed, onRetry }) {
 
 export function FilesView(props) {
   const location = useLocation()
-  return <ScopedFilesView key={`${location?.context ?? "default"}:${props.sandbox.name}`} {...props} />
+  return <ScopedFilesView key={`${location?.id ?? location?.context ?? "default"}:${props.sandbox.name}`} {...props} />
 }
 
 function ScopedFilesView({ sandbox, demo }) {
@@ -156,7 +156,7 @@ function ScopedFilesView({ sandbox, demo }) {
     try {
       const { token, filename, bytes } = await api.prepareDownload(name, target)
       const link = document.createElement("a")
-      link.href = `/api/os/downloads/${token}?context=${encodeURIComponent(await api.contextKey())}${location ? "&location=1" : ""}`
+      link.href = api.url(`/downloads/${token}`, { context: await api.contextKey(), ...(location ? { location: "1" } : {}) })
       link.download = filename
       document.body.append(link); link.click(); link.remove()
       toast.success(`Downloading ${filename}`, { id, description: formatBytes(bytes) })

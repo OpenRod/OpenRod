@@ -1,3 +1,4 @@
+import { useApi, useCompute } from '@/lib/compute'
 import * as React from "react"
 import { Plus } from "lucide-react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
@@ -53,7 +54,8 @@ function locationFromHash() {
   const gateway = params.get("gateway"), workspace = params.get("workspace")
   if (!gateway || !workspace) return null
   const remote = params.get("remote") === "1"
-  return { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, remote, label: params.get("label") || (remote ? `SSH · ${gateway}` : "Local") }
+  const target = params.get("target") ?? new URLSearchParams(window.location.search).get("target") ?? undefined
+  return { id: JSON.stringify([target ?? "local", JSON.stringify([gateway, workspace])]), context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, remote, target, cloud: target === "cloud", label: params.get("label") || (remote ? `SSH · ${gateway}` : "Local") }
 }
 
 function ScopedPage({ location, children }) {
@@ -66,7 +68,7 @@ function terminalFromLocation() {
   if (!match) return null
   const params = new URLSearchParams(match[2] ?? "")
   const gateway = params.get("gateway"), workspace = params.get("workspace")
-  const location = gateway && workspace ? { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true } : null
+  const location = gateway && workspace ? { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, target: new URLSearchParams(window.location.search).get("target") ?? undefined } : null
   return { name: match[1], session: params.get("session") || undefined, setupLogin: params.get("setupLogin") || undefined, mcp: params.get("mcp") || undefined, location }
 }
 
@@ -101,6 +103,8 @@ function ConnectionGate({ onSetup, children }) {
 
 export function App() {
   const cloud = useCloudMode()
+  const api = useApi()
+  const compute = useCompute()
   const [view, setView] = React.useState(viewFromLocation)
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
   const [createRequest, setCreateRequest] = React.useState(0)
@@ -120,10 +124,10 @@ export function App() {
   }, [])
 
   function navigate(next, location = null) {
-    if (!TITLES[next]) return
+    if (api.signal?.aborted || !TITLES[next]) return
     setView(next)
     setPageLocation(location)
-    const params = location ? `?${new URLSearchParams({ gateway: location.gateway, workspace: location.workspace, label: location.label, remote: location.remote ? "1" : "0" })}` : ""
+    const params = location ? `?${new URLSearchParams({ gateway: location.gateway, workspace: location.workspace, label: location.label, remote: location.remote ? "1" : "0", ...(location.target ? { target: location.target } : {}) })}` : ""
     window.history.pushState(null, "", next === "sandboxes" && !location ? window.location.pathname : `#${next}${params}`)
   }
 
@@ -132,7 +136,7 @@ export function App() {
       <>
         <React.Suspense fallback={null}>
           <LocationProvider location={terminal.location}>
-            <TerminalView key={`${terminal.location?.context ?? ""} ${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} setupLogin={terminal.setupLogin} mcp={terminal.mcp} />
+            <TerminalView key={`${compute?.target} ${terminal.location?.context ?? ""} ${terminal.name} ${terminal.session ?? ""}`} name={terminal.name} session={terminal.session} setupLogin={terminal.setupLogin} mcp={terminal.mcp} />
           </LocationProvider>
         </React.Suspense>
         <Toaster position="bottom-right" />
@@ -153,7 +157,7 @@ export function App() {
           </header>
           <SetupImportNotifications />
           <SandboxCreationNotifications />
-          <PageBoundary key={`${view}:${pageLocation?.context ?? ""}`} view={view}>
+          <PageBoundary key={`${view}:${pageLocation?.target ?? ""}:${pageLocation?.context ?? ""}`} view={view}>
           <ScopedPage location={pageLocation}>
           <ConnectionGate onSetup={view === "sandboxes" || view === "templates" ? undefined : connectMachine}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} allowRemote={!cloud} createRequest={createRequest} onCreateRequestHandled={() => setCreateRequest(0)} />}
