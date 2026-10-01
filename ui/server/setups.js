@@ -19,6 +19,15 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
   return {
     get,
     preview(id) { return token(previews, id) },
+    removeReviewItem(previewToken, itemId) {
+      const preview = token(previews, previewToken)
+      if (!preview.items.some(item => item.id === itemId)) throw fail('Import item not found.', 404)
+      const items = preview.items.filter(item => item.id !== itemId)
+      const credentials = Object.fromEntries(Object.entries(preview.credentials || {}).filter(([id]) => id !== itemId))
+      const review = this.stage(items, credentials)
+      previews.delete(previewToken)
+      return review
+    },
     stage(items, credentials = {}) {
       expire(previews)
       const id = randomUUID(), revision = hash(JSON.stringify(items))
@@ -127,6 +136,7 @@ export async function setupRoute(method, parts, input) {
   if (parts[1] === 'prepare') return (await import('./setup-preparation.js')).prepareImport(setupStore, input)
   if (parts[1] === 'scan') return setupStore.scan(input.sources)
   if (parts[1] === 'review') return setupStore.review(input.token, input.ids)
+  if (parts[1] === 'remove-review-item') return setupStore.removeReviewItem(input.token, input.item)
   if (parts[1] === 'file') return setupStore.file(input.token, input.item, input.path)
   if (parts[1] === 'save') return setupStore.save(input.token, input.name, input.acknowledged)
   return undefined

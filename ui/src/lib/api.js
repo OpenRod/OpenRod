@@ -9,7 +9,7 @@ async function request(path, { method = "GET", body } = {}) {
   })
   const payload = await response.json().catch(() => ({}))
   if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
-  if (!response.ok) throw new Error(payload.error ?? `Request failed (${response.status})`)
+  if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes })
   return payload
 }
 
@@ -17,6 +17,7 @@ export const api = {
   setups: () => request('/setups'),
   discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
   reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),
+  removeSetupReviewItem: (token, item) => request('/setups/remove-review-item', { method: 'POST', body: { token, item } }),
   prepareSetup: (token, items) => request('/setups/prepare', { method: 'POST', body: { token, items, approved: true } }),
   prepareLaunchSetup: (id, revision) => request(`/setups/${id}/prepare-launch`, { method: 'POST', body: { revision } }),
   prepareSavedSetup: (id) => request(`/setups/${id}/prepare`, { method: 'POST', body: {} }),
@@ -67,18 +68,20 @@ export const api = {
   deleteSecret: (name) => request(`/secrets/${encodeURIComponent(name)}/delete`, { method: "POST", body: {} }),
   attachSecret: (name, sandbox, attach) => request(`/secrets/${encodeURIComponent(name)}/${attach ? "attach" : "detach"}`, { method: "POST", body: { sandbox } }),
   importProfile: (id) => request("/profiles/import", { method: "POST", body: { id } }),
+  deleteTemplates: (ids) => request("/templates/delete", { method: "POST", body: { ids } }),
   templates: () => request("/templates"),
   imageTemplates: () => request("/image-templates"),
   localImages: () => request("/image-templates/local-images"),
   buildImageTemplate: (recipe, replace = false) => request("/image-templates", { method: "POST", body: { recipe, replace } }),
   cancelImageBuild: (name) => request(`/image-templates/${encodeURIComponent(name)}/cancel`, { method: "POST", body: {} }),
   dismissImageBuild: (name) => request(`/image-templates/${encodeURIComponent(name)}/dismiss`, { method: "POST", body: {} }),
+  imageTemplateUsage: (name) => request(`/image-templates/${encodeURIComponent(name)}/usage`),
   deleteImageTemplate: (name) => request(`/image-templates/${encodeURIComponent(name)}/delete`, { method: "POST", body: {} }),
   org: () => request("/org"),
   saveOrg: (org) => request("/org", { method: "POST", body: org }),
   saveGroup: (group) => request("/org/groups", { method: "POST", body: group }),
   deleteGroup: (id) => request(`/org/groups/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
-  setGroupMembers: (sandboxes, group) => request("/org/members", { method: "POST", body: { sandboxes, group } }),
+  setGroupMembers: (sandboxes, groups, mode = "replace") => request("/org/members", { method: "POST", body: { sandboxes, groups, mode } }),
   savePolicy: (policy) => request("/egress/policies", { method: "POST", body: policy }),
   deletePolicy: (id) => request(`/egress/policies/${encodeURIComponent(id)}/delete`, { method: "POST", body: {} }),
   saveTemplate: (template) => request("/templates", { method: "POST", body: template }),
