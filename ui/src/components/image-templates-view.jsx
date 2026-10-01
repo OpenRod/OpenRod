@@ -2,6 +2,7 @@ import * as React from 'react'
 import { ArrowRight, Copy, HardDrive, Pencil, Plus, RotateCw, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { BlurFade } from '@/components/ui/blur-fade'
@@ -30,6 +31,9 @@ export function TemplatesView() {
   const [remove, setRemove] = React.useState(null)
   const [launch, setLaunch] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
+  const deleting = React.useRef(false)
+  const [checked, setChecked] = React.useState(() => new Set())
+  const [deleteErrors, setDeleteErrors] = React.useState([])
   const load = React.useCallback(async () => {
     try { setRecords(await api.imageTemplates()); setError('') } catch (e) { setError(e.message) }
   }, [])
@@ -38,6 +42,52 @@ export function TemplatesView() {
   React.useEffect(() => { const timer = setInterval(() => { if (document.visibilityState === 'visible') load() }, hasWork ? 1200 : 5000); return () => clearInterval(timer) }, [hasWork, load])
   const selected = records?.find((t) => t.name === selectedName)
   const shown = (records || []).filter((t) => `${t.name} ${t.image || ''} ${t.recipe.repository || ''}`.toLowerCase().includes(query.toLowerCase()))
+  const selectable = shown.filter((t) => !working(t))
+  const checkedRecords = (records || []).filter((t) => checked.has(t.name) && !working(t))
+  const matchingChecked = selectable.filter((t) => checked.has(t.name)).length
+  const allChecked = selectable.length > 0 && matchingChecked === selectable.length
+  React.useEffect(() => {
+    if (!records) return
+    const available = new Set(records.filter((t) => !working(t)).map((t) => t.name))
+    setChecked((current) => new Set([...current].filter((name) => available.has(name))))
+  }, [records])
+  function toggle(name) {
+    setChecked((current) => { const next = new Set(current); if (next.has(name)) next.delete(name); else next.add(name); return next })
+  }
+  function toggleMatching() {
+    setChecked((current) => {
+      const next = new Set(current)
+      for (const t of selectable) { if (allChecked) next.delete(t.name); else next.add(t.name) }
+      return next
+    })
+  }
+  function askRemove(targets) { setDeleteErrors([]); setRemove(targets) }
+  async function deleteTemplates() {
+    if (deleting.current || !remove?.length) return
+    deleting.current = true
+    setBusy(true)
+    setDeleteErrors([])
+    const succeeded = new Set(), failures = [], retained = new Map()
+    try {
+      for (const t of remove) {
+        try {
+          const result = await api.deleteImageTemplate(t.name)
+          succeeded.add(t.name)
+          const cleanup = result?.imageCleanup
+          if (cleanup?.status === 'retained') retained.set(cleanup.image, cleanup.reason)
+          else if (cleanup?.image) retained.delete(cleanup.image)
+        }
+        catch (e) { failures.push({ name: t.name, message: e.message }) }
+      }
+      for (const [image, reason] of retained) toast.warning(reason, { description: image, duration: 10000 })
+      setChecked((current) => new Set([...current].filter((name) => !succeeded.has(name))))
+      setSelectedName((name) => succeeded.has(name) ? null : name)
+      setDeleteErrors(failures)
+      if (succeeded.size) toast.success(`Deleted ${succeeded.size} ${succeeded.size === 1 ? 'template' : 'templates'}`)
+      setRemove(failures.length ? remove.filter((t) => !succeeded.has(t.name)) : null)
+      await load()
+    } finally { deleting.current = false; setBusy(false) }
+  }
   function edit(recipe, replace) { setSelectedName(null); setEditor({ recipe, replace }) }
   function closeEditor() { try { sessionStorage.removeItem(PENDING_RECIPE_KEY) } catch {} setEditor(null) }
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
@@ -50,6 +100,11 @@ export function TemplatesView() {
       </div>
       <Button size="sm" className={action} onClick={() => setEditor({})}><Plus />New template</Button>
     </div>
+    {checkedRecords.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-8">
+      <span role="status" className="mr-auto text-xs">{checkedRecords.length} selected{checkedRecords.length > matchingChecked && <span className="text-muted-foreground"> · {checkedRecords.length - matchingChecked} outside current filters</span>}</span>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => setChecked(new Set())}>Clear selection</Button>
+      <Button variant="destructive" size="sm" disabled={busy} onClick={() => askRemove(checkedRecords)}><Trash2 />Delete selected</Button>
+    </div>}
     {error ? <div role="alert" className="px-4 py-6 text-xs sm:px-8"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>
       : records === null ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
       : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground">
@@ -60,16 +115,17 @@ export function TemplatesView() {
         <div className="overflow-x-auto">
           <table aria-label="Image templates" className="w-full min-w-[580px] text-left">
             <thead className="border-b text-[11px] text-muted-foreground">
-              <tr><th className="px-4 py-2 font-normal sm:pl-8">Name</th><th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
+              <tr><th className="w-10 px-4 py-2 sm:pl-8"><Checkbox aria-label="Select all matching templates" checked={allChecked} indeterminate={matchingChecked > 0 && !allChecked} disabled={busy || !selectable.length} onCheckedChange={toggleMatching} /></th><th className="px-4 py-2 font-normal">Name</th><th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
             </thead>
-            <tbody className="divide-y">{shown.map((t) => <tr key={t.name} className="hover:bg-muted/40">
-              <td className="max-w-72 px-4 py-2 sm:pl-8">
+            <tbody className="divide-y">{shown.map((t) => <tr key={t.name} className={checked.has(t.name) ? "bg-accent/40 hover:bg-muted/40" : "hover:bg-muted/40"}>
+              <td className="px-4 py-2 sm:pl-8"><Checkbox aria-label={`Select ${t.name}`} checked={checked.has(t.name)} disabled={busy || working(t)} onCheckedChange={() => toggle(t.name)} /></td>
+              <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedName(t.name)}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
               </td>
               <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '—' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>
-              <td className="px-4 py-2 text-right sm:pr-8"><div className="flex items-center justify-end gap-1">{!working(t) && (t.status === 'failed' || (t.status === 'ready' && t.managed)) && <Button variant="ghost" size="xs" aria-label={`Edit ${t.name}`} onClick={() => edit(t.recipe, t.status === 'ready' || Boolean(t.exists))}><Pencil />Edit</Button>}<Button variant="ghost" size="xs" onClick={() => launchable(t) ? setLaunch(t) : setSelectedName(t.name)}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button></div></td>
+              <td className="px-4 py-2 text-right sm:pr-8"><div className="flex items-center justify-end gap-1">{!working(t) && (t.status === 'failed' || (t.status === 'ready' && t.managed)) && <Button variant="ghost" size="xs" aria-label={`Edit ${t.name}`} onClick={() => edit(t.recipe, t.status === 'ready' || Boolean(t.exists))}><Pencil />Edit</Button>}<Button variant="ghost" size="xs" onClick={() => launchable(t) ? setLaunch(t) : setSelectedName(t.name)}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button><Button variant="ghost" size="icon-sm" aria-label={`Delete ${t.name}`} title={working(t) ? "Cancel the build before deleting this template" : `Delete ${t.name}`} disabled={busy || working(t)} onClick={() => askRemove([t])}><Trash2 /></Button></div></td>
             </tr>)}</tbody>
           </table>
         </div>
@@ -95,12 +151,17 @@ export function TemplatesView() {
             {selected.status === 'failed' && selected.exists && <Button variant="ghost" size="sm" onClick={() => run(() => api.dismissImageBuild(selected.name))}>Dismiss</Button>}
             {selected.status === 'ready' && selected.managed && <Button variant="ghost" size="sm" onClick={() => edit(selected.recipe, true)}><Pencil />Edit</Button>}
             {selected.managed !== false && <Button variant="ghost" size="sm" onClick={() => edit({ ...selected.recipe, name: `${selected.name.slice(0, 14)}-copy` }, false)}><Copy />Duplicate</Button>}
-            <Button variant="ghost" size="icon-sm" aria-label="Remove image template" onClick={() => setRemove(selected)}><Trash2 /></Button>
+            <Button variant="ghost" size="icon-sm" aria-label="Delete image template" disabled={busy} onClick={() => askRemove([selected])}><Trash2 /></Button>
             {launchable(selected) && <Button className={`ml-auto ${action}`} onClick={() => { setLaunch(selected); setSelectedName(null) }}>Use template<ArrowRight /></Button>}
           </>}</div>
       </>}
     </DialogContent></Dialog>
-    <Dialog open={Boolean(remove)} onOpenChange={(open) => { if (!open) setRemove(null) }}><DialogContent><DialogHeader><DialogTitle>Remove this template?</DialogTitle><DialogDescription>The OpenShell template is deleted. Its Docker image and existing sandboxes stay.</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setRemove(null)}>Keep template</Button><Button variant="destructive" disabled={busy} onClick={async () => { setBusy(true); try { await api.deleteImageTemplate(remove.name); setRemove(null); setSelectedName(null); await load() } catch (e) { toast.error(e.message) } finally { setBusy(false) } }}>{busy && <Spinner />}Remove template</Button></div></DialogContent></Dialog>
+    <Dialog open={Boolean(remove)} onOpenChange={(open) => { if (!open && !deleting.current) setRemove(null) }}><DialogContent>
+      <DialogHeader><DialogTitle>Delete {remove?.length === 1 ? 'this template' : `${remove?.length ?? 0} templates`}?</DialogTitle><DialogDescription>The selected templates and their unused local Docker images will be deleted. Images still needed by other templates or sandboxes are kept. Existing sandboxes stay.</DialogDescription></DialogHeader>
+      <ul className="max-h-40 overflow-y-auto text-xs">{remove?.map((t) => <li key={t.name} className="break-all py-1 font-mono">{t.name}</li>)}</ul>
+      {deleteErrors.length > 0 && <div role="alert" className="rounded-md border border-destructive/30 p-3 text-xs"><p>Some templates could not be deleted. Retry the remaining templates.</p><ul className="mt-2 space-y-1">{deleteErrors.map((e) => <li key={e.name}><span className="font-mono">{e.name}</span>: {e.message}</li>)}</ul></div>}
+      <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={() => setRemove(null)}>Cancel</Button><Button variant="destructive" disabled={busy} onClick={deleteTemplates}>{busy && <Spinner />}{busy ? 'Deleting…' : deleteErrors.length ? 'Retry deletion' : remove?.length === 1 ? 'Delete template' : 'Delete templates'}</Button></div>
+    </DialogContent></Dialog>
     <CreateSandboxDialog open={Boolean(launch)} initialImageTemplate={launch} onOpenChange={(open) => { if (!open) setLaunch(null) }} onCreated={() => { setLaunch(null); toast.success('Sandbox created from image template') }} />
   </div>
 }

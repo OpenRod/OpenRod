@@ -221,6 +221,42 @@ async function saveTemplate(client, recipe, image, previous) {
   }
 }
 
+// Remove the exact image reference, never force removal or prune unrelated data.
+// Keep the template on Docker failure so the same action can be retried.
+export async function deleteImageTemplate(client, name, { getEngine = localEngine, docker = run } = {}) {
+  let template
+  try { template = await client.sandboxTemplates.get(name) } catch (e) { if (!missing(e)) throw e }
+  const image = template?.spec?.workload?.image
+  const removeRecord = async (cleanup) => {
+    await client.sandboxTemplates.delete(name, { allowMissing: true })
+    return { ok: true, imageCleanup: cleanup }
+  }
+  if (!image) return removeRecord({ status: 'absent' })
+  return locked(`image:${image}`, async () => {
+    // Include stopped sandboxes: they may need the image on their next start.
+    let pageToken = ''
+    do {
+      const page = await client.raw.listSandboxes({ workspaceScope: WORKSPACE, pageSize: 1000, pageToken })
+      if (page.sandboxes.some((sandbox) => sandbox.spec?.template?.image === image)) {
+        return removeRecord({ status: 'retained', image, reason: 'Docker image kept because an existing sandbox still uses it.' })
+      }
+      pageToken = page.nextPageToken
+    } while (pageToken)
+    const templates = await client.sandboxTemplates.listAll()
+    if (templates.some((t) => t.metadata?.name !== name && t.spec?.workload?.image === image)) {
+      return removeRecord({ status: 'retained', image, reason: 'Docker image kept because another template still uses it.' })
+    }
+    const engine = await getEngine()
+    try {
+      await docker(['image', 'rm', '--', image], { engine })
+    } catch (e) {
+      if (!/No such image:/i.test(e.message)) throw fail(`Could not delete the Docker image. The template was kept so you can retry. ${e.message}`, 409)
+      return removeRecord({ status: 'absent', image })
+    }
+    return removeRecord({ status: 'removed', image })
+  })
+}
+
 export async function imageTemplateRoute(method, parts, input) {
   const [area, name, action] = parts
   if (area !== 'image-templates') return undefined
@@ -244,11 +280,10 @@ export async function imageTemplateRoute(method, parts, input) {
   if (action === 'delete') {
     return locked(name, async () => {
       if (running(jobs.get(name))) throw fail('Cancel the build before removing this template.', 409)
-      jobs.delete(name)
       const { client } = await gateway()
-      // Removing a template never deletes a Docker image or a sandbox.
-      await client.sandboxTemplates.delete(name, { allowMissing: true })
-      return { ok: true }
+      const result = await deleteImageTemplate(client, name)
+      jobs.delete(name)
+      return result
     })
   }
   throw fail('Unknown image template operation.', 404)

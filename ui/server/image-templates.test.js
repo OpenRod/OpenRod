@@ -151,3 +151,58 @@ test('every agent choice generates an installer, its runtime, and a session', as
   assert.equal(isSession('rm'), false)
   assert.equal(isSession('toString'), false)
 })
+
+const deletionFixture = async ({ shared = false, sandbox = false, dockerError, listError, absent = false } = {}) => {
+  const { deleteImageTemplate } = await import('./image-templates.js')
+  const calls = []
+  const template = (name) => ({ metadata: { name }, spec: { workload: { image: 'openshell-template/test:one' } } })
+  const client = {
+    sandboxTemplates: {
+      get: async () => { if (absent) throw { code: 'not_found' }; return template('test') },
+      listAll: async () => [template('test'), ...(shared ? [template('other')] : [])],
+      delete: async (name) => { calls.push(['delete', name]) },
+    },
+    raw: { listSandboxes: async ({ pageToken }) => {
+      if (listError) throw new Error('Gateway unavailable')
+      if (!pageToken) return { sandboxes: [], nextPageToken: 'second' }
+      return { sandboxes: sandbox ? [{ phase: 'stopped', spec: { template: { image: 'openshell-template/test:one' } } }] : [] }
+    } },
+  }
+  const operation = () => deleteImageTemplate(client, 'test', {
+    getEngine: async () => ({ endpoint: 'unix:///test.sock' }),
+    docker: async (args, options) => { calls.push(['docker', args, options]); if (dockerError) throw new Error(dockerError) },
+  })
+  return { operation, calls }
+}
+
+test('template deletion removes its exact Docker reference before deleting the record, without force', async () => {
+  const { operation, calls } = await deletionFixture()
+  assert.equal((await operation()).imageCleanup.status, 'removed')
+  assert.deepEqual(calls, [['docker', ['image', 'rm', '--', 'openshell-template/test:one'], { engine: { endpoint: 'unix:///test.sock' } }], ['delete', 'test']])
+})
+
+test('shared images and stopped sandbox references on later pages are retained explicitly', async () => {
+  for (const options of [{ shared: true }, { sandbox: true }]) {
+    const { operation, calls } = await deletionFixture(options)
+    const result = await operation()
+    assert.equal(result.imageCleanup.status, 'retained')
+    assert.match(result.imageCleanup.reason, options.shared ? /another template/ : /existing sandbox/)
+    assert.deepEqual(calls, [['delete', 'test']])
+  }
+})
+
+test('Docker failures and unknown gateway usage preserve the template for retry', async () => {
+  for (const options of [{ dockerError: 'image is being used by a container' }, { dockerError: 'Cannot connect to Docker daemon' }, { listError: true }]) {
+    const { operation, calls } = await deletionFixture(options)
+    await assert.rejects(operation())
+    assert.equal(calls.some(([action]) => action === 'delete'), false)
+  }
+})
+
+test('already absent Docker images and template records can be deleted idempotently', async () => {
+  for (const options of [{ dockerError: 'Error response from daemon: No such image: openshell-template/test:one' }, { absent: true }]) {
+    const { operation, calls } = await deletionFixture(options)
+    assert.equal((await operation()).imageCleanup.status, 'absent')
+    assert.deepEqual(calls.at(-1), ['delete', 'test'])
+  }
+})
