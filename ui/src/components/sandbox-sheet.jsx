@@ -97,7 +97,7 @@ function OpenIn({ name, editors, cloud, context }) {
     try {
       await api.openEditor(name, editor.id)
       toast.success(`Opening ${name} in ${editor.label}`)
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { toast.error(`Couldn’t open ${editor.label}`, { description: e.message }) }
     finally { setOpening(false) }
   }
 
