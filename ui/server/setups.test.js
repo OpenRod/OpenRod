@@ -4,10 +4,11 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { createSetupStore, MAX_SELECTION } from './setups.js'
+import { createSetupStore, getSetupStore, setupRoute, MAX_SELECTION } from './setups.js'
 import { normalizeMcp, readSkill, publicItem } from './setup-discovery.js'
 import { PACKAGE_PENDING, isPackagePending, cannotRun, canPrepareAtLaunch } from '../shared/setup-launch.js'
 import { assessNetwork } from './setup-deployment.js'
+import { runWithContext } from './gateway.js'
 
 async function fixture(t) {
   const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'setup-test-')))
@@ -237,22 +238,37 @@ test('deleting an entire setup persists and preserves other setups and source fi
   assert.equal(await fs.readFile(path.join(home, '.cursor/mcp.json'), 'utf8'), source)
 })
 
-test('module reload refreshes store methods instead of reusing the legacy singleton', async () => {
-  const legacyKey = Symbol.for('openshell.console.setup-store.v1')
-  const previous = globalThis[legacyKey]
-  globalThis[legacyKey] = { list: async () => [] }
-  try {
-    const first = await import('./setups.js?reload-test=first')
-    const second = await import('./setups.js?reload-test=second')
-    assert.notEqual(first.setupStore, second.setupStore)
-    assert.equal(typeof second.setupStore.delete, 'function')
-    assert.equal(typeof second.setupStore.deleteItem, 'function')
-    await assert.rejects(second.setupRoute('POST', ['setups', 'invalid', 'delete'], { revision: 'test' }), /Setup not found/)
-    await assert.rejects(second.setupRoute('POST', ['setups', 'invalid', 'delete-item'], { item: 'test', revision: 'test' }), /Setup not found/)
-  } finally {
-    if (previous === undefined) delete globalThis[legacyKey]
-    else globalThis[legacyKey] = previous
+test('setup previews and saved snapshots stay with their gateway and workspace across reloads', async (t) => {
+  const { home } = await fixture(t)
+  const previous = process.env.OPENSHELL_CONSOLE_DATA_DIR
+  process.env.OPENSHELL_CONSOLE_DATA_DIR = path.join(home, 'state')
+  t.after(() => {
+    if (previous === undefined) delete process.env.OPENSHELL_CONSOLE_DATA_DIR
+    else process.env.OPENSHELL_CONSOLE_DATA_DIR = previous
+  })
+  const origin = { gateway: 'setup-origin', workspace: 'alpha' }
+  const others = [{ ...origin, workspace: 'beta' }, { ...origin, gateway: 'setup-other' }]
+  const item = normalizeMcp('docs', { command: 'docs-mcp' }, 'codex')
+  const preview = runWithContext(origin, () => getSetupStore().stage([item]))
+  for (const context of others) {
+    await runWithContext(context, async () => {
+      await assert.rejects(setupRoute('POST', ['setups', 'save'], { token: preview.token, name: 'Wrong context', acknowledged: true }), /expired/)
+      assert.deepEqual(await getSetupStore().list(), [])
+    })
   }
+  const reloaded = await import('./setups.js?context-reload')
+  const saved = await runWithContext(origin, () => reloaded.getSetupStore().save(preview.token, 'Origin tools', true))
+  for (const context of others) {
+    await runWithContext(context, async () => {
+      await assert.rejects(getSetupStore().get(saved.id), { status: 404 })
+      await assert.rejects(getSetupStore().delete(saved.id, saved.revision), { status: 404 })
+    })
+  }
+  await runWithContext(origin, async () => {
+    assert.deepEqual((await getSetupStore().list()).map(setup => setup.id), [saved.id])
+    assert.equal((await getSetupStore().get(saved.id)).revision, saved.revision)
+    await assert.rejects(getSetupStore().save(preview.token, 'Reused token', true), /expired/)
+  })
 })
 
 test('automatic preparation preserves source snapshots and reuses the first pinned build', async t => {

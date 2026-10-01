@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resolveGateway } from './gateway.js'
+import { resolveGateway, workspaceName } from './gateway.js'
 
 const DEFAULT_TIMEOUT_MS = 60_000
 const DEFAULT_OUTPUT_LIMIT = 64 * 1024
@@ -110,8 +110,9 @@ export async function runOpenShell(args, options = {}) {
   const executable = openshellBinary(env)
   if (!executable) throw fail('The openshell CLI is not installed on this machine.', 409)
   const gateway = options.gateway ?? resolveGateway().name
-  const result = await runCli(executable, ['--gateway', gateway, ...args], { ...options, env: { ...env, NO_COLOR: '1' } })
-  return { ...result, executable, gateway }
+  const workspace = options.workspace ?? workspaceName()
+  const result = await runCli(executable, ['--gateway', gateway, '--workspace', workspace, ...args], { ...options, env: { ...env, NO_COLOR: '1' } })
+  return { ...result, executable, gateway, workspace }
 }
 
 // Only CLI operations that install managed SSH config use this queue.

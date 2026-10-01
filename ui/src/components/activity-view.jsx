@@ -145,7 +145,7 @@ export function ActivityView() {
     try {
       if (live.demo) { download(filterActivity(rows, { ...exportQuery, now: anchor }).map((r) => r.event), { ...exportQuery, demo: true }, exportFormat); setExportOptions(null); return }
       const link = document.createElement('a')
-      link.href = `/api/os/activity/export?format=${exportFormat}&query=${encodeURIComponent(JSON.stringify(exportQuery))}`
+      link.href = `/api/os/activity/export?format=${exportFormat}&query=${encodeURIComponent(JSON.stringify(exportQuery))}&context=${encodeURIComponent(await api.contextKey())}`
       link.download = exportFormat === 'ocsf' ? 'openshell-activity-ocsf.json' : 'openshell-activity.json'
       document.body.appendChild(link); link.click(); link.remove(); setExportOptions(null)
     } catch (e) { toast.error(`Export failed: ${e.message}`) } finally { setExporting(false) }
