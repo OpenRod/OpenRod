@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { findExecutable, reasonFrom, runOpenShell, serializeCli } from './openshell-cli.js'
+import { findExecutable, reasonFrom, runCli, runOpenShell, serializeCli } from './openshell-cli.js'
 import { gateway } from './gateway.js'
 
 // "Open in Cursor / VS Code" runs the command the CLI documents for it,
@@ -10,8 +10,8 @@ import { gateway } from './gateway.js'
 // The console runs on the operator's machine, so the editor opens there.
 
 const EDITORS = {
-  cursor: { label: 'Cursor', binary: 'cursor', app: 'Cursor.app' },
-  vscode: { label: 'VS Code', binary: 'code', app: 'Visual Studio Code.app' },
+  cursor: { label: 'Cursor', binary: 'cursor', app: 'Cursor.app', remoteSsh: 'anysphere.remote-ssh' },
+  vscode: { label: 'VS Code', binary: 'code', app: 'Visual Studio Code.app', remoteSsh: 'ms-vscode-remote.remote-ssh' },
 }
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
@@ -29,6 +29,15 @@ function listEditors() {
   return Object.entries(EDITORS).map(([id, editor]) => ({ id, label: editor.label, installed: Boolean(editorBinary(id)) }))
 }
 
+// Neither editor ships its Remote - SSH extension. Without it the editor opens
+// and then fails with "No remote extension installed to resolve ssh-remote".
+export async function ensureRemoteSsh(binary, { label, remoteSsh }, env, run = runCli) {
+  const listed = await run(binary, ['--list-extensions'], { env, timeoutMs: 30_000 })
+  if (listed.code === 0 && listed.stdout.split('\n').some((line) => line.trim().toLowerCase() === remoteSsh)) return
+  const installed = await run(binary, ['--install-extension', remoteSsh], { env, timeoutMs: 120_000 })
+  if (installed.code !== 0 || installed.timedOut) throw fail(`${label} needs its Remote - SSH extension (${remoteSsh}). Install it from ${label}’s Extensions view, then try again.`, 502)
+}
+
 async function openEditor(name, input) {
   const id = String(input?.editor ?? '')
   if (!Object.hasOwn(EDITORS, id)) throw fail('Unknown editor.')
@@ -42,7 +51,15 @@ async function openEditor(name, input) {
   const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)
   const env = pathDirs.includes(dir) ? process.env : { ...process.env, PATH: [dir, process.env.PATH].filter(Boolean).join(path.delimiter) }
   const { target, workspace } = await gateway()
-  const result = await serializeCli(() => runOpenShell(args, { env, gateway: target.name, workspace }))
+  // The editor only reports an unreachable sandbox as a generic SSH failure,
+  // so check the sandbox answers first and show the gateway's reason here.
+  const probe = await runOpenShell(['sandbox', 'exec', '-n', name, '--timeout', '15', '--no-tty', '--', 'true'], { gateway: target.name, workspace, timeoutMs: 20_000 })
+  if (probe.timedOut) throw fail(`${name} did not respond.`, 504)
+  if (probe.code !== 0) throw fail(reasonFrom(probe.stderr) || `${name} is not reachable.`, 409)
+  const result = await serializeCli(async () => {
+    await ensureRemoteSsh(binary, EDITORS[id], env)
+    return runOpenShell(args, { env, gateway: target.name, workspace })
+  })
   if (result.timedOut) throw fail(`Opening ${label} timed out.`, 504)
   if (result.outputExceeded) throw fail(`Opening ${label} produced too much output.`, 502)
   if (result.code !== 0) throw fail(reasonFrom(result.stderr) || `Could not open ${label}.`, 502)
