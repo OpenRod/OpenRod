@@ -54,6 +54,7 @@ export function LiveProvider({ children }) {
       seen.current.clear(); setEvents([]); setActivityRevision((n) => n + 1)
       loadHistory()
     }
+    setSandboxes(null); setOverview(null); setEvents([]); seen.current.clear(); cacheEpoch.current++
     api.context().then(async (selection) => {
       if (cancelled) return
       if (!location && !selection.configured) {
@@ -65,7 +66,7 @@ export function LiveProvider({ children }) {
       slow = setInterval(loadOverview, 15000)
       const context = await api.contextKey()
       if (cancelled) return
-      source = new EventSource(`/api/os/stream?context=${encodeURIComponent(context)}${location ? "&location=1" : ""}`)
+      source = new EventSource(api.url("/stream", { context, ...(location ? { location: "1" } : {}) }))
       source.onopen = () => { setConnection("live"); resetHistory() }
       source.addEventListener("context-changed", () => window.location.reload())
       source.addEventListener("activity-deleted", (e) => { setCollection(JSON.parse(e.data).coverage); resetHistory() })

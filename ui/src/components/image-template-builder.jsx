@@ -29,7 +29,7 @@ function Toggle({ selected, onClick, children, disabled = false }) {
 // everything else behind Advanced. `replace` edits an existing template.
 export function ImageTemplateBuilder(props) {
   const location = useLocation()
-  return <ScopedImageTemplateBuilder key={location?.context ?? 'default'} {...props} />
+  return <ScopedImageTemplateBuilder key={location?.id ?? location?.context ?? 'default'} {...props} />
 }
 
 function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted }) {

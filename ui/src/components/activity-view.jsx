@@ -73,7 +73,7 @@ function download(events, context, format) {
 
 export function ActivityView() {
   const location = useLocation()
-  return <ScopedActivityView key={location?.context ?? "default"} />
+  return <ScopedActivityView key={location?.id ?? location?.context ?? "default"} />
 }
 
 function ScopedActivityView() {
@@ -153,7 +153,7 @@ function ScopedActivityView() {
     try {
       if (live.demo) { download(filterActivity(rows, { ...exportQuery, now: anchor }).map((r) => r.event), { ...exportQuery, demo: true }, exportFormat); setExportOptions(null); return }
       const link = document.createElement('a')
-      link.href = `/api/os/activity/export?format=${exportFormat}&query=${encodeURIComponent(JSON.stringify(exportQuery))}&context=${encodeURIComponent(await api.contextKey())}${location ? "&location=1" : ""}`
+      link.href = api.url("/activity/export", { format: exportFormat, query: JSON.stringify(exportQuery), context: await api.contextKey(), ...(location ? { location: "1" } : {}) })
       link.download = exportFormat === 'ocsf' ? 'openshell-activity-ocsf.json' : 'openshell-activity.json'
       document.body.appendChild(link); link.click(); link.remove(); setExportOptions(null)
     } catch (e) { toast.error(`Export failed: ${e.message}`) } finally { setExporting(false) }

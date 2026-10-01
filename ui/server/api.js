@@ -1,3 +1,6 @@
+import {createLocalCloudNative} from './local-cloud-native.js'
+import {cloudSshRoute,cloudSshUpgrade} from './cloud-ssh.js'
+import {createLocalCloud} from './local-cloud.js'
 import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.js'
 import { localTransfer, importTransfer, exportTransfer } from './cloud-transfer.js'
 import path from 'node:path'
@@ -336,6 +339,7 @@ export function openshellApi(security = createSecurity(cloudConfig())) {
 // Both Vite and the installed CLI use this exact HTTP/WebSocket lifecycle.
 export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(cloudConfig()) } = {}) {
   const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
+  const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative() }) : null
   const initialContext = contextSelection()
   const initialKey = contextKey(initialContext)
   let stopSweeper = null
@@ -393,7 +397,9 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
   const upgrade = async (req, socket, head) => {
     if (closed) { socket.destroy(); return }
     try {
-      if (requestPath(req) !== '/api/os/terminal') return
+      if (localCloud?.upgrade(req, socket, head)) return
+      const pathname = requestPath(req)
+      if (!['/api/os/terminal', '/api/os/ssh'].includes(pathname)) return
       const identity = await security.authenticate(req)
       if (socket.destroyed || closed) { socket.destroy(); return }
       if (identity) security.watch(req, socket, identity)
@@ -402,7 +408,10 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
       const allowContext = plan => locations
         ? locations.some(location => location.connected && location.context === contextKey(plan))
         : contextKey(plan) === contextKey()
-      if (terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid, allowContext)) {
+      const handled = pathname === '/api/os/ssh'
+        ? cloudSshUpgrade(req, socket, head, security.isAllowed, identity, { allowContext })
+        : terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid, allowContext)
+      if (handled) {
         sockets.add(socket)
         socket.once('close', () => sockets.delete(socket))
       }
@@ -411,6 +420,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
   function close() {
     if (closed) return closing
     closed = true
+    localCloud?.close()
     httpServer?.off('listening', start)
     httpServer?.off('upgrade', upgrade)
     httpServer?.off('close', close)
@@ -574,7 +584,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           if (parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && ['stop', 'start', 'delete'].includes(parts[2])) {
             return send(res, 200, await lifecycle(parts[1], parts[2]))
           }
-          const routed = (await sshRoute('POST', parts, input)) ?? (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
+          const routed = (await cloudSshRoute('POST',parts,input)) ?? (await sshRoute('POST', parts, input)) ?? (await setupRoute('POST', parts, input)) ?? (await deploymentRoute('POST', parts, input)) ?? (await editorRoute('POST', parts, input)) ?? (await terminalRoute('POST', parts, input)) ?? (await filesRoute('POST', parts, input)) ?? (await imageTemplateRoute('POST', parts, input)) ?? (await ingressRoute('POST', parts, input)) ?? (await orgRoute('POST', parts, input)) ?? (await policyRoute('POST', parts, input))
           if (routed !== undefined) return send(res, 200, routed)
           return send(res, 404, { error: 'Not found' })
           })
@@ -588,5 +598,10 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     operation.then(() => pending.delete(operation), () => pending.delete(operation))
     return operation
   }
-  return { middleware: (req, res, next) => security.middleware(req, res, () => route(req, res, next)), close }
+  const middleware = (req, res, next) => {
+    if (closed) { res.writeHead(503).end(); return }
+    const authenticate = () => security.middleware(req, res, () => route(req, res, next))
+    return localCloud ? localCloud.middleware(req, res, authenticate) : authenticate()
+  }
+  return { middleware, close }
 }

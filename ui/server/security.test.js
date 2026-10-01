@@ -79,3 +79,14 @@ test('Google signup immediately grants a session without claims or approval', as
  await createSecurity(cloudConfig(env),google).middleware(req,{setHeader:(k,v)=>{if(k==='Set-Cookie')cookie=v},writeHead:s=>{status=s},end:v=>{value=JSON.parse(v)}},()=>assert.fail('signin must terminate'))
  assert.equal(status,200);assert.equal(value.user.uid,user.uid);assert.equal(value.user.role,'member');assert.match(cookie,/Max-Age=3600/);assert.equal(cookies,1)
 })
+
+test('worker streams and sockets enforce expiry without a Firebase polling timer',async()=>{
+ const {EventEmitter}=await import('node:events')
+ const security=createSecurity({mode:'worker',origin:'https://cloud.example.com',host:'cloud.example.com',key:'a'.repeat(64),owner:'alice'})
+ const target=new EventEmitter()
+ let destroyed=false
+ target.destroy=()=>{destroyed=true;target.emit('close')}
+ assert.doesNotThrow(()=>security.watch({},target,{uid:'alice',expires:Date.now()+15}))
+ await new Promise(resolve=>setTimeout(resolve,30))
+ assert.equal(destroyed,true)
+})
