@@ -153,7 +153,8 @@ export async function runSsh(host, script, options = {}) {
 function imageRefs(version) {
   if (typeof version !== 'string' || !VERSION.test(version)) throw fail('The local gateway must report a pinned release version (for example 0.1.2).', 409)
   // Release chart: NVIDIA/OpenShell v0.1.2 deploy/helm/openshell/values.yaml.
-  return ['sandbox', 'supervisor'].map((image) => `ghcr.io/nvidia/openshell/${image}:${version}`)
+  // The persistent gateway container runs the release's gateway image too.
+  return ['sandbox', 'supervisor', 'gateway'].map((image) => `ghcr.io/nvidia/openshell/${image}:${version}`)
 }
 
 // Absence is deliberately conservative: a broken CLI, daemon, package, socket,
@@ -283,7 +284,7 @@ ${refs.map((ref, index) => `image=$(engine image inspect --format '{{json .}}' $
   if (!fields.get('HOST_KERNEL') || info.KernelVersion !== fields.get('HOST_KERNEL')) throw fail('Docker must run directly on the SSH host, not inside a separate VM. Select this host’s native Docker Engine socket.', 409)
   if (!SOCKET.test(dockerSocket ?? '') || dockerSocket.split('/').some((part) => part === '.' || part === '..')) throw fail('The Docker socket must be a safe absolute Unix socket path.', 409)
   if (!Array.isArray(info.SecurityOptions) || !info.SecurityOptions.some((option) => /^name=seccomp(?:,|$)/.test(option))) throw fail('Enable Docker Engine seccomp support before running non-root OpenShell workloads.', 409)
-  if (info.SecurityOptions.some((option) => /^name=rootless(?:,|$)/.test(option))) throw fail('Rootless Docker cannot reach the SSH reverse tunnel on the host loopback interface. Select a rootful Docker Engine on this Linux host; workloads still run non-root.', 409)
+  if (info.SecurityOptions.some((option) => /^name=rootless(?:,|$)/.test(option))) throw fail('Rootless Docker is not supported by persistent remote gateways. Select a rootful Docker Engine on this Linux host; workloads still run non-root.', 409)
   if (typeof info.ID !== 'string' || !info.ID.trim()) throw fail('Docker Engine did not report its identity; upgrade or repair the daemon before connecting.', 409)
   const runtimeReady = images.every((image, index) => image?.Os === 'linux' && architecture(image.Architecture) === arch && image.RepoTags?.includes(refs[index]))
   return { os: 'linux', arch, dockerSocket, runtimeReady, version, engineId: info.ID, dockerInstalled: true }
@@ -348,6 +349,6 @@ export async function installRuntime(host, version, method, { packagePath, onPro
   await execute(host, `${discovery}${command}\n`, { input: method === 'upload' ? packagePath : undefined, timeoutMs: 30 * 60_000, outputLimit: 1024 * 1024, signal })
   onProgress('Checking the installed runtime versions and platform')
   const probe = await probeHost(host, version, { signal })
-  if (!probe.runtimeReady) throw fail(`The host still needs both pinned linux/${probe.arch} images: ${refs.join(' and ')}. Build the Docker-save package for this host's platform.`, 409)
+  if (!probe.runtimeReady) throw fail(`The host still needs the pinned linux/${probe.arch} images: ${refs.join(', ')}. Build the Docker-save package for this host's platform.`, 409)
   return probe
 }

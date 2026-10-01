@@ -68,7 +68,7 @@ function terminalFromLocation() {
   if (!match) return null
   const params = new URLSearchParams(match[2] ?? "")
   const gateway = params.get("gateway"), workspace = params.get("workspace")
-  const location = gateway && workspace ? { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, target: new URLSearchParams(window.location.search).get("target") ?? undefined } : null
+  const location = gateway && workspace ? { context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, remote: params.get('remote') === '1', target: new URLSearchParams(window.location.search).get("target") ?? undefined } : null
   return { name: match[1], session: params.get("session") || undefined, setupLogin: params.get("setupLogin") || undefined, mcp: params.get("mcp") || undefined, location }
 }
 

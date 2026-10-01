@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useApi, useLocation } from "@/lib/location-context"
 import { LocationBadge } from "@/components/location-badge"
-import { defaultSession, sessionChoices, sessionName, terminalHref } from "@/lib/sandbox-session"
+import { defaultSession, sessionChoices, sessionName, terminalHref, persistentGateway } from "@/lib/sandbox-session"
 
 // The terminal itself is always dark, whatever the console's theme.
 const BACKGROUND = "#0b0e14"
@@ -24,8 +24,8 @@ const STATUS = {
 }
 
 // One browser tab, one session. The page asks the console for a ticket, then
-// streams keystrokes and output over a WebSocket; closing the tab ends the
-// session, like closing a terminal window.
+// streams keystrokes and output over a WebSocket. Remote terminals reattach
+// to a persistent tmux session; closing the connection detaches the viewer.
 export function TerminalView({ name, session: requested, setupLogin, mcp }) {
   const api = useApi()
   const location = useLocation()
@@ -115,6 +115,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
   return (
     <div className="flex h-svh flex-col" style={{ background: BACKGROUND }}>
       {setupLogin && <div className="border-b border-border bg-card px-4 py-3 text-xs text-foreground">Connect this MCP with Codex. Open the authorization link it prints, complete sign-in, and paste the callback URL here when prompted. No inbound port is opened.</div>}
+      {persistentGateway(location) && !setupLogin && state.status === 'live' && <div className="border-b border-border bg-card px-4 py-2 text-xs text-foreground">This session keeps running on the remote machine when you disconnect or put your computer to sleep. Reopen it to continue.</div>}
       <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border bg-card px-3 text-xs">
         <TerminalIcon className="size-4 text-muted-foreground" aria-hidden="true" />
         <span className="font-medium">{name}</span>
@@ -133,7 +134,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
           {choices.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-7 text-xs" />}>
-                New session<ChevronDown className="size-3 opacity-70" aria-hidden="true" />
+                {persistentGateway(location) ? 'Choose session' : 'New session'}<ChevronDown className="size-3 opacity-70" aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 {choices.map((choice) => (
