@@ -10,7 +10,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { ImageTemplateBuilder } from '@/components/image-template-builder'
 import { CreateSandboxDialog } from '@/components/create-sandbox-dialog'
 import { api } from '@/lib/api'
-import { AGENTS, PENDING_RECIPE_KEY, STARTS, pendingRecipe } from '@/lib/image-templates'
+import { AGENTS, STARTS, pendingRecipe, pendingRecipeKey } from '@/lib/image-templates'
 
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
 const working = (t) => t.status === 'building'
@@ -26,7 +26,8 @@ export function TemplatesView() {
   const [records, setRecords] = React.useState(null)
   const [error, setError] = React.useState('')
   const [query, setQuery] = React.useState('')
-  const [editor, setEditor] = React.useState(pendingRecipe)
+  const [editor, setEditor] = React.useState(null)
+  const [draftKey, setDraftKey] = React.useState(null)
   const [selectedName, setSelectedName] = React.useState(null)
   const [remove, setRemove] = React.useState(null)
   const [launch, setLaunch] = React.useState(null)
@@ -38,6 +39,17 @@ export function TemplatesView() {
     try { setRecords(await api.imageTemplates()); setError('') } catch (e) { setError(e.message) }
   }, [])
   React.useEffect(() => { load() }, [load])
+  React.useEffect(() => {
+    let current = true
+    api.contextKey().then((context) => {
+      if (!current) return
+      // Drafts contain context-local setup IDs and may replace an existing template.
+      const key = pendingRecipeKey(context)
+      setDraftKey(key)
+      setEditor((editor) => editor ?? pendingRecipe(key))
+    }).catch((e) => { if (current) setError(e.message) })
+    return () => { current = false }
+  }, [])
   const hasWork = records?.some(working)
   React.useEffect(() => { const timer = setInterval(() => { if (document.visibilityState === 'visible') load() }, hasWork ? 1200 : 5000); return () => clearInterval(timer) }, [hasWork, load])
   const selected = records?.find((t) => t.name === selectedName)
@@ -119,10 +131,10 @@ export function TemplatesView() {
     } finally { deleting.current = false; setBusy(false) }
   }
   function edit(recipe, replace) { setSelectedName(null); setEditor({ recipe, replace }) }
-  function closeEditor() { try { sessionStorage.removeItem(PENDING_RECIPE_KEY) } catch {} setEditor(null) }
+  function closeEditor() { try { sessionStorage.removeItem(draftKey) } catch {} setEditor(null) }
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
-    {editor && <ImageTemplateBuilder key={editor.recipe?.name || 'new'} initial={editor} onClose={closeEditor} onStarted={(record) => { closeEditor(); setSelectedName(record.name); load() }} />}
+    {editor && draftKey && <ImageTemplateBuilder key={editor.recipe?.name || 'new'} initial={editor} draftKey={draftKey} onClose={closeEditor} onStarted={(record) => { closeEditor(); setSelectedName(record.name); load() }} />}
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
       <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
         <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />

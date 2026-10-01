@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ruleToProto } from './policy.js'
 import { appliesTo, blockHosts } from '../src/lib/egress.js'
+import { policyDirectory } from './paths.js'
 
 export { appliesTo, blockHosts }
 
@@ -23,7 +24,7 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 //
 // Stored as JSON in policies/egress/<id>.json, reviewed like code.
 
-const DIR = path.resolve(import.meta.dirname, '../policies/egress')
+const directory = async () => path.join(await policyDirectory(), 'egress')
 const ID = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/
 const HOST = /^(\*\*?\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i
 const SANDBOX = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
@@ -121,14 +122,16 @@ async function readJson(file) {
 }
 
 // `dir` is for tests.
-export async function listPolicies(dir = DIR) {
+export async function listPolicies(dir) {
+  dir ??= await directory()
   let files = []
   try { files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json')) } catch (error) { if (error.code !== 'ENOENT') throw error }
   const policies = await Promise.all(files.map(async (f) => { try { return validatePolicy(await readJson(path.join(dir, f))) } catch { return null } }))
   return policies.filter(Boolean).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export async function writePolicy(policy, dir = DIR) {
+export async function writePolicy(policy, dir) {
+  dir ??= await directory()
   await fs.mkdir(dir, { recursive: true })
   const file = path.join(dir, `${policy.id}.json`), temporary = `${file}.${randomUUID()}.tmp`
   try {
@@ -137,8 +140,9 @@ export async function writePolicy(policy, dir = DIR) {
   } finally { await fs.rm(temporary, { force: true }) }
 }
 
-export async function removePolicy(id, dir = DIR) {
+export async function removePolicy(id, dir) {
   if (!ID.test(String(id))) throw fail('Unknown rule.')
+  dir ??= await directory()
   await fs.rm(path.join(dir, `${id}.json`), { force: true })
 }
 

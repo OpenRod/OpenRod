@@ -401,6 +401,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
 
 function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   const [sandboxes, setSandboxes] = React.useState([])
+  const [context, setContext] = React.useState(null)
   const [destination, setDestination] = React.useState(sandbox || '')
   const [targets, setTargets] = React.useState([])
   const [plan, setPlan] = React.useState(null)
@@ -408,7 +409,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   const [jobs, setJobs] = React.useState([])
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState('')
-  React.useEffect(() => { api.overview().then((r) => setSandboxes(r.sandboxes)).catch((e) => setError(e.message)) }, [])
+  React.useEffect(() => { api.overview().then((r) => { setSandboxes(r.sandboxes); setContext(r.gateway) }).catch((e) => setError(e.message)) }, [])
   React.useEffect(() => {
     let stopped = false, timer
     const refresh = async () => {
@@ -462,7 +463,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
     </div>}
     {result && <p role="status" className="rounded-lg border bg-muted/30 p-3 text-xs">{result.status === 'removed' ? 'Removed from this sandbox. Restart the agent to unload it. The sandbox no longer gets this setup’s egress policy; access you approved for it separately stays.' : 'Prepared configuration installed. Restart the agent to load it. Connection checks below apply to this sandbox; they do not execute tools.'}</p>}
     {result?.checks?.map((check, i) => <p key={i} className="text-xs text-muted-foreground">{check.item}: {check.status}{check.toolCount !== undefined ? ` · ${check.toolCount} tools discovered` : ''}{check.reason ? ` · ${check.reason}` : ''}</p>)}
-    {(result?.status === 'installed' || plan?.installed || jobs.some(j => j.sandbox === destination && j.status === 'installed')) && destination && signInItems.length > 0 && <div className="space-y-2 text-xs"><p className="font-medium">Sign in to {signInItems.map(item => item.name).join(', ')}</p><div className="flex flex-wrap gap-2">{targets.map(target => <a key={target} className="rounded-md border px-3 py-2 hover:bg-muted" href={terminalHref(destination, setupTarget(target)?.command || target)} target="_blank" rel="noreferrer">Open {setupTarget(target)?.name}</a>)}</div>{targets.includes('codex') && signInItems.filter(i => i.configuration?.endpoint).map(item => <a key={item.id} className="block underline underline-offset-4" href={`${terminalHref(destination, 'codex')}&setupLogin=${setup.id}&mcp=${encodeURIComponent(item.id)}`} target="_blank" rel="noreferrer">Sign in to {item.name} with Codex</a>)}<details className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">About sign-in</summary><p className="mt-2">Use the agent’s MCP menu to authenticate and confirm tool availability. Sessions stay in this sandbox and are not baked into images. Console connection checks do not use these sessions.</p></details></div>}
+    {(result?.status === 'installed' || plan?.installed || jobs.some(j => j.sandbox === destination && j.status === 'installed')) && destination && context?.name && context?.workspace && signInItems.length > 0 && <div className="space-y-2 text-xs"><p className="font-medium">Sign in to {signInItems.map(item => item.name).join(', ')}</p><div className="flex flex-wrap gap-2">{targets.map(target => <a key={target} className="rounded-md border px-3 py-2 hover:bg-muted" href={terminalHref(destination, setupTarget(target)?.command || target, context)} target="_blank" rel="noreferrer">Open {setupTarget(target)?.name}</a>)}</div>{targets.includes('codex') && signInItems.filter(i => i.configuration?.endpoint).map(item => <a key={item.id} className="block underline underline-offset-4" href={`${terminalHref(destination, 'codex', context)}&setupLogin=${setup.id}&mcp=${encodeURIComponent(item.id)}`} target="_blank" rel="noreferrer">Sign in to {item.name} with Codex</a>)}<details className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">About sign-in</summary><p className="mt-2">Use the agent’s MCP menu to authenticate and confirm tool availability. Sessions stay in this sandbox and are not baked into images. Console connection checks do not use these sessions.</p></details></div>}
     {jobs.filter((j) => !destination || j.sandbox === destination).map((job, i) => <p key={i} className="text-[11px] text-muted-foreground">{job.sandbox}: {job.status}{job.error ? ` · ${job.error}` : ''}</p>)}
       </div>
     </details>

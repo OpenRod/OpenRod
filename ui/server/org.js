@@ -7,7 +7,8 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { create, equals } from '@bufbuild/protobuf'
 import { NetworkPolicyRuleSchema } from '@nvidia/openshell-sdk/raw'
-import { WORKSPACE, gateway, sandboxView } from './gateway.js'
+import { gateway, sandboxView, contextSelection, runWithContext } from './gateway.js'
+import { policyDirectory } from './paths.js'
 import { findTemplate, listTemplates, ruleToProto, templateToPolicy } from './policy.js'
 import { appliesTo, blockHosts, blockedByPolicy, compileFor, listPolicies, removePolicy, validatePolicy, writePolicy } from './egress.js'
 import { hostMatches } from '../src/lib/egress.js'
@@ -36,9 +37,9 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 // like code: policies/org/organization.json, policies/org/groups/<id>.json,
 // policies/org/members.json and policies/egress/<id>.json.
 
-const ORG_DIR = path.resolve(import.meta.dirname, '../policies/org')
-const GROUP_DIR = path.join(ORG_DIR, 'groups')
-const MEMBERS_FILE = path.join(ORG_DIR, 'members.json')
+const orgDirectory = async () => path.join(await policyDirectory(), 'org')
+const groupDirectory = async () => path.join(await orgDirectory(), 'groups')
+const membersFile = async () => path.join(await orgDirectory(), 'members.json')
 const SANDBOX_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const GROUP_ID = /^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?$/
 const HOST_PATTERN = /^(\*\*?\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i
@@ -106,7 +107,7 @@ async function readJson(file) {
 }
 
 export async function readOrg() {
-  const raw = await readJson(path.join(ORG_DIR, 'organization.json'))
+  const raw = await readJson(path.join(await orgDirectory(), 'organization.json'))
   if (!raw) return { ...EMPTY_ORG }
   return { blocked: validateBlocked(raw.blocked), outside: 'block' }
 }
@@ -128,7 +129,7 @@ function validateGroup(input) {
 
 // Read old scalar memberships as arrays; explicit empty membership overrides labels.
 export async function readMembers() {
-  const raw = await readJson(MEMBERS_FILE)
+  const raw = await readJson(await membersFile())
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
   const out = {}
   for (const [name, value] of Object.entries(raw)) {
@@ -143,7 +144,9 @@ export async function readMembers() {
 // a time, so a concurrent change always sees the other's result.
 let orgWrite = Promise.resolve()
 export function serializeOrgWrite(work) {
-  const result = orgWrite.then(work, work)
+  const context = contextSelection()
+  const run = () => runWithContext(context, work)
+  const result = orgWrite.then(run, run)
   orgWrite = result.catch(() => {})
   return result
 }
@@ -172,11 +175,12 @@ async function writeGroupAssignment(names, group, { forget = false } = {}) {
     if (forget) delete members[name]
     else members[name] = groupIds(group)
   }
-  await write(MEMBERS_FILE, Object.fromEntries(Object.entries(members).sort(([a], [b]) => a.localeCompare(b))))
+  await write(await membersFile(), Object.fromEntries(Object.entries(members).sort(([a], [b]) => a.localeCompare(b))))
   return members
 }
 
 export async function listGroups() {
+  const GROUP_DIR = await groupDirectory()
   let files = []
   try { files = (await fs.readdir(GROUP_DIR)).filter((f) => f.endsWith('.json')) } catch (error) { if (error.code !== 'ENOENT') throw error }
   const groups = await Promise.all(files.map(async (f) => { try { return validateGroup(await readJson(path.join(GROUP_DIR, f))) } catch { return null } }))
@@ -185,7 +189,7 @@ export async function listGroups() {
 
 export async function findGroup(id) {
   if (!GROUP_ID.test(String(id ?? ''))) return null
-  const raw = await readJson(path.join(GROUP_DIR, `${id}.json`))
+  const raw = await readJson(path.join(await groupDirectory(), `${id}.json`))
   return raw ? validateGroup(raw) : null
 }
 
@@ -260,9 +264,9 @@ export async function enforcePolicyOnly(client) {
 
 // The operations that bring one sandbox's managed rules in line with the
 // stored policies. `extraPorts` are ports the same update is about to open.
-async function managedOps(client, sandbox, org, groups, policies, members, setupMembers, endpoint, extraPorts = []) {
+async function managedOps(client, workspaceScope, sandbox, org, groups, policies, members, setupMembers, endpoint, extraPorts = []) {
   const ids = groupsOf(sandbox, members, groups)
-  const status = await client.raw.getSandboxPolicyStatus({ sandbox: sandbox.name, workspaceScope: WORKSPACE })
+  const status = await client.raw.getSandboxPolicyStatus({ sandbox: sandbox.name, workspaceScope })
   const rules = status.revision?.policy?.networkPolicies ?? {}
   const desired = managedRules(org, policies, { name: sandbox.name, groups: ids, setups: sandboxSetups(setupMembers, sandbox, endpoint) }, [...openPorts(rules), ...extraPorts])
   const current = Object.keys(rules).filter(isManaged)
@@ -279,20 +283,20 @@ async function managedOps(client, sandbox, org, groups, policies, members, setup
 
 // For a one-off rule edit that opens new ports: the managed rules recomputed
 // with those ports, to go in the same update as the edit.
-export async function managedOpsFor(client, name, extraPorts, endpoint) {
-  const [org, groups, policies, members, setupMembers, sandbox] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), readSetupMembers(), client.raw.getSandbox({ name, workspaceScope: WORKSPACE })])
-  return (await managedOps(client, sandboxView(sandbox.sandbox), org, groups, policies, members, setupMembers, endpoint, extraPorts)).ops
+export async function managedOpsFor(client, workspaceScope, name, extraPorts, endpoint) {
+  const [org, groups, policies, members, setupMembers, sandbox] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), readSetupMembers(), client.raw.getSandbox({ name, workspaceScope })])
+  return (await managedOps(client, workspaceScope, sandboxView(sandbox.sandbox), org, groups, policies, members, setupMembers, endpoint, extraPorts)).ops
 }
 
 // Rewrites the managed rules of one sandbox to match the stored policy. The
 // sandbox's own rules are never touched.
-async function syncOne(client, sandbox, org, groups, policies, members, setupMembers, endpoint, { force = true } = {}) {
-  const { ops, same, groups: ids } = await managedOps(client, sandbox, org, groups, policies, members, setupMembers, endpoint)
+async function syncOne(client, workspaceScope, sandbox, org, groups, policies, members, setupMembers, endpoint, { force = true } = {}) {
+  const { ops, same, groups: ids } = await managedOps(client, workspaceScope, sandbox, org, groups, policies, members, setupMembers, endpoint)
   if (!force && same) return { changed: false }
   let version = null
   if (ops.length) {
     const response = await client.raw.updateConfig({
-      sandbox: sandbox.name, workspaceScope: WORKSPACE, global: false, mergeOperations: ops,
+      sandbox: sandbox.name, workspaceScope, global: false, mergeOperations: ops,
       annotations: { 'console.openshell/change': `org-sync:${ids.length ? `groups=${ids.join(',')}` : 'org'}` },
       requestId: randomUUID(),
     })
@@ -301,8 +305,8 @@ async function syncOne(client, sandbox, org, groups, policies, members, setupMem
   return { changed: true, version }
 }
 
-async function liveSandboxes(client) {
-  const response = await client.raw.listSandboxes({ workspaceScope: WORKSPACE })
+async function liveSandboxes(client, workspaceScope) {
+  const response = await client.raw.listSandboxes({ workspaceScope: workspaceScope })
   return response.sandboxes.map(sandboxView).filter((s) => s.phase !== 'deleting')
 }
 
@@ -314,12 +318,12 @@ export function syncAll(options) {
 // Only callers already holding serializeOrgWrite may use this variant. A
 // snapshot and its gateway effects must finish before another policy mutation.
 export async function syncAllWhileLocked({ group: onlyGroup = null, only = null, force = true } = {}) {
-  const { client, target } = await gateway()
-  const [org, groups, policies, members, setupMembers, live] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), readSetupMembers(), liveSandboxes(client)])
+  const { client, target, workspaceScope } = await gateway()
+  const [org, groups, policies, members, setupMembers, live] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), readSetupMembers(), liveSandboxes(client, workspaceScope)])
   const sandboxes = live.map((s) => ({ ...s, groups: groupsOf(s, members, groups), setups: sandboxSetups(setupMembers, s, target?.endpoint) }))
   const targets = sandboxes.filter((s) => (!onlyGroup || s.groups.includes(onlyGroup)) && (!only || only(s)))
   const results = await Promise.all(targets.map(async (s) => {
-    try { return { sandbox: s.name, ...(await syncOne(client, s, org, groups, policies, members, setupMembers, target?.endpoint, { force })) } } catch (error) { return { sandbox: s.name, error: error.rawMessage ?? error.message } }
+    try { return { sandbox: s.name, ...(await syncOne(client, workspaceScope, s, org, groups, policies, members, setupMembers, target?.endpoint, { force })) } } catch (error) { return { sandbox: s.name, error: error.rawMessage ?? error.message } }
   }))
   return {
     applied: results.filter((r) => r.changed).map((r) => r.sandbox),
@@ -340,25 +344,25 @@ export function settledBy(org, group, hosts, sandbox = null, policies = [], setu
 // Reconcile configured rules. Legacy proposals are rejected, never approved;
 // historical grants to explicitly blocked hosts are revoked as before.
 async function sweep(log) {
-  const { client, target } = await gateway()
+  const { client, target, workspaceScope } = await gateway()
   await enforcePolicyOnly(client)
-  const [org, groups, policies, members, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), liveSandboxes(client)])
+  const [org, groups, policies, members, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), liveSandboxes(client, workspaceScope)])
   for (const s of sandboxes) {
     const group = groupsOf(s, members, groups)
     // Read for each sandbox: a setup enabled during the pass adds its rule, and an older list would take it back out.
     let setupMembers
     try { setupMembers = await readSetupMembers() } catch { continue }
     try {
-      const result = await syncOne(client, s, org, groups, policies, members, setupMembers, target?.endpoint, { force: false })
+      const result = await syncOne(client, workspaceScope, s, org, groups, policies, members, setupMembers, target?.endpoint, { force: false })
       if (result.changed) log(`applied organization policy to ${s.name}`)
     } catch { /* retried next pass */ }
     let draft
-    try { draft = await client.raw.getDraftPolicy({ sandbox: s.name, workspaceScope: WORKSPACE }) } catch { continue }
+    try { draft = await client.raw.getDraftPolicy({ sandbox: s.name, workspaceScope: workspaceScope }) } catch { continue }
     for (const chunk of draft.chunks) {
       const hosts = (chunk.proposedRule?.endpoints ?? []).map((e) => e.host)
       const hit = blockedBy(org, hosts)
       const reason = settledBy(org, group, hosts, s.name, policies, sandboxSetups(setupMembers, s, target?.endpoint))
-      const common = { sandbox: s.name, chunkId: chunk.id, workspaceScope: WORKSPACE, requestId: randomUUID() }
+      const common = { sandbox: s.name, chunkId: chunk.id, workspaceScope, requestId: randomUUID() }
       try {
         if (chunk.status === 'pending' && reason) {
           await client.raw.rejectDraftChunk({ ...common, reason })
@@ -377,7 +381,7 @@ export function startOrgSweeper(log) {
   const tick = async () => {
     if (running) return
     running = true
-    try { await serializeOrgWrite(() => sweep(log)) } catch { /* gateway unreachable; next pass */ } finally { running = false }
+    try { await runWithContext(contextSelection(), () => serializeOrgWrite(() => sweep(log))) } catch { /* gateway unreachable; next pass */ } finally { running = false }
   }
   tick()
   const timer = setInterval(tick, 15000)
@@ -388,8 +392,8 @@ export function startOrgSweeper(log) {
 // ---- routes -----------------------------------------------------------------
 
 async function overview() {
-  const { client, target } = await gateway()
-  const [org, groups, policies, stored, storedSetups, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), readSetupMembers(), liveSandboxes(client)])
+  const { client, target, workspaceScope } = await gateway()
+  const [org, groups, policies, stored, storedSetups, sandboxes] = await Promise.all([readOrg(), listGroups(), listPolicies(), readMembers(), readSetupMembers(), liveSandboxes(client, workspaceScope)])
   const members = Object.fromEntries(groups.map((g) => [g.id, []]))
   const assignments = {}
   const ungrouped = []
@@ -423,8 +427,8 @@ async function updateMembers(input) {
   if (!requested.length) throw fail('Choose at least one group for this sandbox.')
   const [groups, policies, stored] = await Promise.all([listGroups(), listPolicies(), readMembers()])
   if (requested.some((id) => !groups.some((g) => g.id === id))) throw fail('Unknown group.')
-  const { client } = await gateway()
-  const live = await liveSandboxes(client)
+  const { client, workspaceScope } = await gateway()
+  const live = await liveSandboxes(client, workspaceScope)
   // Validate every result before writing any membership in a bulk operation.
   for (const name of names) {
     const sandbox = live.find((s) => s.name === name)
@@ -433,7 +437,7 @@ async function updateMembers(input) {
     try { assertSandboxGroup(ids, groups, policies) } catch (error) { throw fail(`${name}: ${error.message}`) }
     stored[name] = ids
   }
-  await write(MEMBERS_FILE, Object.fromEntries(Object.entries(stored).sort(([a], [b]) => a.localeCompare(b))))
+  await write(await membersFile(), Object.fromEntries(Object.entries(stored).sort(([a], [b]) => a.localeCompare(b))))
   return Object.fromEntries(names.map((name) => [name, stored[name]]))
 }
 
@@ -441,7 +445,7 @@ async function saveOrg(input) {
   const org = { blocked: validateBlocked(input.blocked), outside: 'block' }
   await serializeOrgWrite(async () => {
     assertCompatible(org, await listPolicies())
-    await write(path.join(ORG_DIR, 'organization.json'), org)
+    await write(path.join(await orgDirectory(), 'organization.json'), org)
   })
   return { org, ...(await syncAll()) }
 }
@@ -451,7 +455,7 @@ async function saveGroup(input) {
   await serializeOrgWrite(async () => {
     if (input.isNew && (await findGroup(group.id))) throw fail(`A group with the id "${group.id}" already exists. Pick another name.`)
     if (group.template && !(await findTemplate(group.template))) throw fail('Unknown policy template.')
-    await write(path.join(GROUP_DIR, `${group.id}.json`), group)
+    await write(path.join(await groupDirectory(), `${group.id}.json`), group)
   })
   return { group, ...(await syncAll({ group: group.id })) }
 }
@@ -509,7 +513,7 @@ async function deleteGroup(id) {
   const left = members[id] ?? []
   if (left.length) throw fail('Move this group’s sandboxes to another group before deleting it.')
   if ((await listPolicies()).some((p) => p.appliesTo.groups.includes(id))) throw fail('Move or delete this group’s network rules before deleting it.')
-  await fs.rm(path.join(GROUP_DIR, `${id}.json`), { force: true })
+  await fs.rm(path.join(await groupDirectory(), `${id}.json`), { force: true })
   return { ok: true, applied: [], failed: [] }
 }
 
