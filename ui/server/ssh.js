@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { connectionPlan, nativeSshCommand, persistentSessionArgv, persistentGateway } from '../src/lib/sandbox-session.js'
+import { connectionPlan, nativeSshCommand, persistentSessionArgv, persistentTerminals } from '../src/lib/sandbox-session.js'
 import { CONFIG_DIR, gateway, sandboxView } from './gateway.js'
 import { fail, openshellBinary, reasonFrom, runOpenShell, shellQuote, sshBinary } from './openshell-cli.js'
 
@@ -28,8 +28,8 @@ export function connectionView(sandbox, target, {
   const ready = sandbox.phase === 'ready'
   const configHome = env.XDG_CONFIG_HOME ?? path.dirname(CONFIG_DIR)
   const modes = ready ? {
-    ssh: connectionPlan(sandbox, { gateway: target.name, workspace, executable, configHome, remote: persistentGateway(target), ssh: ssh ?? 'ssh', mode: 'ssh' }),
-    exec: connectionPlan(sandbox, { gateway: target.name, workspace, executable, configHome, remote: persistentGateway(target) }),
+    ssh: connectionPlan(sandbox, { gateway: target.name, workspace, executable, configHome, remote: persistentTerminals(target, sandbox), ssh: ssh ?? 'ssh', mode: 'ssh' }),
+    exec: connectionPlan(sandbox, { gateway: target.name, workspace, executable, configHome, remote: persistentTerminals(target, sandbox) }),
     ...(sandbox.tty ? { attach: connectionPlan(sandbox, { gateway: target.name, workspace, executable, configHome, mode: 'attach' }) } : {}),
   } : {}
   return {
@@ -101,7 +101,7 @@ async function openDirectSsh(sandbox, target, workspace, dependencies) {
       ssh: sshBinary(dependencies.env),
       directory,
       configHome: dependencies.env?.XDG_CONFIG_HOME ?? path.dirname(CONFIG_DIR),
-      remoteArgv: persistentGateway(target) ? persistentSessionArgv('shell') : null,
+      remoteArgv: persistentTerminals(target, sandbox) ? persistentSessionArgv('shell') : null,
     })
     await (dependencies.launchTerminal ?? launchNativeTerminal)(command, {
       ...dependencies,

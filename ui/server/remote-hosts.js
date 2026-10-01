@@ -153,7 +153,8 @@ export async function runSsh(host, script, options = {}) {
 function imageRefs(version) {
   if (typeof version !== 'string' || !VERSION.test(version)) throw fail('The local gateway must report a pinned release version (for example 0.1.2).', 409)
   // Release chart: NVIDIA/OpenShell v0.1.2 deploy/helm/openshell/values.yaml.
-  return ['sandbox', 'supervisor'].map((image) => `ghcr.io/nvidia/openshell/${image}:${version}`)
+  // The persistent gateway container runs the release's gateway image too.
+  return ['sandbox', 'supervisor', 'gateway'].map((image) => `ghcr.io/nvidia/openshell/${image}:${version}`)
 }
 
 // Absence is deliberately conservative: a broken CLI, daemon, package, socket,
@@ -348,6 +349,6 @@ export async function installRuntime(host, version, method, { packagePath, onPro
   await execute(host, `${discovery}${command}\n`, { input: method === 'upload' ? packagePath : undefined, timeoutMs: 30 * 60_000, outputLimit: 1024 * 1024, signal })
   onProgress('Checking the installed runtime versions and platform')
   const probe = await probeHost(host, version, { signal })
-  if (!probe.runtimeReady) throw fail(`The host still needs both pinned linux/${probe.arch} images: ${refs.join(' and ')}. Build the Docker-save package for this host's platform.`, 409)
+  if (!probe.runtimeReady) throw fail(`The host still needs the pinned linux/${probe.arch} images: ${refs.join(', ')}. Build the Docker-save package for this host's platform.`, 409)
   return probe
 }

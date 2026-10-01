@@ -10,7 +10,7 @@ import { identityContext } from './security.js'
 import { STATUS_CODES } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer } from 'ws'
-import { defaultSession, isSession, projectOf, sessionArgv, persistentSessionArgv, persistentGateway } from '../src/lib/sandbox-session.js'
+import { defaultSession, isSession, projectOf, sessionArgv, persistentSessionArgv, persistentTerminals } from '../src/lib/sandbox-session.js'
 import { contextKey, gateway, sandboxView } from './gateway.js'
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
@@ -69,7 +69,7 @@ export async function terminalRoute(method, parts, input) {
     const { client, target, workspace, workspaceScope } = await gateway()
     const sandbox = { ...sandboxView((await client.raw.getSandbox({ name: parts[1], workspaceScope })).sandbox), workspace }
     const plan = { ...planSession(sandbox, input ?? {}), gateway: target.name, workspace }
-    if (persistentGateway(target) && !input?.setupLogin) plan.argv = persistentSessionArgv(plan.session)
+    if (persistentTerminals(target, sandbox) && !input?.setupLogin) plan.argv = persistentSessionArgv(plan.session)
     if (input?.setupLogin) {
       const { getSetupStore } = await import('./setups.js')
       const { executeInstaller } = await import('./setup-deployment.js')

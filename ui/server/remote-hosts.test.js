@@ -14,7 +14,7 @@ const modulePath = fileURLToPath(new URL('./remote-hosts.js', import.meta.url))
 const version = '0.1.2'
 const image = (kind) => ({ Os: 'linux', Architecture: 'amd64', RepoTags: [`ghcr.io/nvidia/openshell/${kind}:${version}`] })
 const engine = { ID: 'engine-one', OSType: 'linux', Architecture: 'x86_64', KernelVersion: '6.8.0', OperatingSystem: 'Ubuntu', SecurityOptions: ['name=seccomp,profile=builtin'] }
-const response = ({ info = engine, images = [null, null], socket = '/run/docker.sock', arch = 'x86_64' } = {}) => [
+const response = ({ info = engine, images = [null, null, null], socket = '/run/docker.sock', arch = 'x86_64' } = {}) => [
   'OPENSHELL_HOST_OS=Linux', `OPENSHELL_HOST_ARCH=${arch}`, 'OPENSHELL_HOST_KERNEL=6.8.0', `OPENSHELL_SOCKET=${socket}`,
   `OPENSHELL_ENGINE=${JSON.stringify(info)}`, ...images.map((value, index) => `OPENSHELL_IMAGE_${index}=${JSON.stringify(value)}`), '',
 ].join('\n')
@@ -136,8 +136,8 @@ test('probe is read-only and checks both pinned runtime platforms', async (t) =>
   const { run } = await fixture(t, 'process.stdout.write(process.env.PROBE)')
   const probe = await run(catchError(`remote.probeHost('target','${version}')`))
   assert.deepEqual(probe, { os: 'linux', arch: 'amd64', dockerSocket: '/run/docker.sock', runtimeReady: false, version, engineId: 'engine-one', dockerInstalled: true })
-  assert.equal((await run(catchError(`remote.probeHost('target','${version}')`), { PROBE: response({ images: [image('sandbox'), image('supervisor')] }) })).runtimeReady, true)
-  assert.equal((await run(catchError(`remote.probeHost('target','${version}')`), { PROBE: response({ images: [image('sandbox'), { ...image('supervisor'), Architecture: 'arm64' }] }) })).runtimeReady, false)
+  assert.equal((await run(catchError(`remote.probeHost('target','${version}')`), { PROBE: response({ images: [image('sandbox'), image('supervisor'), image('gateway')] }) })).runtimeReady, true)
+  assert.equal((await run(catchError(`remote.probeHost('target','${version}')`), { PROBE: response({ images: [image('sandbox'), { ...image('supervisor'), Architecture: 'arm64' }, image('gateway')] }) })).runtimeReady, false)
 })
 
 test('probe rejects incompatible daemons, unsafe sockets, and missing workload isolation', async (t) => {
@@ -164,7 +164,7 @@ test('probe executes actual discovery and rejects a remote TCP Docker context wi
   assert.match(result.error, /local Unix Docker Engine socket/)
 })
 
-test('upload streams archive bytes only to docker load and requires both pinned images afterward', async (t) => {
+test('upload streams archive bytes only to docker load and requires every pinned image afterward', async (t) => {
   const { root, run, env } = await fixture(t, `const fs=require('node:fs');
 if (process.argv.at(-1).includes('engine load --quiet')) {
  const chunks=[];process.stdin.on('data',c=>chunks.push(c));process.stdin.on('end',()=>fs.writeFileSync(process.env.REPORT,Buffer.concat(chunks)));
@@ -173,11 +173,11 @@ if (process.argv.at(-1).includes('engine load --quiet')) {
   const archive = Buffer.from('docker-save archive bytes\0do not execute')
   await writeFile(packagePath, archive)
   const call = `remote.installRuntime('target','${version}','upload',{packagePath:${JSON.stringify(packagePath)}})`
-  const result = await run(catchError(call), { INSTALLED: response({ images: [image('sandbox'), image('supervisor')] }) })
+  const result = await run(catchError(call), { INSTALLED: response({ images: [image('sandbox'), image('supervisor'), image('gateway')] }) })
   assert.equal(result.runtimeReady, true)
   assert.deepEqual(await readFile(env.REPORT), archive)
-  const invalid = await run(catchError(call), { INSTALLED: response({ images: [image('sandbox'), null] }) })
-  assert.match(invalid.error, /still needs both pinned/)
+  const invalid = await run(catchError(call), { INSTALLED: response({ images: [image('sandbox'), null, image('gateway')] }) })
+  assert.match(invalid.error, /still needs the pinned .*gateway:/)
 })
 
 test('upload failure closes the stream and child; cancellation terminates a blocked transfer', async (t) => {

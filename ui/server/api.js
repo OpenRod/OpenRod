@@ -12,7 +12,7 @@ import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
-import { PROJECT_LABEL, templateSession, isSession, sessionLaunch, persistentTerminalPolicy, persistentGateway } from '../src/lib/sandbox-session.js'
+import { PROJECT_LABEL, templateSession, isSession, sessionLaunch, persistentTerminalPolicy, persistentGateway, PERSISTENT_TERMINAL_LABEL } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
 import { createRemoteConnections } from './remote-gateway.js'
@@ -175,7 +175,7 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
   // resolved here from stored policy, never accepted raw from the browser.
   let labels
   const { plan, ref } = await createInGroups({ name: String(input.name ?? ''), groups: input.groups ?? input.group, template: input.template ? String(input.template) : null, accessTemplates: input.accessTemplates, agentRules, requireGroup: true, setups: setupMembers }, async (plan) => {
-    labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels(), ...(seed?.project ? { [PROJECT_LABEL]: seed.project } : {}) }
+    labels = { ...plan.labels, ...launch.labels, ...imageLabels, ...sandboxIdentityLabels(), ...(seed?.project ? { [PROJECT_LABEL]: seed.project } : {}), ...(persistentGateway(target) ? { [PERSISTENT_TERMINAL_LABEL]: '1' } : {}) }
     await enforcePolicyOnly(client)
     const spec = {
       policy: persistentGateway(target) ? persistentTerminalPolicy(plan.policy) : plan.policy,
