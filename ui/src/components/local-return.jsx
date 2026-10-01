@@ -1,8 +1,9 @@
 import * as React from 'react'
-import { useApi } from "@/lib/compute"
+import { createApi } from "@/lib/api"
 import {CLOUD_ORIGIN} from '@/lib/cloud-transfer'
 export function LocalReturn({children}) {
-  const api = useApi()
+  // A cloud return always rebuilds on the laptop, independent of saved compute.
+  const api = React.useMemo(() => createApi('local'), [])
  const nonce=React.useRef(/^#cloud-return=([a-f0-9-]{36})$/.exec(window.location.hash)?.[1])
  const [state,setState]=React.useState(nonce.current&&window.opener?'waiting':'normal'),[message,setMessage]=React.useState('')
  const accepted=React.useRef(false),detached=React.useRef(false)

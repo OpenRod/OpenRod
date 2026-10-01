@@ -323,7 +323,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                         </div>
                       </Section>
                     )}
-                    {!live.demo && phase === "ready" && (!compute?.localViewer ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : !cloud ? <ContinueInCloud key={name} name={name} sandbox={sandbox} /> : null)}
+                    {!live.demo && phase === "ready" && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}

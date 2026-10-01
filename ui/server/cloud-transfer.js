@@ -123,11 +123,11 @@ async function rebuild(recipe) {
   while (Date.now() < deadline) {
     const template = (await listImageTemplates()).find((item) => item.name === name)
     if (template?.status === 'ready') return name
-    if (template?.status === 'failed') throw fail('Cloud image rebuild failed. Review the image build in cloud.', 502)
+    if (template?.status === 'failed') throw fail(`Image rebuild failed. Open Templates on the destination and inspect ${name}.`, 502)
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
   await imageTemplateRoute('POST', ['image-templates', name, 'cancel'], {}).catch(() => {})
-  throw fail('Cloud image rebuild timed out.', 504)
+  throw fail('Image rebuild timed out. Check Docker on the destination and retry.', 504)
 }
 
 async function waitReady(name) {
@@ -136,10 +136,10 @@ async function waitReady(name) {
   while (Date.now() < deadline) {
     const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
     if (sandbox.phase === 'ready') return
-    if (['error', 'deleting', 'completed'].includes(sandbox.phase)) throw fail('Cloud sandbox did not start. Review its status in cloud.', 502)
+    if (['error', 'deleting', 'completed'].includes(sandbox.phase)) throw fail(`Sandbox ${name} did not start. Review its status on the destination.`, 502)
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
-  throw fail('Cloud sandbox startup timed out.', 504)
+  throw fail(`Sandbox ${name} startup timed out. Review its status on the destination.`, 504)
 }
 
 async function upload(name, root) {
@@ -148,12 +148,12 @@ async function upload(name, root) {
   const walk = async (folder, prefix = '') => { for (const entry of await fs.readdir(folder, { withFileTypes: true })) { const relative = prefix + entry.name; relatives.push('/sandbox/' + relative); if (entry.isDirectory()) await walk(path.join(folder, entry.name), relative + '/') } }
   await walk(root)
   const check = await client.sandbox.exec(name, ['/bin/sh', '-c', `set -eu\n[ \"$(realpath /sandbox)\" = /sandbox ] || exit 1\nfor p in ${relatives.map(quote).join(' ')}; do [ ! -L \"$p\" ] || exit 1; done`], { noLoginShell: true, timeoutSecs: 30 })
-  if (check.exitCode !== 0) throw fail('Cloud destination contains a symlink. Review the template before transferring.', 409)
+  if (check.exitCode !== 0) throw fail('The destination contains a symlink. Review the template before transferring.', 409)
   await new Promise((resolve, reject) => {
     const child = spawn(process.env.OPENSHELL_BIN || 'openshell', ['--gateway', target.name, 'sandbox', 'upload', '--no-git-ignore', name, '.', '/sandbox'], { cwd: root, shell: false, stdio: ['ignore', 'ignore', 'ignore'] })
     const timer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000)
-    child.once('error', () => { clearTimeout(timer); reject(fail('The cloud workspace upload could not start.', 502)) })
-    child.once('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(fail('Cloud workspace upload failed. Your local workspace is unchanged.', 502)) })
+    child.once('error', () => { clearTimeout(timer); reject(fail('The workspace upload could not start on the destination.', 502)) })
+    child.once('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(fail('Workspace upload failed. Your source workspace is unchanged.', 502)) })
   })
 }
 

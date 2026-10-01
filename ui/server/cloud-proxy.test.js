@@ -52,3 +52,17 @@ test('local connection authorization requires the console cookie and relay uses 
  assert.equal((await request('/api/cloud/local-connect/machine',{token:'grant'})).data.owner,'alice')
  assert.equal((await request('/api/cloud/local-connect/exchange',{body:{code:'code',verifier:'v',nonce:'n'}})).data.token,'grant')
 })
+
+test('combined inventory reads only an existing owner VM without allocating compute',async t=>{
+ const identity={uid:'alice',expires:Date.now()+60000},key='a'.repeat(64)
+ const worker=http.createServer((req,res)=>{assert.equal(req.url,'/api/os/overview');assert.equal(verifyWorkerRequest(key,'alice',req).uid,'alice');res.setHeader('content-type','application/json');res.end(JSON.stringify({sandboxes:[{id:'same',name:'demo'}]}))})
+ let record=null,allocations=0
+ const machines={store:{get:async()=>record},target:async()=>{allocations++;throw Error('Must not provision')},status:async()=>{allocations++;throw Error('Must not provision')}}
+ const security=createSecurity(config,{}),connections={authenticate:async()=>identity}
+ const routes=cloudRouter(security,machines,{},null,{connections}),port=await listen(t,http.createServer((req,res)=>routes.publicRoutes(req,res,()=>res.writeHead(404).end())))
+ const request=()=>new Promise(resolve=>{const q=http.request({host:'127.0.0.1',port,path:'/api/cloud/local-connect/inventory',headers:{host:config.host,origin:config.origin,authorization:'Bearer grant'}},r=>{let raw='';r.on('data',c=>raw+=c);r.on('end',()=>resolve({status:r.statusCode,data:JSON.parse(raw)}))});q.end()})
+ assert.deepEqual((await request()).data.sandboxes,[])
+ record={uid:'alice',state:'ready',key,address:'127.0.0.1',port:await listen(t,worker)}
+ assert.equal((await request()).data.sandboxes[0].name,'demo');assert.equal(allocations,0)
+ record={...record,uid:'bob'};assert.equal((await request()).status,403)
+})

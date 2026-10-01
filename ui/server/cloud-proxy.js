@@ -61,6 +61,13 @@ export function cloudRouter(security,machines,handoffs,auth,{artifact=process.en
     let identity;try{identity=await connections.authenticate(token)}catch(error){if(error.status===403)throw fail('Cloud connection unavailable. Sign in again.',401);throw error}
     if(pathname==='/api/cloud/local-connect/revoke'&&req.method==='POST'){await readJson(req);await connections.revoke(token);return json(res,200,{ok:true})}
     if(pathname==='/api/cloud/local-connect/identity'&&req.method==='GET')return json(res,200,{user:{uid:identity.uid,email:identity.email},expires:identity.expires})
+    if(pathname==='/api/cloud/local-connect/inventory'&&req.method==='GET'){
+     const record=await machines.store.get(identity.uid)
+     if(record&&record.uid!==identity.uid)throw fail('Machine ownership mismatch',403)
+     if(!record||record.state!=='ready'||!record.address)return json(res,200,{sandboxes:[],machine:{status:record?.state??'none',error:record?.error??null}})
+     watchConnection(token,res,identity)
+     return await proxyWorker(req,res,record,identity,security.config,{target:'/api/os/overview'})
+    }
     if(pathname==='/api/cloud/local-connect/machine'&&req.method==='GET')return json(res,200,await machines.status(identity))
     if(pathname.startsWith('/api/cloud/local-connect/os/')&&['GET','POST'].includes(req.method)){
      const target=safeWorkspaceTarget(req.url,'/api/cloud/local-connect/os')

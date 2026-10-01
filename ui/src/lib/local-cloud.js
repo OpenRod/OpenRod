@@ -17,8 +17,9 @@ export function localConnectFromHash(hash) {
 export function isLocalConnectedMessage(event, popup, nonce) {
   return Boolean(popup && event.source === popup && event.origin === CLOUD_ORIGIN && event.data?.type === 'openrod-local-connected' && event.data.nonce === nonce && typeof event.data.code === 'string' && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(event.data.code))
 }
-export async function localCloudRequest(path, body) {
+export async function localCloudRequest(path, body, {signal} = {}) {
   const response = await fetch(`/api/local-cloud/${path}`, {
+    signal,
     method: body === undefined ? 'GET' : 'POST',
     headers: body === undefined ? undefined : { 'content-type': 'application/json', 'x-openshell-console': '1' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -52,6 +53,10 @@ export async function copyLocalSandbox(local, cloud, name) {
   const exported = await local.cloudExport(name)
   const result = await cloud.importCloud(exported.bundle)
   return { ...result, warning: result.warning || exported.warning }
+}
+export async function copyCloudSandboxToLocal(cloud, local, name) {
+  if (local.target !== 'local') throw Error('Choose a local destination for this workspace.')
+  return copyLocalSandbox(cloud, local, name)
 }
 
 export async function authorizeLocalConnection(handoff, request = fetch) {
