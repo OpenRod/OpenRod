@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Check, ChevronDown, Download, FileCode2, Info, Package, Plus, ShieldCheck, Terminal, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, Download, FileCode2, Info, Package, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SelectField } from '@/components/ui/select-field'
 import { BlurFade } from '@/components/ui/blur-fade'
@@ -7,10 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Spinner } from '@/components/ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { SetupPicker } from '@/components/setups-view'
 import { api } from '@/lib/api'
+import { buildTemplateWithSetups } from '@/lib/setup-template-build'
 import { AGENTS, BASES, PENDING_RECIPE_KEY, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
 
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
@@ -33,13 +35,17 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
   const [moreAgents, setMoreAgents] = React.useState(() => Boolean(newRecipe(initial?.recipe).customAgents.length) || AGENTS.some((a) => !a.featured && newRecipe(initial?.recipe).agents.includes(a.id)))
   const [error, setError] = React.useState('')
   const [busy, setBusy] = React.useState(false)
+  const [preparing, setPreparing] = React.useState(false)
+  const [progress, setProgress] = React.useState('')
+  const preparation = React.useRef(null)
+  React.useEffect(() => () => preparation.current?.abort(), [])
   const [local, setLocal] = React.useState(null)
   const [codeOpen, setCodeOpen] = React.useState(false)
   const [leaveOpen, setLeaveOpen] = React.useState(false)
   const build = recipe.source === 'build'
   const patch = (value) => {
     if (requiresShell({ ...recipe, ...value })) setCustom(false)
-    setRecipe((r) => newRecipe({ ...r, ...value }))
+    setRecipe((r) => newRecipe({ ...r, ...value, ...(value.setups ? { setupRevisions: Object.fromEntries(Object.entries(r.setupRevisions || {}).filter(([id]) => value.setups.includes(id))) } : {}) }))
   }
   const dirty = JSON.stringify(recipe) !== baseline
   const errors = recipeErrors(recipe)
@@ -73,8 +79,16 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
       if (first[0] === 'customAgents') setMoreAgents(true)
       setError(first[1]); return
     }
-    setBusy(true); setError('')
-    try { onStarted(await api.buildImageTemplate(recipe, replace)) } catch (e) { setError(e.message) } finally { setBusy(false) }
+    if (busy) return
+    setBusy(true); setPreparing(true); setError(''); setProgress('')
+    const controller = new AbortController()
+    preparation.current = controller
+    try {
+      onStarted(await buildTemplateWithSetups(api, recipe, replace, {
+        signal: controller.signal, onProgress: setProgress, onPrepared: () => setPreparing(false),
+      }))
+    } catch (e) { if (e.name !== 'AbortError') setError(e.message) }
+    finally { setBusy(false); setPreparing(false); setProgress(''); preparation.current = null }
   }
   function exportDockerfile() {
     const url = URL.createObjectURL(new Blob([dockerfileFor(recipe)], { type: 'text/plain' }))
@@ -92,7 +106,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
     <form onSubmit={submit} className="flex max-h-[calc(100svh-2rem)] min-h-0 flex-col">
     <DialogHeader className="shrink-0 flex-row items-center justify-between gap-3 border-b bg-card px-5 py-4 sm:px-6">
       <div className="min-w-0">
-        <DialogTitle className="truncate text-sm">{replace ? `Edit ${recipe.name}` : 'New image template'}</DialogTitle>
+        <div className="flex items-center gap-2"><DialogTitle className="truncate text-sm">{replace ? `Edit ${recipe.name}` : 'New image template'}</DialogTitle><Tooltip><TooltipTrigger type="button" aria-label="About template access" className="rounded-sm text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"><Info className="size-3.5" /></TooltipTrigger><TooltipContent>Software only. Network, file and credential access come from the security preset you pick at launch, plus the selected agents' own sign-in and model destinations.</TooltipContent></Tooltip></div>
         <DialogDescription className="sr-only">Choose the software and start command for your sandbox image.</DialogDescription>
       </div>
       <Button type="button" variant="ghost" size="icon-sm" aria-label="Close template creation" disabled={busy} onClick={requestClose}><X /></Button>
@@ -102,7 +116,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
         <Tabs value={recipe.source} onValueChange={(source) => { patch({ source }); if (source === 'build' && recipe.agents.length > 1) setCustom(false); setError('') }}>
           <TabsList className="w-full"><TabsTrigger value="build" className="text-xs">Build an image</TabsTrigger><TabsTrigger value="image" className="text-xs">Use an existing image</TabsTrigger></TabsList>
         </Tabs>
-        <Field label="Name" htmlFor="template-name" hint={replace ? 'The name stays the same. Duplicate the template to use a new one.' : 'Lowercase letters, digits and dashes, up to 19.'}>
+        <Field label="Name" htmlFor="template-name" hint={recipe.name && errors.name ? errors.name : undefined}>
           <Input id="template-name" value={recipe.name} disabled={replace} maxLength={19} onChange={(e) => patch({ name: e.target.value.toLowerCase() })} placeholder="frontend-app" className="font-mono text-xs" autoFocus={!replace} />
         </Field>
         {build ? <>
@@ -130,7 +144,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
             {local.images.map((i) => <option key={i.reference} value={i.reference}>{i.reference}</option>)}
           </SelectField>}
         </Field>}
-        <SetupPicker value={recipe.setups} onChange={(setups) => patch({ setups })} />
+        <SetupPicker autoPrepare preparationContext="template" value={recipe.setups} onChange={(setups) => patch({ setups })} />
         <StartsIn starts={starts} recipe={recipe} custom={custom} setCustom={setCustom} patch={patch} />
 
         <div className="border-t pt-4">
@@ -158,14 +172,15 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
             {build && <Button type="button" variant="outline" size="sm" onClick={() => setCodeOpen(true)}><FileCode2 />View Dockerfile</Button>}
           </BlurFade>}
         </div>
-        <div className="flex gap-3 rounded-lg border bg-muted/30 p-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="text-[11px] leading-relaxed text-muted-foreground">Software only. Network, file and credential access come from the security preset you pick at launch, plus the selected agents' own sign-in and model destinations.</p></div>
+
         {error && <p role="alert" className="whitespace-pre-wrap rounded-md border border-red-200 bg-red-50/60 p-3 text-xs text-red-700">{error}</p>}
       </fieldset>
     </div>
+    {progress && <p role="status" className="border-t px-5 py-3 text-xs text-muted-foreground sm:px-6">{progress}</p>}
     <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-card px-5 py-3 sm:px-6">
       {replace && <p className="mr-auto flex items-center gap-1.5 text-[11px] text-muted-foreground"><Info className="size-3.5 shrink-0" />{build ? 'Rebuilding replaces this template.' : 'Saving replaces this template.'} Sandboxes already running from it keep their current image.</p>}
-      <Button type="button" variant="ghost" disabled={busy} onClick={requestClose}>Cancel</Button>
-      <Button type="submit" className={action} disabled={busy}>{busy ? <Spinner /> : <Package />}{build ? (replace ? 'Rebuild template' : 'Build template') : 'Save template'}</Button>
+      <Button type="button" variant="ghost" disabled={busy && !preparing} onClick={() => preparing ? preparation.current?.abort() : requestClose()}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
+      <Button type="submit" className={action} disabled={busy}>{busy ? <Spinner /> : <Package />}{preparing ? 'Preparing MCPs…' : build ? (replace ? 'Rebuild template' : 'Build template') : 'Save template'}</Button>
     </footer>
     <Dialog open={codeOpen} onOpenChange={setCodeOpen}><DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>Generated Dockerfile</DialogTitle><DialogDescription>Setup commands are added as a separate build-context file.</DialogDescription></DialogHeader><pre className="overflow-x-auto rounded-md border bg-muted/30 p-4 font-mono text-[11px] leading-relaxed">{build ? dockerfileFor(recipe) : ''}</pre><Button type="button" variant="outline" onClick={exportDockerfile}><Download />Download Dockerfile</Button></DialogContent></Dialog>
     <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}><DialogContent><DialogHeader><DialogTitle>Discard this template?</DialogTitle><DialogDescription>Your changes haven’t been built yet.</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setLeaveOpen(false)}>Keep editing</Button><Button type="button" variant="destructive" onClick={onClose}>Discard</Button></div></DialogContent></Dialog>
