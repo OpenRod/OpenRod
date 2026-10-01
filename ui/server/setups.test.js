@@ -102,7 +102,7 @@ test('installer preserves configs, is idempotent, verifies executable files and 
   assert.deepEqual(await fs.readdir(home),beforeProbe)
   const first = run('apply'); assert.equal(first.code,0,first.error); assert.equal(first.connectivityVerified,false)
   assert.equal(run('apply').code,0)
-  assert.equal((await fs.stat(path.join(home,'.agents/skills/os-12345678-testing/scripts/run.sh'))).mode & 0o777,0o700)
+  assert.equal((await fs.stat(path.join(home,'.agents/skills/testing/scripts/run.sh'))).mode & 0o777,0o700)
   assert.equal(JSON.parse(await fs.readFile(path.join(home,'.claude.json'))).mcpServers.existing.command,'keep-me')
   assert.deepEqual(run('probe',['codex']).targets,['codex','claude','cursor'])
   assert.equal(run('apply',['codex']).code,1)
@@ -114,12 +114,12 @@ test('installer preserves configs, is idempotent, verifies executable files and 
 test('installer detects drift and does not partially remove or overwrite', async (t) => {
   const {home,put,run} = await installerFixture(t)
   assert.equal(run('apply').code,0)
-  await put('.agents/skills/os-12345678-testing/SKILL.md','user changed this')
+  await put('.agents/skills/testing/SKILL.md','user changed this')
   const config = await fs.readFile(path.join(home,'.codex/config.toml'),'utf8')
   assert.match(run('remove').error,/modified/)
   assert.match(run('apply').error,/modified/)
   assert.equal(await fs.readFile(path.join(home,'.codex/config.toml'),'utf8'),config)
-  assert.equal(await fs.readFile(path.join(home,'.agents/skills/os-12345678-testing/SKILL.md'),'utf8'),'user changed this')
+  assert.equal(await fs.readFile(path.join(home,'.agents/skills/testing/SKILL.md'),'utf8'),'user changed this')
 })
 test('installer refuses symlink destinations and malformed existing configuration', async (t) => {
   const {home,put,run} = await installerFixture(t)
@@ -225,4 +225,166 @@ test('module reload refreshes store methods instead of reusing the legacy single
     if (previous === undefined) delete globalThis[legacyKey]
     else globalThis[legacyKey] = previous
   }
+})
+
+test('automatic preparation preserves source snapshots and reuses the first pinned build', async t => {
+  const {home}=await fixture(t)
+  const store=createSetupStore({dir:path.join(home,'store')})
+  const item={id:'mcp',kind:'mcp',issues:['Prepare package dependencies in the next step.'],package:{name:'shadcn'},requirements:[]}
+  const source=await store.save(store.stage([item]).token,'My tools',true)
+  const pinned={...item,issues:[],artifact:{digest:'a'.repeat(64)},config:{command:'node',args:[]}}
+  const results=await Promise.all([store.buildSnapshot(source,[pinned]),store.buildSnapshot(source,[{...pinned,artifact:{digest:'b'.repeat(64)}}])])
+  assert.equal(results[0].id,results[1].id)
+  assert.equal(results[0].revision,results[1].revision)
+  assert.notEqual(results[0].id,source.id)
+  assert.equal((await store.get(source.id)).revision,source.revision)
+  await store.deleteItem(source.id,'mcp',source.revision)
+  await assert.rejects(store.buildSnapshot(source,[pinned]),/changed/)
+})
+
+test('ZIP skills survive review, save, install for every agent, and removal byte-for-byte', async (t) => {
+  const { zipSync, strToU8 } = await import('fflate')
+  const { home, put, setup, run } = await installerFixture(t)
+  const zip = Buffer.from(zipSync({ 'resources/run.sh': strToU8('#!/bin/sh\nexit 99'), '__MACOSX/._run.sh': new Uint8Array([0, 5, 1]) }))
+  await put('.codex/skills/bundled/SKILL.md', '# Bundled skill')
+  await put('.codex/skills/bundled/Archive.zip', zip)
+  const store = createSetupStore({ home, dir: path.join(home, 'catalog') })
+  const scan = await store.scan(['codex'])
+  const review = await store.review(scan.token, scan.items.map(i => i.id))
+  const skill = review.items[0]
+  assert.deepEqual(skill.issues, [])
+  assert.equal(skill.files.find(f => f.path === 'Archive.zip').bytes, zip.length)
+  const preview = await store.file(review.token, skill.id, 'Archive.zip')
+  assert.match(preview.content, /resources\/run.sh/)
+  assert.match(preview.content, /not extracted/)
+  const saved = await store.save(review.token, 'ZIP setup', true)
+  const pinned = (await store.get(saved.id)).items[0]
+  assert.deepEqual(Buffer.from(pinned.files.find(f => f.path === 'Archive.zip').content, 'base64'), zip)
+  setup.items = [pinned]
+  assert.equal(run('apply').code, 0)
+  for (const dir of ['.agents', '.claude', '.cursor']) {
+    const file = path.join(home, dir, 'skills/bundled/Archive.zip')
+    assert.deepEqual(await fs.readFile(file), zip)
+    assert.equal((await fs.stat(file)).mode & 0o111, 0)
+    await assert.rejects(fs.stat(path.join(path.dirname(file), 'resources/run.sh')), { code: 'ENOENT' })
+  }
+  assert.equal(run('apply').code, 0)
+  await put('.agents/skills/bundled/Archive.zip', 'modified')
+  assert.match(run('remove').error, /modified/)
+  await put('.agents/skills/bundled/Archive.zip', zip)
+  assert.equal(run('remove').code, 0)
+  await assert.rejects(fs.stat(path.join(home, '.agents/skills/bundled/Archive.zip')), { code: 'ENOENT' })
+})
+
+test('ZIP review rejects traversal, credentials, nested archives, corrupt data and expansion limits', async (t) => {
+  const { zipSync, strToU8 } = await import('fflate')
+  const { home, put } = await fixture(t)
+  const root = path.dirname(await put('skill/SKILL.md', '# Safe'))
+  for (const [name, contents, expected] of [
+    ['../escape.sh', 'exit 0', /unsafe/],
+    ['/absolute.md', '# No', /unsafe/],
+    ['secret.txt', 'token = abcdefghijklmnopqrstuvwxyz123456', /credentials/],
+    ['nested.zip', 'not text', /unsupported/],
+    ['large.txt', 'a'.repeat(513 * 1024), /expanded limit/],
+  ]) {
+    await put('skill/archive.zip', zipSync({ [name]: strToU8(contents) }))
+    await assert.rejects(readSkill(root, home), expected)
+  }
+  await put('skill/archive.zip', 'not a zip')
+  await assert.rejects(readSkill(root, home), /could not be read/)
+  await put('skill/archive.zip', zipSync(Object.fromEntries(Array.from({length: 201}, (_, i) => [`${i}.md`, strToU8('safe')]))))
+  await assert.rejects(readSkill(root, home), /200 entry/)
+})
+
+test('MCP names are readable, collision-safe and stable across all agents', async (t) => {
+  const { home, put, setup, run } = await installerFixture(t)
+  setup.items = [{id:'first1234',name:'shadcn',kind:'mcp',config:{url:'https://example.com/first'}},{id:'second123',name:'shadcn',kind:'mcp',config:{url:'https://example.com/second'}},{id:'third1234',name:'magicui',kind:'mcp',config:{url:'https://example.com/third'}}]
+  await put('.codex/config.toml', '[mcp_servers.shadcn]\nurl="https://existing.example.com"\n')
+  assert.equal(run('apply').code, 0)
+  const probe = run('probe')
+  assert.equal(probe.mcpNames.codex.first1234, 'shadcn-12345678-first123')
+  assert.equal(probe.mcpNames.claude.first1234, 'shadcn')
+  assert.equal(probe.mcpNames.cursor.second123, 'shadcn-12345678-second12')
+  assert.equal(probe.mcpNames.codex.third1234, 'magicui')
+  assert.equal(run('apply').code, 0)
+  assert.deepEqual(run('probe').mcpNames, probe.mcpNames)
+  assert.equal(run('remove').code, 0)
+  assert.match(await fs.readFile(path.join(home,'.codex/config.toml'),'utf8'), /existing.example.com/)
+})
+
+test('reapplying a legacy setup migrates generated MCP IDs and retains managed removal', async (t) => {
+  const { home, setup, run } = await installerFixture(t)
+  setup.items[0].name = 'magicui'
+  assert.equal(run('apply').code, 0)
+  const manifestPath = path.join(home,'.openshell/installed-setups',setup.id+'.json')
+  const manifest = JSON.parse(await fs.readFile(manifestPath))
+  const legacy = 'os-12345678-abcdef12'
+  for (const config of manifest.configs) {
+    delete config.names
+    if (config.target === 'codex') {
+      const filename = path.join(home,'.codex/config.toml')
+      config.block = config.block.replace('"magicui"', JSON.stringify(legacy))
+      await fs.writeFile(filename, (await fs.readFile(filename,'utf8')).replace('"magicui"', JSON.stringify(legacy)))
+    } else {
+      const filename = path.join(home, config.target === 'claude' ? '.claude.json' : '.cursor/mcp.json')
+      const doc = JSON.parse(await fs.readFile(filename))
+      doc.mcpServers[legacy] = doc.mcpServers.magicui; delete doc.mcpServers.magicui
+      config.values[legacy] = config.values.magicui; delete config.values.magicui
+      await fs.writeFile(filename, JSON.stringify(doc))
+    }
+  }
+  await fs.writeFile(manifestPath, JSON.stringify(manifest))
+  assert.equal(run('apply').code, 0)
+  for (const target of ['codex','claude','cursor']) assert.equal(run('probe').mcpNames[target].abcdef1234,'magicui')
+  assert.ok(!(await fs.readFile(path.join(home,'.codex/config.toml'),'utf8')).includes(legacy))
+  assert.equal(run('remove').code, 0)
+})
+
+test('MCP reapply preserves Codex preferences inserted inside the managed block', async (t) => {
+  const { home, setup, run } = await installerFixture(t)
+  setup.items[0].name = 'shadcn'
+  assert.equal(run('apply').code, 0)
+  const file = path.join(home,'.codex/config.toml')
+  const text = await fs.readFile(file,'utf8')
+  await fs.writeFile(file, text.replace(':end\n', ':end\n').replace('# openshell-setup:' + setup.id + ':end', '[tui]\nscreen_reader_detection_done = true\n[projects."/sandbox"]\ntrust_level = "trusted"\n# openshell-setup:' + setup.id + ':end'))
+  assert.equal(run('apply').code, 0)
+  assert.match(await fs.readFile(file,'utf8'), /screen_reader_detection_done = true/)
+  assert.equal(run('remove').code, 0)
+  assert.match(await fs.readFile(file,'utf8'), /trust_level = "trusted"/)
+})
+
+test('skill names stay readable and preserve colliding user folders for every agent', async (t) => {
+  const { home, put, setup, run } = await installerFixture(t)
+  await put('.agents/skills/testing/SKILL.md', '# Existing user skill')
+  const applied = run('apply'); assert.equal(applied.code, 0, applied.error)
+  assert.equal(await fs.readFile(path.join(home,'.agents/skills/testing/SKILL.md'),'utf8'), '# Existing user skill')
+  assert.equal(await fs.readFile(path.join(home,'.agents/skills/testing-12345678-skill123/SKILL.md'),'utf8'), '# Test')
+  for (const agent of ['.claude','.cursor']) assert.equal(await fs.readFile(path.join(home,agent,'skills/testing/SKILL.md'),'utf8'), '# Test')
+  assert.equal(run('apply').code, 0)
+  assert.equal(run('remove').code, 0)
+  assert.equal(await fs.readFile(path.join(home,'.agents/skills/testing/SKILL.md'),'utf8'), '# Existing user skill')
+})
+
+test('legacy skill paths migrate without losing files and refuse modified originals', async (t) => {
+  const { home, setup, run } = await installerFixture(t)
+  assert.equal(run('apply').code, 0)
+  const manifestPath = path.join(home,'.openshell/installed-setups',setup.id+'.json')
+  const manifest = JSON.parse(await fs.readFile(manifestPath))
+  delete manifest.skillNames
+  for (const agent of ['.agents','.claude','.cursor']) await fs.rename(path.join(home,agent,'skills/testing'),path.join(home,agent,'skills/os-12345678-testing'))
+  manifest.files = Object.fromEntries(Object.entries(manifest.files).map(([file,digest])=>[file.replace('/testing/','/os-12345678-testing/'),digest]))
+  await fs.writeFile(manifestPath,JSON.stringify(manifest))
+  const legacy = path.join(home,'.agents/skills/os-12345678-testing/SKILL.md')
+  await fs.writeFile(legacy,'# Modified')
+  assert.match(run('apply').error,/modified/)
+  await assert.rejects(fs.stat(path.join(home,'.agents/skills/testing/SKILL.md')),{code:'ENOENT'})
+  await fs.writeFile(legacy,'# Test')
+  const applied = run('apply'); assert.equal(applied.code,0,applied.error)
+  for (const agent of ['.agents','.claude','.cursor']) {
+    assert.equal(await fs.readFile(path.join(home,agent,'skills/testing/SKILL.md'),'utf8'),'# Test')
+    await assert.rejects(fs.stat(path.join(home,agent,'skills/os-12345678-testing/SKILL.md')),{code:'ENOENT'})
+    assert.equal((await fs.stat(path.join(home,agent,'skills/testing/scripts/run.sh'))).mode & 0o777,0o700)
+  }
+  assert.equal(run('apply').code,0)
+  assert.equal(run('remove').code,0)
 })

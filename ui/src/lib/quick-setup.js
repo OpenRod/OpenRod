@@ -16,16 +16,16 @@ export function quickSession(ids, openIn) {
   return agent.command
 }
 
-export function quickRecipe(agentId, name = '', openIn = 'agent', withSetups = false) {
+export function quickRecipe(agentId, name = '', openIn = 'agent', withSetups = false, setups = []) {
   if (!['agent', 'shell'].includes(openIn)) throw new Error('Choose Shell or the selected agent.')
   const agents = normalizeQuickAgents(agentId)
   const agent = QUICK_AGENTS.find((item) => item.id === agents[0])
   // Composed images are independent of which session opens on connection.
-  return newRecipe({ name, agents, ...(withSetups ? { runtimes: ['python'] } : {}), command: Array.isArray(agentId) || openIn === 'shell' ? '' : agent?.command || '' })
+  return newRecipe({ name, agents, ...((withSetups || setups.length) ? { runtimes: ['python', 'node'] } : {}), setups: setups.map(s => s.id), setupRevisions: Object.fromEntries(setups.map(s => [s.id, s.revision])), command: Array.isArray(agentId) || openIn === 'shell' ? '' : agent?.command || '' })
 }
 
-export function matchingQuickTemplate(items, agentId, openIn = 'agent', withSetups = false) {
-  const expected = quickRecipe(agentId, '', openIn, withSetups)
+export function matchingQuickTemplate(items, agentId, openIn = 'agent', withSetups = false, setups = []) {
+  const expected = quickRecipe(agentId, '', openIn, withSetups, setups)
   return items.find((item) => item.managed && item.status === 'ready' && item.image &&
     JSON.stringify(newRecipe({ ...item.recipe, name: '' })) === JSON.stringify(expected))
 }
@@ -43,18 +43,18 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) cancel()
 })
 
-export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', withSetups = false, signal, onProgress = () => {}, onBuild = () => {}, wait = pause } = {}) {
+export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', withSetups = false, setups = [], signal, onProgress = () => {}, onBuild = () => {}, wait = pause } = {}) {
   const check = () => { if (signal?.aborted) throw new DOMException('Preparation cancelled.', 'AbortError') }
   check()
   const items = await api.imageTemplates()
   check()
-  const existing = matchingQuickTemplate(items, agentId, openIn, withSetups)
+  const existing = matchingQuickTemplate(items, agentId, openIn, withSetups, setups)
   if (existing) return existing
   const ids = normalizeQuickAgents(agentId)
   const label = ids.length > 1 ? 'agents' : ids[0] || 'terminal'
   const name = `q-${label.slice(0, 9)}-${crypto.randomUUID().slice(0, 6)}`
   onProgress('Preparing environment… First-time setup can take a few minutes.')
-  const job = await api.buildImageTemplate(quickRecipe(agentId, name, openIn, withSetups))
+  const job = await api.buildImageTemplate(quickRecipe(agentId, name, openIn, withSetups, setups))
   onBuild(name)
   check()
   if (job.status === 'failed') throw new Error(job.error || 'Environment build failed.')
@@ -68,4 +68,38 @@ export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', wit
     if (current.status === 'ready') return current
   }
   throw new Error('The build is still running. Check Templates before trying again.')
+}
+
+export async function prepareQuickSetups(api, ids, accessReview, { signal, expectedRevisions = {}, onProgress = () => {}, wait = pause } = {}) {
+  const check = () => { if (signal?.aborted) throw new DOMException('Preparation cancelled.', 'AbortError') }
+  check()
+  if (!ids.length) return { setups: [], accessReview: null }
+  const saved = await api.setups()
+  const setups = []
+  const review = accessReview ? {} : null
+  for (const id of ids) {
+    check()
+    const source = saved.find(s => s.id === id)
+    if (!source || (accessReview && accessReview[id] !== source.revision) || (expectedRevisions[id] && expectedRevisions[id] !== source.revision)) throw new Error('A selected Setup changed. Reopen the dialog and review it again.')
+    onProgress(`Preparing MCP packages for ${source.name}…`)
+    let job
+    try {
+      job = await api.prepareLaunchSetup(id, source.revision)
+      for (let attempt = 0; job.status === 'running' && attempt < 900; attempt++) {
+        check()
+        onProgress(job.message || `Preparing ${source.name}…`)
+        await wait(2000, signal)
+        check()
+        job = await api.setupPreparation(job.id)
+      }
+      check()
+      if (job.status !== 'complete' || !job.setup) throw new Error(job.message || 'Package preparation did not finish. Retry creation.')
+      setups.push(job.setup)
+      if (review) review[job.setup.id] = job.setup.revision
+    } catch (error) {
+      if (job?.id && job.status === 'running') await api.cancelSetupPreparation(job.id).catch(() => {})
+      throw error
+    }
+  }
+  return { setups, accessReview: review }
 }

@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { setupPython } from './setup-python.js'
 import { AGENTS } from '../src/lib/agents.js'
 
-const resourceProbe = readFileSync(new URL('./agent-resources.py', import.meta.url), 'utf8')
+const resourceProbe = setupPython('./agent-resources.py')
 
 // Inspect executables without starting an agent, reading credentials, or sourcing
 // user profile scripts. The same check finds image contents and later installs.

@@ -4,6 +4,7 @@ import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { discover, readSkill, publicItem, hash, fail } from './setup-discovery.js'
 
+export const usableSetup = (setup) => ({ ...setup, items: setup.items.filter(i => !i.disabled && !i.issues.length && (i.kind === 'skill' || i.config)) })
 export const SETUP_ID = /^[a-f0-9]{24}$/
 const TTL = 15 * 60_000
 // Tokens pin the reviewed snapshot. The browser cannot submit arbitrary paths,
@@ -17,6 +18,13 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
   const view = (s) => ({ ...s, items: s.items.map(publicItem) })
   return {
     get,
+    preview(id) { return token(previews, id) },
+    stage(items, credentials = {}) {
+      expire(previews)
+      const id = randomUUID(), revision = hash(JSON.stringify(items))
+      previews.set(id, { items, credentials, revision, expires: now() + TTL })
+      return { token: id, revision, items: items.map(publicItem) }
+    },
     delete(id, revision) {
       const edit = state.edits.then(async () => {
         const setup = await get(id)
@@ -50,10 +58,11 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
       const scan = token(scans, scanToken)
       if (!Array.isArray(ids) || !ids.length || ids.length > scan.items.length || new Set(ids).size !== ids.length) throw fail('Select one or more unique discovered items.')
       const selected = ids.map((id) => { const item = scan.items.find((i) => i.id === id); if (!item) throw fail('Unknown discovery item.'); return item })
-      const items = []
+      const items = [], credentials = {}
       let selectionBytes = 2
       for (const selectedItem of selected) {
-        const { root, ...item } = selectedItem
+        const { root, _sourceCredentials, ...item } = selectedItem
+        if (_sourceCredentials) { credentials[item.id] = _sourceCredentials; item.sourceCredentialFields = Object.keys(_sourceCredentials) }
         if (item.kind === 'skill') {
           try { Object.assign(item, await readSkill(root, home)) } catch (e) { item.issues = [e.status ? e.message : 'Skill could not be read safely.']; item.files = [] }
         }
@@ -62,14 +71,28 @@ export function createSetupStore({ home = os.homedir(), dir = path.resolve(impor
         items.push(item)
       }
       expire(previews); const id = randomUUID(); const revision = hash(JSON.stringify(items))
-      previews.set(id, { items, revision, expires: now() + TTL })
+      previews.set(id, { items, credentials, revision, expires: now() + TTL })
       return { token: id, revision, items: items.map(publicItem), warnings: ['Credential scanning is best-effort. Review every selected skill file before saving or deploying.', 'Import does not grant network access or execute commands.'] }
     },
     async file(previewToken, itemId, filename) {
       const preview = token(previews, previewToken)
       const f = preview.items.find((i) => i.id === itemId)?.files?.find((f) => f.path === filename)
       if (!f) throw fail('Preview file not found.', 404)
-      return { content: f.content }
+      return f.encoding === 'base64' ? { content: 'ZIP archive · copied as-is, not extracted or executed.\n\n' + (f.archiveEntries || []).map(entry => `${entry.path} · ${entry.bytes} B`).join('\n') } : { content: f.content }
+    },
+    buildSnapshot(source, items) {
+      const edit = state.edits.then(async () => {
+      const current = await get(source.id)
+      if (current.revision !== source.revision) throw fail('Setup changed during preparation. Review it and retry.', 409)
+      const id = hash('quick-setup:' + source.id + ':' + source.revision).slice(0, 24)
+      const setup = { id, name: source.name.slice(0, 65) + ' (prepared)', revision: hash(JSON.stringify(items)), createdAt: new Date(now()).toISOString(), owner: 'local operator', preparedFrom: { id: source.id, revision: source.revision }, items }
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 })
+      try { await fs.writeFile(filename(id), JSON.stringify(setup), { flag: 'wx', mode: 0o600 }) }
+      catch (e) { if (e.code !== 'EEXIST') throw e }
+      return view(await get(id))
+      })
+      state.edits = edit.catch(() => {})
+      return edit
     },
     async save(previewToken, name, acknowledged) {
       if (acknowledged !== true) throw fail('Review the selected files and acknowledge the import.')
@@ -93,10 +116,15 @@ export async function resolveSetups(ids = []) {
 }
 export async function setupRoute(method, parts, input) {
   if (parts[0] !== 'setups') return undefined
+  if (method === 'GET' && parts.length === 3 && parts[1] === 'preparations') return (await import('./setup-preparation.js')).preparationStatus(parts[2])
+  if (method === 'POST' && parts.length === 4 && parts[1] === 'preparations' && parts[3] === 'cancel') return (await import('./setup-preparation.js')).cancelPreparation(parts[2])
+  if (method === 'POST' && parts.length === 3 && parts[2] === 'prepare-launch') return (await import('./setup-preparation.js')).prepareLaunch(setupStore, parts[1], input)
   if (method === 'GET' && parts.length === 1) return setupStore.list()
+  if (method === 'POST' && parts.length === 3 && parts[2] === 'prepare') return setupStore.stage((await setupStore.get(parts[1])).items)
   if (method === 'POST' && parts.length === 3 && parts[2] === 'delete') return setupStore.delete(parts[1], input.revision)
   if (method === 'POST' && parts.length === 3 && parts[2] === 'delete-item') return setupStore.deleteItem(parts[1], input.item, input.revision)
   if (method !== 'POST' || parts.length !== 2) return undefined
+  if (parts[1] === 'prepare') return (await import('./setup-preparation.js')).prepareImport(setupStore, input)
   if (parts[1] === 'scan') return setupStore.scan(input.sources)
   if (parts[1] === 'review') return setupStore.review(input.token, input.ids)
   if (parts[1] === 'file') return setupStore.file(input.token, input.item, input.path)

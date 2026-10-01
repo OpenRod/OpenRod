@@ -3,7 +3,8 @@ import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
-import { resolveSetups } from './setups.js'
+import { resolveSetups, usableSetup } from './setups.js'
+import { artifactFile } from './setup-packages.js'
 import { WORKSPACE, gateway, resolveGateway, iso } from './gateway.js'
 
 // Image templates are OpenShell sandbox templates (`openshell sandbox template
@@ -132,8 +133,12 @@ function clean(input) {
 
 async function start(input) {
   const recipe = clean(input)
-  const setups = await resolveSetups(recipe.setups)
-  if (setups.some((s) => s.items.some((i) => i.issues.length))) throw fail('A selected Setup has unresolved import requirements. Resolve or re-import those items before building.')
+  const setups = (await resolveSetups(recipe.setups)).map(usableSetup)
+  if (setups.some(s => recipe.setupRevisions?.[s.id] && recipe.setupRevisions[s.id] !== s.revision)) throw fail('A selected Setup changed. Review it before building the image.',409)
+  recipe.setupRevisions = Object.fromEntries(setups.map(s => [s.id, s.revision]))
+  const pinnedErrors = recipeErrors(recipe)
+  if (Object.keys(pinnedErrors).length) throw fail(Object.values(pinnedErrors)[0])
+  if (setups.some((s) => !s.items.length)) throw fail('A selected Setup has unresolved import requirements. Resolve or re-import those items before building.')
   const { name } = recipe
   const replace = input.replace === true
   if (running(jobs.get(name))) throw fail('This template is already building.', 409)
@@ -155,7 +160,10 @@ async function start(input) {
         await fs.writeFile(path.join(temp, 'Dockerfile'), recipe.source === 'build' ? dockerfileFor(recipe) : `FROM ${recipe.image}\nCOPY --chown=1000:1000 setup-bundles/ /sandbox/.openshell/bundles/\n`)
         if (setups.length) {
           await fs.mkdir(path.join(temp, 'setup-bundles'), { mode: 0o700 })
-          for (const setup of setups) await fs.writeFile(path.join(temp, 'setup-bundles', setup.id + '.json'), JSON.stringify(setup), { mode: 0o600 })
+          for (const setup of setups) {
+            await fs.writeFile(path.join(temp, 'setup-bundles', setup.id + '.json'), JSON.stringify(setup), { mode: 0o600 })
+            for (const item of setup.items.filter(i => i.artifact)) { const { data } = await artifactFile(item.artifact); await fs.writeFile(path.join(temp, 'setup-bundles', item.artifact.digest + '.tar.gz'), data, { mode: 0o600 }) }
+          }
         }
         await fs.writeFile(path.join(temp, 'setup.sh'), recipe.setup)
         image = `${BUILT_PREFIX}${name}:${Date.now().toString(36)}`
