@@ -41,8 +41,8 @@ async function openEditor(name, input) {
   const dir = path.dirname(binary)
   const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)
   const env = pathDirs.includes(dir) ? process.env : { ...process.env, PATH: [dir, process.env.PATH].filter(Boolean).join(path.delimiter) }
-  const { target } = await gateway()
-  const result = await serializeCli(() => runOpenShell(args, { env, gateway: target.name }))
+  const { target, workspace } = await gateway()
+  const result = await serializeCli(() => runOpenShell(args, { env, gateway: target.name, workspace }))
   if (result.timedOut) throw fail(`Opening ${label} timed out.`, 504)
   if (result.outputExceeded) throw fail(`Opening ${label} produced too much output.`, 502)
   if (result.code !== 0) throw fail(reasonFrom(result.stderr) || `Could not open ${label}.`, 502)

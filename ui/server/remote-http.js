@@ -9,6 +9,6 @@ export function safeWorkspaceTarget(target,prefix){
  if(typeof target!=='string'||!target.startsWith(prefix+'/'))throw remoteFail('Invalid remote target',404)
  const suffix=target.slice(prefix.length),path=suffix.split('?')[0]
  if(/%2f|%5c|%2e|\\|\/\//i.test(path)||path.split('/').some(p=>p==='.'||p==='..'))throw remoteFail('Invalid remote target')
- if(!/^\/(overview|sandboxes|activity|activity-destinations|setups|cloud-export|cloud-import|cloud-transfer|policy|settings|secrets|profiles|templates|image-templates|org|egress|files|ingress|stream|editors|local-folder|terminal|ssh)(?:\/|$)/.test(path))throw remoteFail('Unknown remote operation',404)
+ if(!/^\/(context|inventory|overview|sandboxes|activity|activity-destinations|setups|cloud-export|cloud-import|cloud-transfer|policy|settings|secrets|profiles|templates|image-templates|org|egress|files|downloads|ingress|stream|editors|local-folder|terminal|ssh)(?:\/|$)/.test(path))throw remoteFail('Unknown remote operation',404)
  return '/api/os'+suffix
 }

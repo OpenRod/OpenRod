@@ -7,7 +7,7 @@ import { WebSocket } from 'ws'
 
 const module = await import('./cloud-ssh.js').catch(() => ({}))
 const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBQ0mhdsCYeaMy1QaI3/GDYUHJRTerTsKhXvrFTHkmEa'
-const context = { sandbox: { name: 'demo', phase: 'ready' }, target: { name: 'owner-gateway' } }
+const context = { sandbox: { name: 'demo', phase: 'ready' }, target: { name: 'owner-gateway' }, workspace: 'team' }
 
 test('SSH ticket is single-use, principal-scoped, short-lived and pins authenticated host keys', async () => {
   assert.equal(typeof module.createSshTickets, 'function')
@@ -23,6 +23,8 @@ test('SSH ticket is single-use, principal-scoped, short-lived and pins authentic
   const plan = tickets.claim(second.ticket, 'alice')
   assert.equal(plan.name, 'demo')
   assert.equal(plan.target.name, 'owner-gateway')
+  assert.equal(plan.workspace, 'team')
+  assert.equal(second.context, '["owner-gateway","team"]')
   assert.equal(plan.sessionExpires, 100000)
   assert.equal(tickets.claim(second.ticket, 'alice'), null)
   const third = await module.cloudSshRoute('POST', ['sandboxes', 'demo', 'ssh-ticket'], {}, dependencies)
@@ -38,10 +40,23 @@ test('tickets reject stopped sandboxes, missing owners, and invalid host keys', 
   await assert.rejects(module.cloudSshRoute('POST', ['sandboxes', 'demo', 'ssh-ticket'], {}, { ...base, hostKeys: async () => ['ssh-ed25519 invalid\nHost evil'] }), { status: 502 })
 })
 
+test('SSH upgrades reject tickets for another workspace or a disconnected location', () => {
+  for (const options of [{ requested: '["owner-gateway","other"]' }, { allowContext: () => false }]) {
+    const tickets = module.createSshTickets()
+    const ticket = tickets.issue({ name: 'demo', target: context.target, gateway: context.target.name, workspace: context.workspace, principal: 'alice', sessionExpires: Date.now() + 5000 })
+    let rejection
+    const socket = { end: value => { rejection = value } }
+    const query = new URLSearchParams({ ticket, ...(options.requested ? { context: options.requested } : {}) })
+    assert.equal(module.cloudSshUpgrade({ url: '/api/os/ssh?' + query }, socket, Buffer.alloc(0), () => true, 'alice', { tickets, allowContext: options.allowContext, spawnProcess: () => assert.fail('A rejected scope must not launch SSH') }), true)
+    assert.match(rejection, /409 Conflict/)
+    assert.equal(tickets.claim(ticket, 'alice'), null)
+  }
+})
+
 test('raw SSH websocket streams binary to fixed proxy argv and kills child on disconnect', async () => {
   assert.equal(typeof module.cloudSshUpgrade, 'function')
   const tickets = module.createSshTickets()
-  const ticket = tickets.issue({ name: 'demo', target: context.target, principal: 'alice', sessionExpires: Date.now() + 5000 })
+  const ticket = tickets.issue({ name: 'demo', target: context.target, gateway: context.target.name, workspace: context.workspace, principal: 'alice', sessionExpires: Date.now() + 5000 })
   const child = new EventEmitter()
   child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough()
   let invocation, killed = false, finishKill
@@ -54,7 +69,7 @@ test('raw SSH websocket streams binary to fixed proxy argv and kills child on di
   try {
     await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
     assert.equal(invocation.file, '/usr/bin/openshell')
-    assert.deepEqual(invocation.args, ['ssh-proxy', '--gateway-name', 'owner-gateway', '--name', 'demo', '--workspace', 'default'])
+    assert.deepEqual(invocation.args, ['ssh-proxy', '--gateway-name', 'owner-gateway', '--name', 'demo', '--workspace', 'team'])
     assert.equal(invocation.opts.shell, false)
     const input = new Promise(resolve => child.stdin.once('data', resolve))
     ws.send(Buffer.from([0, 255, 1])); assert.deepEqual(await input, Buffer.from([0, 255, 1]))
@@ -67,7 +82,7 @@ test('raw SSH websocket streams binary to fixed proxy argv and kills child on di
 
 test('expired authorization kills the proxy even when a peer never acknowledges websocket close', async () => {
   const tickets = module.createSshTickets()
-  const ticket = tickets.issue({ name: 'demo', target: context.target, principal: 'alice', sessionExpires: Date.now() + 100 })
+  const ticket = tickets.issue({ name: 'demo', target: context.target, gateway: context.target.name, workspace: context.workspace, principal: 'alice', sessionExpires: Date.now() + 100 })
   const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough()
   let killed = false; child.kill = () => { killed = true }
   const server = http.createServer()
@@ -82,7 +97,7 @@ test('expired authorization kills the proxy even when a peer never acknowledges 
 
 test('successful proxy exit drains queued SSH stdout before closing the websocket', async () => {
   const tickets = module.createSshTickets(), expected = Buffer.alloc(256 * 1024, 0xa5)
-  const ticket = tickets.issue({ name: 'demo', target: context.target, principal: 'alice', sessionExpires: Date.now() + 5000 })
+  const ticket = tickets.issue({ name: 'demo', target: context.target, gateway: context.target.name, workspace: context.workspace, principal: 'alice', sessionExpires: Date.now() + 5000 })
   const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => {}
   child.stdout.once('end', () => child.emit('close', 0))
   const server = http.createServer()

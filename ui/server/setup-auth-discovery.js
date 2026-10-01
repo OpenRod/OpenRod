@@ -18,7 +18,7 @@ export async function discoverSignIn(item) {
   }
   const requirements = [...item.requirements]
   const mcpHost = new URL(item.config.url).hostname
-  if (!requirements.some(r => r.phase === 'auth' && r.host === mcpHost)) requirements.push({phase:'auth',host:mcpHost,port:443,path:'/.well-known/**',reason:'The agent reads MCP sign-in metadata here; this does not grant access to other API paths.'})
-  for (const host of pending) if (!requirements.some(r => r.host === host && r.phase === 'auth')) requirements.push({ phase:'auth',host,port:443,reason:'Sign-in metadata identified this authorization service. The agent needs this access for account connection and refresh.' })
+  if (!requirements.some(r => r.phase === 'auth' && r.host === mcpHost)) requirements.push({phase:'auth',host:mcpHost,port:443,path:'/.well-known/**',reason:'Sign-in details for this MCP.'})
+  for (const host of pending) if (!requirements.some(r => r.host === host && r.phase === 'auth')) requirements.push({ phase:'auth',host,port:443,reason:'Sign-in service for this MCP.' })
   return { ...item, requirements, auth: {mode:'agent-session',status:'sign-in-required',discovery:server?'metadata-found':'destinations-proposed'} }
 }

@@ -42,13 +42,40 @@ export function sessionLaunch(session, command) {
 
 const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
 
-// Native terminal commands are always pinned to the gateway shown by the
-// console. Exec starts a fresh console-managed session; attach reconnects to
-// the sandbox's canonical TTY process.
-export function connectionPlan(sandbox, { gateway, mode = "exec", executable = "openshell" } = {}) {
-  if (!["exec", "attach"].includes(mode)) throw new Error("Unknown connection mode.")
+// Both copied commands and native launches own a private config directory.
+// The shell must stay alive while ssh runs so its exit trap removes the config.
+export function nativeSshCommand({ alias, ssh = "ssh", directory, configCommand, configHome }) {
+  const script = [
+    "umask 077",
+    ...(configHome ? [`export XDG_CONFIG_HOME=${shellQuote(configHome)}`] : []),
+    directory ? `dir=${shellQuote(directory)}` : 'dir=$(mktemp -d "${TMPDIR:-/tmp}/openshell-ssh.XXXXXXXX") || exit',
+    'trap \'rm -f -- "$dir/config"; rmdir -- "$dir"\' 0',
+    "trap 'exit 129' HUP",
+    "trap 'exit 130' INT",
+    "trap 'exit 143' TERM",
+    ...(configCommand ? [`${configCommand} > "$dir/config" || exit`] : []),
+    `${shellQuote(ssh)} -F "$dir/config" ${shellQuote(alias)}`,
+  ].join("; ")
+  return `sh -c ${shellQuote(script)}`
+}
+
+// Every mode is pinned to the displayed gateway and workspace. Direct SSH
+// opens a login shell; exec starts a new console session; attach uses its TTY.
+export function connectionPlan(sandbox, { gateway, workspace = sandbox.workspace || "default", mode = "exec", executable = "openshell", ssh = "ssh", configHome } = {}) {
+  if (!["ssh", "exec", "attach"].includes(mode)) throw new Error("Unknown connection mode.")
   if (mode === "attach" && !sandbox.tty) throw new Error("This sandbox has no canonical TTY session.")
-  const argv = ["--gateway", gateway, "sandbox"]
+  const argv = ["--gateway", gateway, "--workspace", workspace, "sandbox"]
+  if (mode === "ssh") {
+    argv.push("ssh-config", sandbox.name)
+    const alias = `openshell-${sandbox.name}.${workspace}`
+    return {
+      mode,
+      alias,
+      command: nativeSshCommand({ alias, ssh, configHome, configCommand: [executable, ...argv].map(shellQuote).join(" ") }),
+      session: null,
+      workdir: null,
+    }
+  }
   if (mode === "attach") argv.push("connect", sandbox.name)
   else {
     const project = projectOf(sandbox)
@@ -59,7 +86,7 @@ export function connectionPlan(sandbox, { gateway, mode = "exec", executable = "
   return {
     mode,
     argv,
-    command: [executable, ...argv].map(shellQuote).join(" "),
+    command: `${configHome ? `env ${shellQuote(`XDG_CONFIG_HOME=${configHome}`)} ` : ""}${[executable, ...argv].map(shellQuote).join(" ")}`,
     session: mode === "exec" ? defaultSession(sandbox) : null,
     workdir: mode === "exec" && projectOf(sandbox) ? `/sandbox/${projectOf(sandbox)}` : null,
   }
@@ -78,5 +105,17 @@ export function sessionChoices(sandbox) {
   const commands = [...new Set([...(current === "shell" ? [] : [current]), ...installed])]
   return [{ id: "shell", name: "Shell" }, ...commands.map((command) => ({ id: command, name: sessionName(command) }))]
 }
-// A browser terminal is its own tab; the app routes this hash to it.
-export const terminalHref = (name, session, target = currentComputeTarget()) => `?target=${target}#terminal/${encodeURIComponent(name)}${session ? `?session=${encodeURIComponent(session)}` : ""}`
+// Pin a new terminal tab to its originating gateway/workspace, not whichever
+// context another console tab happens to select later.
+export function terminalHref(name, session, context, target = typeof context === "string" ? context : context?.target ?? currentComputeTarget()) {
+  const query = new URLSearchParams()
+  if (session) query.set("session", session)
+  const gateway = typeof context?.gateway === "string" ? context.gateway : context?.gateway?.name ?? context?.name
+  const workspace = context?.workspace ?? context?.gateway?.workspace
+  if (gateway && workspace) {
+    query.set("gateway", gateway)
+    query.set("workspace", workspace)
+  }
+  const suffix = query.toString()
+  return `?target=${target}#terminal/${encodeURIComponent(name)}${suffix ? `?${suffix}` : ""}`
+}

@@ -17,6 +17,7 @@ const ownerId = uid => createHash('sha256').update(uid).digest('hex').slice(0, 1
 // escaping; neither ever contains a grant, gateway credential, or SSH secret.
 const configQuote = value => `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 const proxyQuote = value => shellQuote(String(value).replaceAll('%', '%%'))
+const scopedTarget = (target, context) => context ? `${target}?${new URLSearchParams({ context, location: '1' })}` : target
 
 async function readManaged(file) {
   try {
@@ -50,15 +51,18 @@ export function createLocalCloudNative(dependencies = {}) {
     const editor = EDITORS[id]
     return findExecutable(editor.binary, [...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...['/Applications', path.join(home, 'Applications')].map(root => path.join(root, editor.app, 'Contents/Resources/app/bin'))])
   })
-  const aliasFor = (uid, name) => `openrod-cloud-${ownerId(uid)}-${name}`
+  const aliasFor = (uid, name, context) => `openrod-cloud-${ownerId(uid)}-${name}${context ? '-' + ownerId(context) : ''}`
   const commandFor = alias => `${shellQuote(sshBinary(env) ?? 'ssh')} -F ${shellQuote(configFile)} ${shellQuote(alias)}`
 
   const assertActive = (services, grant) => { if (services.connection() !== grant) throw fail('Cloud connection changed. Open the sandbox from OpenRod again.', 403) }
-  async function install(name, origin, services, grant) {
+  async function install(name, origin, services, grant, requestedContext) {
     assertActive(services, grant)
-    const owner = grant.user.uid, alias = aliasFor(owner, name)
-    const ticket = await services.call(`/os/sandboxes/${name}/ssh-ticket`, { method: 'POST', body: {} })
+    const owner = grant.user.uid
+    const ticket = await services.call(scopedTarget(`/os/sandboxes/${name}/ssh-ticket`, requestedContext), { method: 'POST', body: {} })
     const keys = validateHostKeys(ticket.hostKeys)
+    const context = requestedContext ?? ticket.context
+    if (requestedContext && ticket.context !== requestedContext) throw fail('Cloud workspace changed. Open the sandbox from OpenRod again.', 409)
+    const alias = aliasFor(owner, name, context)
     assertActive(services, grant)
     const config = [
       `Host ${alias}`, `  HostName ${alias}`, '  User sandbox', '  StrictHostKeyChecking yes',
@@ -66,7 +70,7 @@ export function createLocalCloudNative(dependencies = {}) {
       '  CheckHostIP no', '  UpdateHostKeys no', '  IdentityAgent none', '  IdentitiesOnly yes',
       '  PubkeyAuthentication no', '  PasswordAuthentication no', '  KbdInteractiveAuthentication no',
       '  ControlMaster no', '  ServerAliveInterval 15', '  ServerAliveCountMax 3',
-      `  ProxyCommand ${[node, helper, '--origin', origin, '--sandbox', name, '--owner', ownerId(owner)].map(proxyQuote).join(' ')}`,
+      `  ProxyCommand ${[node, helper, '--origin', origin, '--sandbox', name, '--owner', ownerId(owner), ...(context ? ['--context', context] : [])].map(proxyQuote).join(' ')}`,
     ].join('\n') + '\n'
     await serial(async () => {
       assertActive(services, grant)
@@ -103,19 +107,25 @@ export function createLocalCloudNative(dependencies = {}) {
     const [, name, action] = parts
     if (action === 'ssh' ? req.method !== 'GET' : req.method !== 'POST') return false
     const input = req.method === 'POST' ? await readJson(req) : {}
+    const context = req.headers['x-openshell-context'] ?? url.searchParams.get('context') ?? input.context
+    if (context !== undefined && context !== null) {
+      let selection
+      try { selection = JSON.parse(context) } catch { throw fail('Invalid cloud workspace.') }
+      if (!Array.isArray(selection) || selection.length !== 2 || !selection.every(value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(value))) throw fail('Invalid cloud workspace.')
+    }
     const connection = services.connection(), owner = ownerId(connection.user.uid)
     if (input.owner !== undefined && input.owner !== owner) throw fail('This SSH alias belongs to a different Google account. Open the sandbox from OpenRod again.', 403)
-    const sandbox = await services.call(`/os/sandboxes/${name}`)
+    const sandbox = await services.call(scopedTarget(`/os/sandboxes/${name}`, context))
     assertActive(services, connection)
     const origin = `http://${req.headers.host}`
     if (!/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?$/.test(origin)) throw fail('Invalid local origin.', 403)
-    const alias = aliasFor(connection.user.uid, name)
+    let alias = aliasFor(connection.user.uid, name, context)
     if (action === 'ssh') {
       const view = connectionView(sandbox, { name: 'openrod-cloud', endpoint: 'https://cloud.example.com', remote: true }, { env, platform })
       const ready = sandbox.phase === 'ready'
-      if (ready) await install(name, origin, services, connection)
+      if (ready) alias = (await install(name, origin, services, connection, context)).alias
       assertActive(services, connection)
-      responseJson(res, 200, { ...view, alias, cliInstalled: true, canOpenTerminal: ready && Boolean(sshBinary(env)) && view.terminalSupported, modes: ready ? { exec: { mode: 'exec', command: commandFor(alias), argv: ['-F', configFile, alias], workdir: projectOf(sandbox) ? `/sandbox/${projectOf(sandbox)}` : '/sandbox' } } : {} }); return true
+      responseJson(res, 200, { ...view, alias, defaultMode: 'exec', cliInstalled: true, canOpenTerminal: ready && Boolean(sshBinary(env)) && view.terminalSupported, modes: ready ? { exec: { mode: 'exec', command: commandFor(alias), argv: ['-F', configFile, alias], workdir: projectOf(sandbox) ? `/sandbox/${projectOf(sandbox)}` : '/sandbox' } } : {} }); return true
     }
     if (sandbox.phase !== 'ready') throw fail('This sandbox is not running.', 409)
     if (action === 'ssh-open' && input.mode !== undefined && input.mode !== 'exec') throw fail('Cloud SSH opens a fresh shell. Use the browser terminal for attach.')
@@ -126,7 +136,7 @@ export function createLocalCloudNative(dependencies = {}) {
       if (!editor) throw fail(`${EDITORS[input.editor].label} is not installed on this machine.`, 409)
     }
     if (action === 'ssh-open' && !sshBinary(env)) throw fail('OpenSSH is not installed on this machine.', 409)
-    const installed = await install(name, origin, services, connection)
+    const installed = await install(name, origin, services, connection, context)
     assertActive(services, connection)
     if (action === 'ssh-ticket') responseJson(res, 200, installed.ticket)
     else if (action === 'ssh-config') responseJson(res, 200, { config: installed.config, alias, command: installed.command })

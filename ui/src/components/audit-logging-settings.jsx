@@ -3,7 +3,7 @@ import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 
 import { Spinner } from "@/components/ui/spinner"
-import { useApi } from "@/lib/compute"
+import { useApi } from "@/lib/location-context"
 import { useLive } from "@/lib/live"
 
 // The gateway's registered settings that change how policy is enforced,
@@ -52,7 +52,7 @@ export function AuditLoggingSettings() {
       const entries = await Promise.all(sandboxes.map(async (s) => [s.name, (await api.settings(s.name).catch(() => ({ sandbox: null }))).sandbox]))
       setPerSandbox(Object.fromEntries(entries))
     } catch (e) { setError(e.message) }
-  }, [sandboxes.map((s) => s.name).join(",")]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sandboxes.map((s) => s.name).join(","), api]) // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => { load() }, [load])
 
   async function set(scope, key, value, clear = false) {

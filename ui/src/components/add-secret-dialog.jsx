@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ServiceLogo } from "@/components/service-logo"
 import { credentialFields, setupIssue, validateSecretCredentials } from "../../shared/secret-fields"
-import { useApi } from "@/lib/compute"
+import { useApi } from "@/lib/location-context"
 import { SERVICES, SERVICE_GROUPS } from "@/lib/services"
 
 // Step one is a choice of service, not of "profile": the profile behind it is

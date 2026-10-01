@@ -43,19 +43,20 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) cancel()
 })
 
-export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', withSetups = false, setups = [], signal, onProgress = () => {}, onBuild = () => {}, wait = pause } = {}) {
+export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', withSetups = false, setups = [], signal, onProgress = () => {}, onBuild = () => {}, onBuildUpdate = () => {}, wait = pause } = {}) {
   const check = () => { if (signal?.aborted) throw new DOMException('Preparation cancelled.', 'AbortError') }
   check()
   const items = await api.imageTemplates()
   check()
   const existing = matchingQuickTemplate(items, agentId, openIn, withSetups, setups)
-  if (existing) return existing
+  if (existing) { onBuildUpdate(existing); return existing }
   const ids = normalizeQuickAgents(agentId)
   const label = ids.length > 1 ? 'agents' : ids[0] || 'terminal'
   const name = `q-${label.slice(0, 9)}-${crypto.randomUUID().slice(0, 6)}`
   onProgress('Preparing environment… First-time setup can take a few minutes.')
   const job = await api.buildImageTemplate(quickRecipe(agentId, name, openIn, withSetups, setups))
   onBuild(name)
+  onBuildUpdate({ ...job, name })
   check()
   if (job.status === 'failed') throw new Error(job.error || 'Environment build failed.')
   for (let attempt = 0; attempt < 900; attempt++) {
@@ -64,6 +65,7 @@ export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', wit
     const current = (await api.imageTemplates()).find((item) => item.name === name)
     check()
     if (!current) throw new Error('The environment build disappeared. Check Templates and try again.')
+    onBuildUpdate(current)
     if (current.status === 'failed') throw new Error(current.error || 'Environment build failed.')
     if (current.status === 'ready') return current
   }

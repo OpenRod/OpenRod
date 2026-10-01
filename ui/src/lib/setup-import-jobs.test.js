@@ -60,6 +60,54 @@ test('retrying an active job shares the same operation instead of duplicating im
   const second = store.start({ id: 'same', review, name: 'Tools' })
   assert.equal(first.promise, second.promise)
   assert.equal(runs, 1)
+  assert.throws(() => store.updateReview(first.id, prepared, true), /Wait for the import/)
   finish({ status: 'cancelled' })
   await first.promise
+})
+
+test('removing an import item survives reopening and saves the updated review', async () => {
+  const updated = { token: 'without-failed-item', items: [{ id: 'working' }] }
+  const store = createSetupImportJobs({ saveSetup: async token => {
+    assert.equal(token, updated.token)
+    return { id: 'saved' }
+  } }, async (_, r, name, choices, callbacks) => {
+    callbacks.onReview(prepared)
+    return { status: 'needs-attention', review: prepared }
+  })
+  const task = store.start({ review, name: 'Tools' })
+  await task.promise
+  store.updateReview(task.id, updated, true)
+  const reopened = store.getSnapshot()[0]
+  assert.deepEqual(reopened.review, updated)
+  assert.equal(reopened.preparation, null)
+  assert.equal(reopened.prepared, true)
+  await store.start({ id: reopened.id, review: reopened.review, name: reopened.name, saveOnly: reopened.prepared }).promise
+  assert.equal(store.getSnapshot()[0].status, 'saved')
+})
+test('notification messages list inactive items and point attention back to the import', async () => {
+  const saved = createSetupImportJobs({}, async () => ({ status: 'saved', setup: { id: 'saved' }, inactive: ['shadcn', 'local'] }))
+  await saved.start({ review, name: 'Tools' }).promise
+  assert.equal(saved.getSnapshot()[0].message, 'Available in templates and sandboxes. Inactive: shadcn, local.')
+  const clean = createSetupImportJobs({}, async () => ({ status: 'saved', setup: { id: 'saved' }, inactive: [] }))
+  await clean.start({ review, name: 'Tools' }).promise
+  assert.equal(clean.getSnapshot()[0].message, 'Available in templates and sandboxes.')
+  const attention = createSetupImportJobs({}, async () => ({ status: 'needs-attention', review: prepared }))
+  await attention.start({ review, name: 'Tools' }).promise
+  assert.equal(attention.getSnapshot()[0].message, 'Some items need attention. Open the import to remove or fix them.')
+  const saveOnly = createSetupImportJobs({ saveSetup: async () => ({ id: 'saved' }) })
+  await saveOnly.start({ review: { token: 'prepared', items: [{ name: 'shadcn', issues: ['Unsupported'] }, { name: 'ok', issues: [] }] }, name: 'Tools', saveOnly: true }).promise
+  assert.equal(saveOnly.getSnapshot()[0].message, 'Available in templates and sandboxes. Inactive: shadcn.')
+})
+test('saved jobs keep the egress policy the save created, for the network access popup', async () => {
+  const egressPolicy = { id: 'setup-saved', name: 'MCPs & Skills: Tools', created: true, destinations: ['api.github.com'], hosts: [{ host: 'api.github.com', items: ['GitHub'] }], blocked: [], sync: { applied: [], failed: [] } }
+  const imported = createSetupImportJobs({}, async () => ({ status: 'saved', setup: { id: 'saved', egressPolicy } }))
+  await imported.start({ review, name: 'Tools' }).promise
+  assert.deepEqual(imported.getSnapshot()[0].setup.egressPolicy, egressPolicy)
+  assert.equal(imported.getSnapshot()[0].message, 'Available in templates and sandboxes. Created the egress policy “MCPs & Skills: Tools”.')
+  const unsaved = createSetupImportJobs({}, async () => ({ status: 'saved', setup: { id: 'saved', egressPolicy: null, egressPolicyError: 'Too many destinations.' } }))
+  await unsaved.start({ review, name: 'Tools' }).promise
+  assert.equal(unsaved.getSnapshot()[0].message, 'Available in templates and sandboxes. Its egress policy wasn’t saved.')
+  const saveOnly = createSetupImportJobs({ saveSetup: async () => ({ id: 'saved', egressPolicy }) })
+  await saveOnly.start({ review: prepared, name: 'Tools', saveOnly: true }).promise
+  assert.deepEqual(saveOnly.getSnapshot()[0].setup.egressPolicy, egressPolicy)
 })

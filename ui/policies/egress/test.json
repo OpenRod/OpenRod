@@ -1,12 +1,9 @@
 {
-  "id": "cursor",
-  "name": "Cursor",
+  "id": "test",
+  "name": "test",
   "action": "allow",
   "destinations": [
-    "cursor.com",
-    "**.cursor.com",
-    "**.cursor.sh",
-    "**.cursorapi.com"
+    "*.n12.co.il"
   ],
   "appliesTo": {
     "everyone": false,
@@ -17,7 +14,8 @@
   },
   "advanced": {
     "ports": [
-      443
+      443,
+      80
     ],
     "programs": [],
     "requests": "any",

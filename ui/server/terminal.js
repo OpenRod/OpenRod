@@ -11,7 +11,7 @@ import { STATUS_CODES } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer } from 'ws'
 import { defaultSession, isSession, projectOf, sessionArgv } from '../src/lib/sandbox-session.js'
-import { WORKSPACE, gateway, sandboxView } from './gateway.js'
+import { contextKey, gateway, sandboxView } from './gateway.js'
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
@@ -66,19 +66,19 @@ const tickets = createTickets()
 
 export async function terminalRoute(method, parts, input) {
   if (method === 'POST' && parts[0] === 'sandboxes' && parts.length === 3 && NAME.test(parts[1]) && parts[2] === 'terminal-session') {
-    const { client } = await gateway()
-    const sandbox = sandboxView((await client.raw.getSandbox({ name: parts[1], workspaceScope: WORKSPACE })).sandbox)
-    const plan = planSession(sandbox, input ?? {})
+    const { client, target, workspace, workspaceScope } = await gateway()
+    const sandbox = { ...sandboxView((await client.raw.getSandbox({ name: parts[1], workspaceScope })).sandbox), workspace }
+    const plan = { ...planSession(sandbox, input ?? {}), gateway: target.name, workspace }
     if (input?.setupLogin) {
-      const { setupStore } = await import('./setups.js')
+      const { getSetupStore } = await import('./setups.js')
       const { executeInstaller } = await import('./setup-deployment.js')
-      const setup = await setupStore.get(input.setupLogin)
+      const setup = await getSetupStore().get(input.setupLogin)
       const item = setup.items.find(i => i.id === input.mcp)
       plan.argv = setupLoginArgv(item, setup.id, plan.session)
       const probe = await executeInstaller(client, sandbox, setup, ['codex'], 'probe')
       if (!probe.installed || !probe.targets.includes('codex') || !probe.items.includes(item.id) || probe.revision !== setup.revision) throw fail('Enable this Setup for Codex in the sandbox first.', 409)
       plan.argv = setupLoginArgv(item, setup.id, plan.session, probe.mcpNames?.codex?.[item.id])
-      const help = await client.sandbox.exec(sandbox.name, ['codex', 'mcp', 'login', '--help'], {noLoginShell:true,timeoutSecs:10})
+      const help = await client.sandbox.exec(sandbox.name, ['codex', 'mcp', 'login', '--help'], {workspace,noLoginShell:true,timeoutSecs:10})
       if (!help.stdout.toString().includes('--no-browser')) throw fail('Update Codex in this image to a version with MCP --no-browser sign-in.',409)
       plan.workdir = '/sandbox'
     }
@@ -96,12 +96,14 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
 
 // Handles the console's own upgrade requests and leaves every other one (Vite's
 // HMR socket) alone. `isLocal` is the same check the HTTP routes apply.
-export function terminalUpgrade(req, socket, head, isLocal, principal) {
+export function terminalUpgrade(req, socket, head, isLocal, principal, allowContext = () => true) {
   const url = new URL(req.url ?? '/', 'http://local')
   if (url.pathname !== TERMINAL_PATH) return false
   if (!isLocal(req)) { refuse(socket, 403); return true }
   const plan = tickets.claim(url.searchParams.get('ticket'), principal)
   if (!plan || plan.principal !== principal) { refuse(socket, 403); return true }
+  const requestedContext = url.searchParams.get('context')
+  if (!allowContext(plan) || (requestedContext != null && requestedContext !== contextKey(plan))) { refuse(socket, 409); return true }
   wss.handleUpgrade(req, socket, head, (ws) => { run(ws, plan).catch(() => { try { ws.close(1011) } catch {} }) })
   return true
 }
@@ -117,10 +119,11 @@ export function controlOf(data, isBinary) {
 
 async function run(ws, plan) {
   const send = (message) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message)) }
-  const { client } = await gateway()
+  const { client } = await gateway(plan)
   let session
   try {
     session = await client.sandbox.execInteractive(plan.name, plan.argv, {
+      workspace: plan.workspace,
       tty: true, cols: plan.cols, rows: plan.rows, workdir: plan.workdir,
       environment: { TERM: 'xterm-256color', COLORTERM: 'truecolor' },
     })
@@ -142,6 +145,7 @@ async function run(ws, plan) {
     } catch { /* input raced the exit */ }
   })
   ws.on('close', () => { if (running()) session.cancel() })
+  send({ type: 'ready' })
   const ping = setInterval(() => { if (ws.readyState === ws.OPEN) ws.ping() }, 30_000)
   try {
     for await (const event of session.output) {

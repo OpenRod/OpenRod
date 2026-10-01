@@ -45,9 +45,11 @@ test('native launcher opens installed local editors and Terminal with fixed alia
   try {
     const editors = res(); await native(req('GET'), editors, '/api/os/editors', services()); assert.equal(editors.value[0].installed, true); assert.equal(editors.value[1].installed, false)
     const view = res(); await native(req('GET'), view, '/api/os/sandboxes/demo/ssh', services()); assert.equal(view.value.canOpenTerminal, true)
+    assert.equal(view.value.defaultMode, 'exec')
+    assert.equal(view.value.modes[view.value.defaultMode].mode, 'exec')
     const result = res(); await native(req('POST', { editor: 'cursor', command: 'evil', folder: '/etc' }), result, '/api/os/sandboxes/demo/editor', services())
     assert.equal(launched.file, '/Applications/Cursor.app/bin/cursor'); assert.deepEqual(launched.args, ['--remote', `ssh-remote+${view.value.alias}`, '/sandbox/project'])
-    await native(req('POST', { mode: 'exec', command: 'evil' }), res(), '/api/os/sandboxes/demo/ssh-open', services()); assert.match(terminal, /ssh.*-F/); assert.doesNotMatch(terminal, /evil/)
+    await native(req('POST', { mode: view.value.defaultMode, command: 'evil' }), res(), '/api/os/sandboxes/demo/ssh-open', services()); assert.match(terminal, /ssh.*-F/); assert.doesNotMatch(terminal, /evil/)
     await assert.rejects(native(req('POST', { editor: 'vscode' }), res(), '/api/os/sandboxes/demo/editor', services()), { status: 409 })
     assert.equal(await native(req('GET'), res(), '/api/os/overview', services()), false)
     await assert.rejects(native(req('POST', { mode: 'attach' }), res(), '/api/os/sandboxes/demo/ssh-open', services()), { status: 400 })
@@ -74,5 +76,42 @@ test('account switches and same-account reconnects cancel a pending native launc
       })
       await assert.rejects(pending, { status: 403 }); assert.equal(tickets, 0); assert.equal(launched, false)
     }
+  } finally { await fs.rm(home, { recursive: true, force: true }) }
+})
+
+test('native aliases and proxy commands stay bound to their originating cloud workspace', async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'openrod-native-workspace-'))
+  const native = module.createLocalCloudNative({ home, env: { PATH: '/usr/bin:/bin' } })
+  const grant = { user: { uid: 'alice' }, expires: Date.now() + 10000 }
+  const aliases = []
+  try {
+    for (const workspace of ['alpha', 'beta']) {
+      const context = JSON.stringify(['worker', workspace]), calls = []
+      const scoped = {
+        connection: () => grant,
+        call: async target => {
+          const url = new URL(target, 'http://local')
+          calls.push(url)
+          return url.pathname.endsWith('ssh-ticket') ? { ticket: 'one-use', hostKeys: [key], context } : { ...sandbox, workspace }
+        },
+      }
+      const response = res()
+      await native(req('POST'), response, '/api/os/sandboxes/demo/ssh-config?' + new URLSearchParams({ context, location: '1' }), scoped)
+      aliases.push(response.value.alias)
+      assert.match(response.value.config, /--context/)
+      assert.ok(response.value.config.includes(context))
+      assert.equal(calls.length, 2)
+      for (const call of calls) {
+        assert.equal(call.searchParams.get('context'), context)
+        assert.equal(call.searchParams.get('location'), '1')
+      }
+    }
+    assert.notEqual(aliases[0], aliases[1])
+    const config = await fs.readFile(path.join(home, '.config/openrod/cloud_ssh_config'), 'utf8')
+    for (const alias of aliases) assert.ok(config.includes(alias))
+    await assert.rejects(native(req('POST'), res(), '/api/os/sandboxes/demo/ssh-config?' + new URLSearchParams({ context: '["worker","alpha"]' }), {
+      connection: () => grant,
+      call: async target => new URL(target, 'http://local').pathname.endsWith('ssh-ticket') ? { ticket: 'one-use', hostKeys: [key], context: '["worker","beta"]' } : sandbox,
+    }), { status: 409 })
   } finally { await fs.rm(home, { recursive: true, force: true }) }
 })

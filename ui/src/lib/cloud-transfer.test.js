@@ -19,7 +19,7 @@ test('ticket messages require exact cloud origin, popup source and nonce', () =>
 
 test('return handoff fixes local destination and binds messages to the opened window', async () => {
   const { LOCAL_ORIGIN, localHandoffUrl, isLocalHandoffMessage } = await import('./cloud-transfer.js')
-  assert.equal(localHandoffUrl('nonce'), 'http://127.0.0.1:4600/?handoff=cloud#cloud-return=nonce')
+  assert.equal(localHandoffUrl('nonce'), 'http://127.0.0.1:4600/?handoff=cloud&target=local#cloud-return=nonce')
   const popup = {}
   const event = { origin: LOCAL_ORIGIN, source: popup, data: { type: 'openrod-local-ready', nonce: 'nonce' } }
   assert.equal(isLocalHandoffMessage(event, popup, 'nonce', 'openrod-local-ready'), true)

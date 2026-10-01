@@ -11,6 +11,8 @@ test('proxy refuses nonloopback origins, arbitrary targets, credentials and miss
   assert.equal(typeof module.parseProxyArgs, 'function')
   const args = ['--origin', 'http://localhost:4311', '--sandbox', 'demo', '--owner', 'abcdef1234567890']
   assert.equal(module.parseProxyArgs(args).sandbox, 'demo')
+  assert.equal(module.parseProxyArgs([...args, '--context', '["worker","team"]']).context, '["worker","team"]')
+  for (const context of ['not-json', '["worker"]', '["worker","../evil"]']) assert.throws(() => module.parseProxyArgs([...args, '--context', context]))
   for (const origin of ['https://evil.example', 'http://localhost.evil:4311', 'http://u:p@localhost:4311', 'http://localhost:4311/path']) assert.throws(() => module.parseProxyArgs(['--origin', origin, ...args.slice(2)]))
   assert.throws(() => module.parseProxyArgs([...args, '--command', 'sh']))
   assert.throws(() => module.parseProxyArgs(args.slice(0, 4)))
@@ -35,13 +37,15 @@ test('proxy obtains ticket from exact local boundary and relays only binary SSH 
   const input = new PassThrough(), output = new PassThrough(), data = []
   output.on('data', chunk => data.push(chunk))
   try {
-    const running = module.runProxy({ origin, sandbox: 'demo', owner: 'abcdef1234567890' }, { input, output })
+    const context = '["worker","team"]'
+    const running = module.runProxy({ origin, sandbox: 'demo', owner: 'abcdef1234567890', context }, { input, output })
     input.write(Buffer.from([0, 255, 2])); await running
     assert.deepEqual(Buffer.concat(data), Buffer.from([0, 255, 2]))
     assert.equal(request.url, '/api/remote/os/sandboxes/demo/ssh-ticket')
     assert.equal(request.headers.origin, origin); assert.equal(request.headers['x-openshell-console'], '1')
-    assert.deepEqual(request.body, { owner: 'abcdef1234567890' })
-    assert.equal(upgraded.url, '/api/remote/os/ssh?ticket=one-use'); assert.equal(upgraded.headers.origin, origin)
+    assert.deepEqual(request.body, { owner: 'abcdef1234567890', context })
+    const upgradedUrl = new URL(upgraded.url, origin)
+    assert.equal(upgradedUrl.pathname, '/api/remote/os/ssh'); assert.equal(upgradedUrl.searchParams.get('ticket'), 'one-use'); assert.equal(upgradedUrl.searchParams.get('context'), context); assert.equal(upgraded.headers.origin, origin)
     assert.equal(request.headers.authorization, undefined)
   } finally { input.destroy(); output.destroy(); for (const ws of wss.clients) ws.terminate(); wss.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
 })

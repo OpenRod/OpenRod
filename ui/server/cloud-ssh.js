@@ -3,14 +3,14 @@ import { STATUS_CODES } from 'node:http'
 import { createServer } from 'node:net'
 import { spawn } from 'node:child_process'
 import { WebSocketServer, createWebSocketStream } from 'ws'
-import { WORKSPACE, gateway, sandboxView } from './gateway.js'
+import { contextKey, gateway, sandboxView } from './gateway.js'
 import { identityContext } from './security.js'
 import { fail, runCli } from './openshell-cli.js'
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 export const SSH_PATH = '/api/os/ssh'
 const TTL = 60_000
-const proxyArgs = plan => ['ssh-proxy', '--gateway-name', plan.target.name, '--name', plan.name, '--workspace', 'default']
+const proxyArgs = plan => ['ssh-proxy', '--gateway-name', plan.target.name, '--name', plan.name, '--workspace', plan.workspace]
 
 export function validateHostKeys(keys) {
   if (!Array.isArray(keys) || !keys.length || keys.length > 8) throw fail('No verified SSH host key is available.', 502)
@@ -41,9 +41,9 @@ export function createSshTickets({ now = Date.now, ttl = TTL } = {}) {
 const tickets = createSshTickets()
 
 async function loadContext(name) {
-  const { client, target } = await gateway()
-  const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
-  return { sandbox, target }
+  const { client, target, workspace, workspaceScope } = await gateway()
+  const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope })).sandbox)
+  return { sandbox, target, workspace }
 }
 
 function stopProxy(child) {
@@ -61,12 +61,12 @@ function stopProxy(child) {
 // ssh-proxy authenticates the gateway with the worker's own mTLS bundle. A
 // loopback-only keyscan through that trusted stream obtains the actual SSH key
 // (OpenShell terminates SSH, so sandbox /etc/ssh keys are not authoritative).
-export async function discoverHostKeys({ sandbox, target }, dependencies = {}) {
+export async function discoverHostKeys({ sandbox, target, workspace }, dependencies = {}) {
   const spawnProcess = dependencies.spawnProcess ?? spawn
   const peers = new Set(), children = new Set()
   const server = createServer(socket => {
     peers.add(socket)
-    const child = spawnProcess('/usr/bin/openshell', proxyArgs({ name: sandbox.name, target }), { shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawnProcess('/usr/bin/openshell', proxyArgs({ name: sandbox.name, target, workspace }), { shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] })
     children.add(child); child.stderr.resume()
     child.on('error', () => socket.destroy()); child.stdin.on('error', () => socket.destroy()); child.stdout.on('error', () => socket.destroy())
     socket.on('error', () => {}); socket.pipe(child.stdin); child.stdout.pipe(socket)
@@ -93,8 +93,9 @@ export async function cloudSshRoute(method, parts, input, dependencies = {}) {
   if (context.sandbox.phase !== 'ready') throw fail('This sandbox is not running.', 409)
   const hostKeys = validateHostKeys(await (dependencies.hostKeys ?? discoverHostKeys)(context))
   const store = dependencies.tickets ?? tickets
-  const ticket = store.issue({ name: context.sandbox.name, target: context.target, principal: principal.uid, sessionExpires: principal.expires })
-  return { ticket, expires: store.expires(ticket), hostKeys, user: 'sandbox' }
+  const plan = { name: context.sandbox.name, target: context.target, gateway: context.target.name, workspace: context.workspace, principal: principal.uid, sessionExpires: principal.expires }
+  const ticket = store.issue(plan)
+  return { ticket, expires: store.expires(ticket), hostKeys, user: 'sandbox', context: contextKey(plan) }
 }
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
@@ -106,6 +107,8 @@ export function cloudSshUpgrade(req, socket, head, isAllowed, principal, depende
   const uid = typeof principal === 'string' ? principal : principal?.uid
   const plan = (dependencies.tickets ?? tickets).claim(url.searchParams.get('ticket'), uid)
   if (!plan || !uid) { refuse(socket, 403); return true }
+  const requestedContext = url.searchParams.get('context')
+  if (!(dependencies.allowContext ?? (() => true))(plan) || (requestedContext != null && requestedContext !== contextKey(plan))) { refuse(socket, 409); return true }
   wss.handleUpgrade(req, socket, head, ws => {
     let child
     try { child = (dependencies.spawnProcess ?? spawn)('/usr/bin/openshell', proxyArgs(plan), { shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] }) }

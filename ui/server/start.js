@@ -43,8 +43,11 @@ export async function createConsoleServer({ config = cloudConfig(), auth, machin
     server.on('upgrade', routes.upgrade)
   } else openshellApi(security).configureServer({ middlewares: app, httpServer: server, config: { logger: { info: console.info } } })
   app.use('/healthz', (req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('ready') })
+  const upgradePaths = config.mode === 'cloud'
+    ? ['/api/os/terminal', '/api/cloud/local-connect/os/terminal', '/api/cloud/local-connect/os/ssh']
+    : config.mode === 'local' ? ['/api/os/terminal', '/api/os/ssh', '/api/remote/os/terminal', '/api/remote/os/ssh'] : ['/api/os/terminal', '/api/os/ssh']
   server.on('upgrade', (req, socket) => {
-    try { if (!['/api/os/terminal','/api/os/ssh','/api/remote/os/terminal','/api/remote/os/ssh','/api/cloud/local-connect/os/terminal','/api/cloud/local-connect/os/ssh'].includes(requestPath(req))) socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n') }
+    try { if (!upgradePaths.includes(requestPath(req))) socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n') }
     catch { /* The API upgrade handler rejects malformed targets. */ }
   })
   app.use(serveStatic(dist, { index: 'index.html', dotfiles: 'deny', maxAge: 0 }))
