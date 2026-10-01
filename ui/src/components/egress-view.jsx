@@ -491,7 +491,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
         )}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-6 py-2 text-[11px] text-muted-foreground">
-        <span>{view === "rules" && !filtering ? "Sandboxes start locked down. Blocks beat every allow." : <><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}</>}</span>
+        <span><strong className="font-medium text-foreground">{count.toLocaleString()}</strong>{filtering ? ` of ${allCount.toLocaleString()}` : ""} {view === "blocked" ? "blocked hosts" : view}</span>
         <span className="hidden sm:inline">{enforced}/{total} policies enforced · ⌘K to search</span>
       </div>
       <AlertDialog open={deleteTargets !== null} onOpenChange={(open) => { if (!open && !deletionInFlight.current) setDeleteTargets(null) }}>
