@@ -1,0 +1,14 @@
+[Unit]
+Description=Block cloud metadata access from Docker workloads
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+Before=openrod-console.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/openrod-block-metadata
+RemainAfterExit=yes
+
+[Install]
+WantedBy=docker.service

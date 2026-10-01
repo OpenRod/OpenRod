@@ -10,6 +10,7 @@ import { SecretsView } from "@/components/secrets-view"
 import { TemplatesView } from "@/components/image-templates-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
+import { CloudAccount } from "@/components/auth-gate"
 import { LiveProvider } from "@/lib/live"
 
 // xterm.js is only needed by terminal tabs.
@@ -99,6 +100,7 @@ export function App() {
           <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-8">
             <SidebarTrigger className="mr-2 md:hidden" />
             <h1 className="text-[18px] font-semibold tracking-tight">{TITLES[view]}</h1>
+            <CloudAccount />
           </header>
           <SetupImportNotifications />
           <PageBoundary view={view}>

@@ -1,4 +1,5 @@
 import { SetupsView } from "@/components/setups-view"
+import { useCloudMode } from "./auth-gate"
 import * as React from "react"
 import { AlertTriangle, Box, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Terminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -13,6 +14,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
 import { CopyCommand } from "@/components/copy-command"
+import { ContinueInCloud, ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
@@ -42,8 +44,10 @@ function Section({ title, icon: Icon, children, aside, className }) {
 // keep retrying while the sheet is open if that first request fails.
 let editorsRequest
 function useEditors() {
+  const cloud = useCloudMode()
   const [editors, setEditors] = React.useState([])
   React.useEffect(() => {
+    if (cloud) return
     let cancelled = false
     let timer
     const load = () => {
@@ -53,7 +57,7 @@ function useEditors() {
     }
     load()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [])
+  }, [cloud])
   return editors
 }
 
@@ -200,6 +204,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const cloud = useCloudMode()
   const editors = useEditors()
   const summary = live.sandboxes?.find((s) => s.name === name)
 
@@ -309,10 +314,11 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                         <div className="space-y-2">
                           {!live.demo && <OpenInEditor name={name} editors={editors} />}
                           {!live.demo && <OpenWebTerminal name={name} sandbox={sandbox} />}
-                          {!live.demo && <NativeSsh name={name} />}
+                          {!live.demo && !cloud && <NativeSsh name={name} />}
                         </div>
                       </Section>
                     )}
+                    {!live.demo && phase === "ready" && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}

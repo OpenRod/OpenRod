@@ -17,3 +17,10 @@ dist/
 *.key
 *.p12
 *.pfx
+
+# Infrastructure state and local configuration
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan

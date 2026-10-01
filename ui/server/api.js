@@ -1,4 +1,5 @@
 import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.js'
+import { localTransfer, importTransfer, exportTransfer } from './cloud-transfer.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -27,22 +28,14 @@ import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from '.
 // These routes act with the operator's gateway certificate. A loopback Host
 // header alone is not proof of a local caller when Vite is bound to a LAN
 // address, so check the socket, the Host and the browser's own origin claims.
-export function isLocalApiRequest(req) {
-  const host = req.headers.host ?? ''
-  const peer = req.socket?.remoteAddress
-  const origin = req.headers.origin
-  const site = req.headers['sec-fetch-site']
-  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer)
-    && /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)
-    && (origin === undefined || origin === `http://${host}`)
-    && (site === undefined || site === 'same-origin' || site === 'none')
-}
+export { isLocalApiRequest } from './security.js'
+import { createSecurity, cloudConfig, assertCloudOperation, requestPath } from './security.js'
 
 // A mutation must also carry a JSON body and a custom header, which a
 // cross-site form or image tag cannot send without a CORS preflight we never grant.
-function isMutation(req) {
+function isMutation(req, security) {
   return req.method === 'POST'
-    && req.headers.origin === `http://${req.headers.host}`
+    && req.headers.origin === security.originFor(req)
     && (req.headers['content-type'] ?? '').startsWith('application/json')
     && req.headers['x-openshell-console'] === '1'
 }
@@ -130,7 +123,7 @@ async function sandboxDetail(name) {
 
 // ---- writes -----------------------------------------------------------------
 
-async function createSandbox(input) {
+export async function createSandbox(input, { sessionOverride = false } = {}) {
   const { client } = await gateway()
   // An image template is an OpenShell sandbox template: the gateway supplies
   // its image and environment; the console adds how the sandbox starts.
@@ -141,7 +134,7 @@ async function createSandbox(input) {
   let agentRules = []
   if (saved?.managed) { try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) } }
   if (saved) {
-    const start = saved.recipe.command.trim()
+    const start = sessionOverride && input.session !== undefined ? String(input.session) : saved.recipe.command.trim()
     let selectedSession
     try { selectedSession = templateSession(saved, input.session) } catch (error) { throw fail(error.message) }
     input = { ...input, image: '', session: selectedSession, command: start ? ['/bin/bash', '-lc', start] : [] }
@@ -316,10 +309,11 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
 
 // ---- router -----------------------------------------------------------------
 
-export function openshellApi() {
+export function openshellApi(security = createSecurity(cloudConfig())) {
   return {
     name: 'openshell-console-api',
     configureServer(server) {
+      server.middlewares.use(security.middleware)
       const store = createActivityStore(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity.sqlite'))
       const delivery = createActivityDelivery(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity-delivery.sqlite'), store)
       delivery.start()
@@ -334,12 +328,21 @@ export function openshellApi() {
       const stopOrgSweeper = process.env.OPENSHELL_CONSOLE_SWEEP === '0' ? () => {} : startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
       server.httpServer?.once('close', () => { stopSweeper(); stopOrgSweeper() })
       // Browser terminals arrive as WebSocket upgrades, which skip the middleware.
-      server.httpServer?.on('upgrade', (req, socket, head) => terminalUpgrade(req, socket, head, isLocalApiRequest))
+      server.httpServer?.on('upgrade', async (req, socket, head) => {
+        try {
+          if (requestPath(req) !== '/api/os/terminal') return
+          const identity = await security.authenticate(req)
+          if (socket.destroyed) return
+          if (identity) security.watch(req, socket, identity)
+          terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid)
+        } catch (error) { socket.end(`HTTP/1.1 ${error.status === 400 ? '400 Bad Request' : '403 Forbidden'}\r\nConnection: close\r\n\r\n`) }
+      })
       server.middlewares.use('/api/os', async (req, res) => {
-        if (!isLocalApiRequest(req)) { res.writeHead(403).end(); return }
+        if (!security.isAllowed(req)) { res.writeHead(403).end(); return }
         const url = new URL(req.url, 'http://local')
         const parts = url.pathname.split('/').filter(Boolean)
         try {
+          assertCloudOperation(parts)
           if (req.method === 'GET') {
             if (parts[0] === 'stream') {
               res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' })
@@ -349,6 +352,7 @@ export function openshellApi() {
               req.on('close', () => { clearInterval(ping); hub.remove(res) })
               return
             }
+            if (parts[0] === 'cloud-export') return send(res, 200, await exportTransfer({ name: url.searchParams.get('name') }))
             if (parts[0] === 'overview') return send(res, 200, await overview())
             if (parts[0] === 'sandboxes' && parts.length === 1) return send(res, 200, await listSandboxes())
             if (parts[0] === 'sandboxes' && parts.length === 2 && NAME.test(parts[1])) return send(res, 200, await sandboxDetail(parts[1]))
@@ -388,11 +392,14 @@ export function openshellApi() {
           }
           // One dropped file per request, streamed to a staging folder.
           if (req.method === 'POST' && parts[0] === 'files' && parts[2] === 'uploads' && parts.length === 4 && NAME.test(parts[1])) {
-            if (req.headers.origin !== `http://${req.headers.host}` || req.headers['content-type'] !== 'application/octet-stream' || req.headers['x-openshell-console'] !== '1') return send(res, 403, { error: 'Request rejected' })
+            if (req.headers.origin !== security.originFor(req) || req.headers['content-type'] !== 'application/octet-stream' || req.headers['x-openshell-console'] !== '1') return send(res, 403, { error: 'Request rejected' })
             return send(res, 200, await receiveUpload(req, parts[1], parts[3], url.searchParams.get('path')))
           }
-          if (!isMutation(req)) return send(res, 403, { error: 'Request rejected' })
+          if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
+          if (parts[0] === 'cloud-import' && ['worker', 'local'].includes(security.config.mode)) return send(res, 200, await importTransfer(req, { createSandbox: input => createSandbox(input, { sessionOverride: true }) }))
           const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : parts[0] === 'setups' ? 128 * 1024 : 65536)
+          assertCloudOperation(parts, input)
+          if (parts[0] === 'cloud-transfer' && security.config.mode === 'local') return send(res, 200, await localTransfer(input))
           if (parts[0] === 'activity' && parts.length === 2) {
             if (parts[1] === 'delete-preview') return send(res, 200, store.previewDeletion(input))
             if (parts[1] === 'delete') {
