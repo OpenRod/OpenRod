@@ -52,7 +52,7 @@ test('one failing source preserves the other inventory and remote cached rows ar
   assert.deepEqual(partial.sandboxes.find(record => record.location.remote), {
     id: 'remote-id', name: 'same-name', phase: 'ready', location: {
       id: contextKey(remote), context: contextKey(remote), gateway: remote.gateway, workspace: remote.workspace,
-      label: 'SSH · target', remote: true, connected: false, error: 'Remote RPC failed',
+      label: 'SSH · target', remote: true, host: 'target', connected: false, error: 'Remote RPC failed',
     },
   })
   await assert.rejects(inventory.resolve(contextKey(remote)), { status: 409 })
@@ -92,7 +92,7 @@ test('aws-eks is never an inventory source or an allowed resource owner', async 
   await assert.rejects(inventory.resolve(contextKey(snapshot.returnContext)), { status: 409 })
 })
 
-test('HTTP explicit owner marker rejects arbitrary locations and does not widen OpenRod Cloud context authorization', async t => {
+test('HTTP explicit owner marker rejects arbitrary locations and does not widen ShellOS Cloud context authorization', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-context-authorization-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const moduleUrl = new URL('./api.js', import.meta.url).href
