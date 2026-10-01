@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
+import { NAME_PATTERN, RECIPE_ANNOTATION, newRecipe, recipeErrors, dockerfileFor, storedRecipe, buildFingerprint } from '../src/lib/image-templates.js'
 import { IMAGE_TEMPLATE_NAME } from '../src/lib/sandbox-images.js'
 import { resolveSetups, usableSetup } from './setups.js'
 import { artifactFile } from './setup-packages.js'
@@ -110,7 +110,8 @@ export function templateView(t) {
   let stored = null
   try { stored = JSON.parse(meta.annotations?.[RECIPE_ANNOTATION] ?? 'null') } catch { /* edited outside the console */ }
   // Annotations can be written with the CLI, so a recipe counts only if it is valid.
-  const recipe = stored && typeof stored === 'object' && !Array.isArray(stored) ? newRecipe({ ...stored, name: meta.name, environment }) : null
+  const { build = null, ...fields } = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}
+  const recipe = stored && typeof stored === 'object' && !Array.isArray(stored) ? newRecipe({ ...fields, name: meta.name, environment }) : null
   const managed = Boolean(recipe && !Object.keys(recipeErrors(recipe)).length)
   return {
     name: meta.name,
@@ -118,6 +119,7 @@ export function templateView(t) {
     createdAt: iso(meta.createdTime),
     managed,
     recipe: managed ? recipe : newRecipe({ source: 'image', image: workload.image || '', agents: [], command: '', name: meta.name, environment }),
+    build: managed && typeof build === 'string' ? build : null,
     status: 'ready',
   }
 }
@@ -281,7 +283,7 @@ export async function publishImageTemplate({ recipe, setups = [], client, worksp
 // the same name. Sandboxes already created keep running unchanged.
 async function saveTemplate(client, workspace, recipe, image, previous) {
   const template = {
-    metadata: { name: recipe.name, labels: { [LABEL]: 'v1' }, annotations: { [RECIPE_ANNOTATION]: JSON.stringify(storedRecipe(recipe)) } },
+    metadata: { name: recipe.name, labels: { [LABEL]: 'v1' }, annotations: { [RECIPE_ANNOTATION]: JSON.stringify({ ...storedRecipe(recipe), build: buildFingerprint(recipe) }) } },
     spec: { workload: { image, environment: Object.fromEntries(recipe.environment.map((e) => [e.name, e.value])) } },
   }
   if (previous) await client.sandboxTemplates.delete(recipe.name, { workspace, allowMissing: true })

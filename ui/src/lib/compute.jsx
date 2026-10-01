@@ -48,7 +48,6 @@ function CloudReadyGate({ children, status, onStatus, onCancel }) {
   }, [retry, ready, onStatus])
   if (ready) return children
   return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
-    <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10" />
     <h1 className="text-2xl font-semibold">Preparing your private machine…</h1>
     <p role="status" className="mt-3 text-sm text-muted-foreground">{machine?.message || 'Your account has one dedicated machine. Its first start can take several minutes.'}</p>
     {error && <><p role="alert" className="mt-4 text-sm text-destructive">{error}</p><button className="mt-4 text-sm underline" onClick={() => setRetry(n => n + 1)}>Try again</button></>}
@@ -131,7 +130,6 @@ export function LocalComputeProvider({ children }) {
   const value = { target, localViewer: true, nativeActions: target === 'local' || Boolean(status?.connected), user: status?.user, connected: Boolean(status?.connected), connecting, error, connect, disconnect, selectTarget, createRequested, requestCreate, cancelConnect: () => cancelConnect() }
   return <ComputeContext.Provider value={value}>
     {target === 'cloud' && !status?.connected ? <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
-      <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10" />
       <h1 className="text-2xl font-semibold">Connect your cloud workspace</h1>
       <p className="mt-3 text-sm text-muted-foreground">Sign in with Google to control your private cloud machine from local OpenRod.</p>
       {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}

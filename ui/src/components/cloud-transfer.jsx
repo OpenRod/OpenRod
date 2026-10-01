@@ -3,6 +3,7 @@ import { Cloud, Laptop } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { createApi } from '@/lib/api'
 import { useCompute } from '@/lib/compute'
 import { useApi, useLocation } from '@/lib/location-context'
@@ -47,13 +48,20 @@ export function ContinueInCloud({ name, sandbox }) {
     finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
   if (sandbox?.phase !== 'ready') return null
-  return <div className="space-y-1.5">
+  return <div className="flex items-center gap-1">
     {dialog}
-    <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={copy}>
+    <Button variant="outline" size="sm" className="flex-1 justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={copy}>
       {stage ? <Spinner className="size-3.5" /> : <Cloud className="size-3.5" aria-hidden="true" />}
       {stage === 'signin' ? 'Sign in to cloud…' : stage === 'prepare' ? 'Preparing cloud machine…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue in cloud'}
     </Button>
-    <p className="text-[11px] leading-relaxed text-muted-foreground">Copies workspace files and rebuilds saved templates. Your local source stays available. Credential files are excluded; reconnect agents in cloud.</p>
+    <TooltipProvider delay={200}>
+      <Tooltip>
+        <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="What this does" className="text-muted-foreground" />}>
+          <Info className="size-3.5" aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-60">Copies workspace files and rebuilds saved templates. Your local source stays available. Credential files are excluded; reconnect agents in cloud.</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   </div>
 }
 
@@ -133,9 +141,9 @@ export function ContinueLocally({ name, sandbox }) {
     } finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
   return (
-    <div className="space-y-1.5">
+    <div className="flex items-center gap-1">
       {dialog}
-      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
+      <Button variant="outline" size="sm" className="flex-1 justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
         if (compute?.localViewer) { importLocally(); return }
         const nonce = crypto.randomUUID()
         const popup = window.open(localHandoffUrl(nonce), '_blank')
@@ -146,7 +154,14 @@ export function ContinueLocally({ name, sandbox }) {
         {stage ? <Spinner className="size-3.5" /> : <Laptop className="size-3.5" aria-hidden="true" />}
         {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Import and run locally'}
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{compute?.localViewer ? 'Creates a separate local sandbox, copies files and rebuilds the image for this computer. Your cloud source stays available.' : 'Open OpenRod on this computer first. Creates a local sandbox, copies files and rebuilds saved templates.'} Reconnect agents locally.</p>
+      <TooltipProvider delay={200}>
+        <Tooltip>
+          <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="What this does" className="text-muted-foreground" />}>
+            <Info className="size-3.5" aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-60">{compute?.localViewer ? 'Creates a separate local sandbox, copies files and rebuilds the image for this computer. Your cloud source stays available.' : 'Open OpenRod on this computer first. Creates a local sandbox, copies files and rebuilds saved templates.'} Reconnect agents locally.</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   )
 }

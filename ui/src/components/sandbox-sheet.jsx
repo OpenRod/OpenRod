@@ -1,7 +1,7 @@
 import { SetupsView } from "@/components/setups-view"
 import { useCompute } from "@/lib/compute"
 import * as React from "react"
-import { AlertTriangle, Box, Copy, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, ChevronRight, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -14,7 +14,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
 import { CopyCommand } from "@/components/copy-command"
-import { ContinueInCloud, ContinueLocally } from "@/components/cloud-transfer"
+import { ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
 import { useApi, useLocation } from "@/lib/location-context"
 import { LocationBadge } from "@/components/location-badge"
@@ -85,7 +85,7 @@ function OpenIn({ name, editors, cloud, context }) {
   const plan = connection?.modes[mode] ?? connection?.modes.ssh
   const actionLabel = mode === "ssh" ? "Open SSH in terminal"
     : mode === "attach" ? "Attach canonical TTY"
-    : `Exec new ${sessionName(plan?.session)?.toLowerCase() ?? "session"}`
+    : `New ${sessionName(plan?.session)?.toLowerCase() ?? "session"}`
   const unavailable = error || (!connection ? "Checking connection…"
     : !connection.cliInstalled ? "Install the openshell CLI to connect."
     : !connection.sshInstalled ? "Install OpenSSH to connect."
@@ -97,13 +97,8 @@ function OpenIn({ name, editors, cloud, context }) {
     try {
       await api.openEditor(name, editor.id)
       toast.success(`Opening ${name} in ${editor.label}`)
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { toast.error(`Couldn’t open ${editor.label}`, { description: e.message }) }
     finally { setOpening(false) }
-  }
-
-  async function copyCommand() {
-    try { await navigator.clipboard.writeText(plan.command); toast.success("SSH command copied") }
-    catch { toast.error("Couldn’t copy SSH command") }
   }
 
   async function open() {
@@ -134,18 +129,6 @@ function OpenIn({ name, editors, cloud, context }) {
   return (
     <>
       <Section title="Open in">
-        {connection && <>
-          <dl aria-label="SSH target" className="mb-3 grid gap-1 text-[11px]">
-            <div><dt className="text-muted-foreground">Gateway</dt><dd className="break-all font-mono">{connection.gateway.name}</dd></div>
-            <div><dt className="text-muted-foreground">Workspace</dt><dd className="break-all font-mono">{connection.gateway.workspace}</dd></div>
-            <div><dt className="text-muted-foreground">Sandbox</dt><dd className="break-all font-mono">{name}</dd></div>
-          </dl>
-          <div className="mb-2 flex flex-wrap gap-1 rounded-md bg-muted p-1">
-            {connection.modes.ssh && <Button type="button" variant={mode === "ssh" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("ssh")}>SSH shell</Button>}
-            {connection.modes.exec && <Button type="button" variant={mode === "exec" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("exec")}>Exec new</Button>}
-            {connection.modes.attach && <Button type="button" variant={mode === "attach" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("attach")}>Attach TTY</Button>}
-          </div>
-        </>}
         <div className="grid grid-cols-2 gap-1.5">
           <Button variant="outline" size="sm" className="justify-start text-xs" disabled={!connection?.canOpenTerminal || opening} title={unavailable ?? actionLabel} onClick={open}>
             {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" />}Terminal
@@ -158,29 +141,29 @@ function OpenIn({ name, editors, cloud, context }) {
           })}
           {browser}
         </div>
-        {connection && <div className="mt-2 space-y-1.5">
-          {plan && <CopyCommand command={plan.command} />}
-          <p className="text-[10px] leading-relaxed text-muted-foreground">
-            {mode === "ssh" ? "Direct OpenSSH login shell. Its private, temporary config is removed when the session exits."
-              : mode === "attach" ? "Reconnects to the sandbox’s original TTY process."
-              : "Starts a separate shell or agent with openshell exec."}
-          </p>
-          <details className="text-[10px] text-muted-foreground">
-            <summary className="cursor-pointer py-1">How SSH reaches this sandbox</summary>
-            <p className="mt-1">OpenSSH → OpenShell SSH proxy → gateway → this sandbox. The SSH target is the sandbox, not the gateway host.</p>
-            <p className="mt-2 break-all font-mono">{connection.gateway.endpoint}</p>
-            <p className="mt-1">A localhost gateway address can be a tunnel to a remote Kubernetes cluster. It does not mean the sandbox runs on this machine.</p>
-          </details>
-        </div>}
-        <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3">
-          <Button variant="outline" size="sm" className="justify-start text-xs font-normal text-muted-foreground" disabled={!plan} onClick={copyCommand}>
-            <Copy className="size-3.5" />Copy SSH command
-          </Button>
-          <Button variant="outline" size="sm" className="justify-start text-xs font-normal text-muted-foreground" disabled={!connection?.cliInstalled || loadingConfig} onClick={showConfig}>
-            {loadingConfig ? <Spinner className="size-3.5" /> : <SquareCode className="size-3.5" />}SSH configuration
-          </Button>
-        </div>
         {unavailable && <p role={error ? "alert" : "status"} className="mt-2 text-[11px] text-muted-foreground">{unavailable}</p>}
+        {connection && <details className="group mt-2 text-[11px] text-muted-foreground">
+          <summary className="flex cursor-pointer list-none items-center gap-1 py-1 hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-3 transition-transform group-open:rotate-90" aria-hidden="true" />Connection options
+          </summary>
+          <div className="mt-1.5 space-y-2">
+            <div className="flex flex-wrap gap-1 rounded-md bg-muted p-1">
+              <Button type="button" variant={mode === "ssh" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("ssh")}>SSH shell</Button>
+              <Button type="button" variant={mode === "exec" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("exec")}>New session</Button>
+              {connection.modes.attach && <Button type="button" variant={mode === "attach" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("attach")}>Attach</Button>}
+            </div>
+            <p className="text-[10px] leading-relaxed">
+              {mode === "ssh" ? "Login shell over SSH."
+                : mode === "attach" ? "Reconnects to the sandbox’s running terminal."
+                : "Starts a separate shell or agent in the sandbox."}
+            </p>
+            {plan && <CopyCommand command={plan.command} label={mode === "ssh" ? `ssh ${plan.alias}` : `openshell sandbox ${mode === "attach" ? "connect" : "exec --name"} ${name}`} />}
+            {connection.gateway.remote && <p className="break-all text-[10px]">Via gateway <span className="font-mono">{connection.gateway.name}/{connection.gateway.workspace}</span> at <span className="font-mono">{connection.gateway.endpoint}</span></p>}
+            <Button variant="outline" size="sm" className="w-full justify-start text-xs font-normal text-muted-foreground" disabled={!connection.cliInstalled || loadingConfig} onClick={showConfig}>
+              {loadingConfig ? <Spinner className="size-3.5" /> : <SquareCode className="size-3.5" />}SSH configuration
+            </Button>
+          </div>
+        </details>}
       </Section>
       <Dialog open={Boolean(config)} onOpenChange={(open) => { if (!open) setConfig(null) }}>
         <DialogContent className="sm:max-w-2xl">
@@ -337,7 +320,7 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
                     {phase === "ready" && !live.demo && location?.connected !== false && <OpenIn key={name} name={name} editors={editors} cloud={!nativeActions} context={location ? { name: location.gateway, workspace: location.workspace, target: location.target } : { ...live.overview?.gateway, target: compute?.target }} />}
-                    {!live.demo && phase === "ready" && location?.connected !== false && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
+                    {!live.demo && phase === "ready" && location?.connected !== false && cloud && <ContinueLocally key={name} name={name} sandbox={sandbox} />}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}

@@ -3,6 +3,7 @@ import { createApi } from "@/lib/api"
 import { terminalHref } from "@/lib/sandbox-session"
 import { useTransferGroups } from '@/components/transfer-groups'
 import {CLOUD_ORIGIN} from '@/lib/cloud-transfer'
+import { Notice } from '@/components/notice'
 export function LocalReturn({children}) {
  const { chooseGroups, dialog, cancel } = useTransferGroups()
   // A cloud return always rebuilds on the laptop, independent of saved compute.
@@ -46,9 +47,8 @@ export function LocalReturn({children}) {
   const timer=setInterval(()=>{if(window.opener?.closed||Date.now()>deadline){transfer.current.abort();cancel();setMessage('The cloud tab closed or the copy timed out. Open the workspace to check whether a copy was created.');setState('error')}},1000)
   return()=>clearInterval(timer)
  },[state])
- if(state==='normal'||state==='done')return <>{message&&<div role="status" className="border-b px-6 py-3 text-sm text-muted-foreground">{message}</div>}{children}</>
+ if(state==='normal'||state==='done')return <>{message&&<Notice id="local-return" tone={state==='done'?'success':'warning'} title={state==='done'?'Workspace continued locally':'Workspace copy didn’t finish'} onDismiss={()=>setMessage('')}>{message}</Notice>}{children}</>
  return <>{dialog}<main className="grid min-h-screen place-items-center px-6"><section className="max-w-md text-center">
-  <img src="/openrod.svg" alt="OpenRod" className="mx-auto mb-6 h-10 w-10"/>
   <h1 className="text-2xl font-semibold">Continuing your workspace locally…</h1>
   <p className="mt-3 text-sm text-muted-foreground">Keep the cloud tab open while your files are copied and your template is rebuilt for this computer.</p>
   {message&&<p role="alert" className="mt-4 text-sm text-destructive">{message}</p>}

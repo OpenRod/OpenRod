@@ -1,4 +1,4 @@
-import { AGENTS, newRecipe } from './image-templates.js'
+import { AGENTS, newRecipe, buildFingerprint } from './image-templates.js'
 import { agentAccessFor } from '../../shared/agent-access.js'
 
 export const QUICK_AGENTS = AGENTS.filter((agent) => !agentAccessFor({ source: 'build', agents: [agent.id] }).unsupported.length)
@@ -26,7 +26,7 @@ export function quickRecipe(agentId, name = '', openIn = 'agent', withSetups = f
 
 export function matchingQuickTemplate(items, agentId, openIn = 'agent', withSetups = false, setups = []) {
   const expected = quickRecipe(agentId, '', openIn, withSetups, setups)
-  return items.find((item) => item.managed && item.status === 'ready' && item.image &&
+  return items.find((item) => item.managed && item.status === 'ready' && item.image && item.build === buildFingerprint(expected) &&
     JSON.stringify(newRecipe({ ...item.recipe, name: '' })) === JSON.stringify(expected))
 }
 

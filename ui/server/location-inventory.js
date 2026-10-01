@@ -7,7 +7,7 @@ import { stateDirectory } from './paths.js'
 const fail = message => Object.assign(new Error(message), { status: 409 })
 const locationOf = (context, remote = false, host = null, connected = true, error = null) => ({
   id: contextKey(context), context: contextKey(context), gateway: context.gateway, workspace: context.workspace,
-  label: remote ? `SSH · ${host}` : 'Local', remote, connected, ...(error ? { error } : {}),
+  label: remote ? `SSH · ${host}` : 'Local', remote, ...(remote && host ? { host } : {}), connected, ...(error ? { error } : {}),
 })
 
 export function createLocationInventory({ connections, listSandboxes, listTemplates, logger = console, directory = stateDirectory(), defaultLabel = 'Local' }) {
