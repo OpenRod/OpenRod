@@ -1,0 +1,27 @@
+{
+  "id": "aaa",
+  "name": "aaa",
+  "action": "allow",
+  "destinations": [
+    "*.google.com"
+  ],
+  "appliesTo": {
+    "everyone": false,
+    "groups": [
+      "dev"
+    ],
+    "sandboxes": []
+  },
+  "advanced": {
+    "ports": [
+      443,
+      80
+    ],
+    "programs": [],
+    "requests": "any",
+    "allow": [],
+    "deny": [],
+    "enforcement": "enforce",
+    "privateIps": []
+  }
+}
