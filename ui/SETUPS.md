@@ -24,6 +24,8 @@
 - Skills are copied as reviewed files. Their instructions are not executed during import; arbitrary package, filesystem and network dependencies are not automatically inferred.
 - Additional/custom registries and sign-in services require review. A completed sign-in does not override network or tool policy.
 - Preparation artifacts survive console restart. An interrupted import needs a fresh review. Failed enable operations may leave explicitly approved network rules or credential attachments in place; configuration checks report the failure.
+- Preparation checks npm connectivity inside the builder before installing packages. Each npm phase has a two-minute limit and the installation has a 250-second deadline; npm may retry individual downloads, but the console does not repeat the whole installation. Gateway startup, registry outages and interrupted gateway execution stop the remaining tools and retain completed items for review and retry. These rules apply to every import, Quick setup and template preparation.
+- The console cannot repair the gateway host's network routing or bootstrap image access. A local gateway image override does not change other users' gateways. The gateway must be able to start its builder and reach the approved registries; the importer reports that failure without bypassing policy or running imported code on the host.
 
 ## Verification
 

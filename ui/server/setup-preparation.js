@@ -65,6 +65,7 @@ export async function prepareImport(store,input,{source,packagesOnly=false}={}){
  state.jobs.set(id,job);state.controllers.set(id,controller);await persist(job)
  void(async()=>{
    const prepared=[]
+   let startupFailure=null
    for(const original of items){
      if(controller.signal.aborted)break
      let item=structuredClone(original)
@@ -85,11 +86,13 @@ export async function prepareImport(store,input,{source,packagesOnly=false}={}){
            else if(item.verification.status!=='connected')item.issues.push('Connection check did not pass. Review the account and runtime destinations, then retry.')
          }
        }
-     }catch(e){const message=e.status?e.message:'Preparation failed. Retry this item; no imported code ran on your computer.';item.preparationIssues=[message];item.issues=[...item.issues.filter(i=>!i.startsWith('Prepare package')),message]}
+     }catch(e){if(e.preparationUnavailable)startupFailure=e.message;const message=e.status?e.message:'Preparation failed. Retry this item; no imported code ran on your computer.';item.preparationIssues=[message];item.issues=[...item.issues.filter(i=>!i.startsWith('Prepare package')),message]}
      item.state=item.disabled?'disabled':item.issues.length?'needs-attention':item.auth?.mode==='agent-session'?'sign-in-in-sandbox':'prepared'
      prepared.push(item);job.preparedItems=[...prepared,...items.slice(prepared.length)];job.items=job.preparedItems.map(publicItem);await persist(job)
+     if(startupFailure)break
    }
    if(controller.signal.aborted){job.status='cancelled';job.message='Preparation cancelled. Completed items are retained for review; destination sandboxes were not modified.';job.review=store.stage(job.preparedItems||items,preview.credentials)}
+   else if(startupFailure){job.status='failed';job.message=startupFailure+' Remaining tools were not attempted. Restore connectivity and retry.';job.review=store.stage(job.preparedItems||items,preview.credentials)}
    else if(packagesOnly){
      const failed=prepared.find(item=>source.items.some(old=>old.id===item.id&&canPrepareAtLaunch(old))&&(!item.artifact||item.issues.length))
      if(failed){job.status='failed';job.message=`${failed.name}: ${failed.issues.join(' ') || 'Package preparation failed.'}`}
