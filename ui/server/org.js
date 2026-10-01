@@ -130,15 +130,32 @@ export async function readMembers() {
   return out
 }
 
-let membershipWrite = Promise.resolve()
-function serializeMembership(work) {
-  const result = membershipWrite.then(work, work)
-  membershipWrite = result.catch(() => {})
+// Network rule changes check coverage against memberships, and membership
+// changes check it against network rules. Each check and its write run one at
+// a time, so a concurrent change always sees the other's result.
+let orgWrite = Promise.resolve()
+function serializeOrgWrite(work) {
+  const result = orgWrite.then(work, work)
+  orgWrite = result.catch(() => {})
   return result
 }
 
 export function assignGroup(...args) {
-  return serializeMembership(() => writeGroupAssignment(...args))
+  return serializeOrgWrite(() => writeGroupAssignment(...args))
+}
+
+// Plans a sandbox, creates it with `create(plan)` and records its groups as
+// one step, so a network rule can't be removed between the check and the
+// membership it allowed.
+export function createInGroups(input, create) {
+  return serializeOrgWrite(async () => {
+    const plan = await planSandbox(input)
+    const ref = await create(plan)
+    // A new sandbox starts in the group it was created in, even if an older
+    // sandbox of the same name was moved elsewhere.
+    await writeGroupAssignment([ref.name], plan.groups)
+    return { plan, ref }
+  })
 }
 
 async function writeGroupAssignment(names, group, { forget = false } = {}) {
@@ -366,8 +383,9 @@ async function overview() {
 }
 
 // Replace, add, or remove memberships without overwriting unrelated groups.
-function setMembers(input) {
-  return serializeMembership(() => updateMembers(input))
+async function setMembers(input) {
+  const assignments = await serializeOrgWrite(() => updateMembers(input))
+  return { assignments, ...(await syncAll({ only: (s) => s.name in assignments })) }
 }
 
 async function updateMembers(input) {
@@ -392,7 +410,7 @@ async function updateMembers(input) {
     stored[name] = ids
   }
   await write(MEMBERS_FILE, Object.fromEntries(Object.entries(stored).sort(([a], [b]) => a.localeCompare(b))))
-  return { assignments: Object.fromEntries(names.map((name) => [name, stored[name]])), ...(await syncAll({ only: (s) => names.includes(s.name) })) }
+  return Object.fromEntries(names.map((name) => [name, stored[name]]))
 }
 
 async function saveOrg(input) {
@@ -412,16 +430,20 @@ async function saveGroup(input) {
 
 async function savePolicy(input) {
   const policy = validatePolicy(input)
+  const before = await serializeOrgWrite(() => writeCheckedPolicy(policy, input.isNew))
+  return { policy, ...(await syncAll({ only: covers([before, policy]) })) }
+}
+
+async function writeCheckedPolicy(policy, isNew) {
   const [org, groups, policies] = await Promise.all([readOrg(), listGroups(), listPolicies()])
-  if (input.isNew && policies.some((p) => p.id === policy.id)) throw fail(`A policy with the id "${policy.id}" already exists. Pick another name.`)
+  if (isNew && policies.some((p) => p.id === policy.id)) throw fail(`A policy with the id "${policy.id}" already exists. Pick another name.`)
   try { assertPolicyGroup(policy, groups) } catch (error) { throw fail(error.message) }
   await protectCoverage(policies, [...policies.filter((p) => p.id !== policy.id), policy])
   const unknown = policy.appliesTo.groups.find((g) => !groups.some((x) => x.id === g))
   if (unknown) throw fail(`Unknown group "${unknown}".`)
   assertCompatible(org, [...policies.filter((p) => p.id !== policy.id), policy])
-  const before = policies.find((p) => p.id === policy.id)
   await writePolicy(policy)
-  return { policy, ...(await syncAll({ only: covers([before, policy]) })) }
+  return policies.find((p) => p.id === policy.id)
 }
 
 async function protectCoverage(before, after) {
@@ -433,10 +455,12 @@ async function protectCoverage(before, after) {
 }
 
 async function deletePolicy(id) {
-  const policies = await listPolicies()
-  const before = policies.find((p) => p.id === id)
-  await protectCoverage(policies, policies.filter((p) => p.id !== id))
-  await removePolicy(id)
+  const before = await serializeOrgWrite(async () => {
+    const policies = await listPolicies()
+    await protectCoverage(policies, policies.filter((p) => p.id !== id))
+    await removePolicy(id)
+    return policies.find((p) => p.id === id)
+  })
   return { ok: true, ...(await syncAll({ only: covers([before]) })) }
 }
 
