@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, Monitor, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { useInventory } from "@/lib/inventory"
@@ -35,7 +35,7 @@ const COLUMNS = [{ id: "name", label: "Sandbox", width: "26%" }, { id: "type", l
 // Synthetic fleets spread across every placement so the Type column can be judged.
 const DEMO_PLACEMENTS = Object.keys(PLACEMENTS)
 
-export function SandboxesView({ onNavigate, onConnect }) {
+export function SandboxesView({ onNavigate, allowRemote = false, createRequest = 0, onCreateRequestHandled }) {
   const live = useDemoFleet(useLive())
   const inventory = useInventory()
   const { locations } = inventory
@@ -45,7 +45,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
   const [locationFilter, setLocationFilter] = React.useState(inheritedLocation?.context ?? "")
   const [creationLocation, setCreationLocation] = React.useState(null)
   const [handoff, setHandoff] = React.useState(null)
-  const canConnect = Boolean(onConnect)
+  const canConnect = allowRemote
   React.useEffect(() => {
     let alive = true
     api.contextKey().then((context) => { if (alive) setSelectedContext(context) }).catch(() => {})
@@ -218,6 +218,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
     refresh: inventory.refresh,
   } : null
   const beginCreation = () => { setCreationLocation(availableLocation ?? null); setCreating(true) }
+  React.useEffect(() => { if (createRequest) { beginCreation(); onCreateRequestHandled?.() } }, [createRequest])
 
   return (
     <>
@@ -276,8 +277,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
           </Select>
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={inventory.refresh}><RefreshCw className="size-3.5" /></Button>
-          {canConnect && <Button variant="outline" size="sm" onClick={onConnect}><Monitor aria-hidden="true" className="size-3.5" />Connect machine</Button>}
-          <Button size="sm" disabled={!availableLocation} onClick={beginCreation} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
+          <Button size="sm" disabled={!availableLocation && !canConnect} onClick={beginCreation} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
         </div>
         {selectedBoxes.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent/30 px-6 py-2">
           <span role="status" className="mr-auto text-xs"><strong>{number(selectedBoxes.length)}</strong> selected{selectedBoxes.length > matchingSelected && <span className="text-muted-foreground"> · {number(selectedBoxes.length - matchingSelected)} outside current filters</span>}</span>
@@ -291,7 +291,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
         <div ref={virtual.ref} onScroll={virtual.onScroll} tabIndex={0} role="region" aria-label="Sandbox inventory" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
           {loading ? <p role="status" className="py-20 text-center text-sm text-muted-foreground">Loading sandboxes…</p>
             : unreachable ? <div role="alert" className="py-16 text-center"><p>Inventory unavailable</p><p className="mt-2 text-sm text-muted-foreground">{inventory.error}</p><Button variant="outline" onClick={inventory.refresh} className="mt-4">Retry</Button></div>
-            : !ordered.length ? <div className="py-20 text-center"><Box className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{sandboxes.length ? "No matching sandboxes" : "No sandboxes yet"}</p><Button variant="outline" disabled={!sandboxes.length && !availableLocation} className="mt-4" onClick={() => sandboxes.length ? clearFilters() : beginCreation()}>{sandboxes.length ? "Clear filters" : "Create sandbox"}</Button></div>
+            : !ordered.length ? <div className="py-20 text-center"><Box className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{sandboxes.length ? "No matching sandboxes" : "No sandboxes yet"}</p><Button variant="outline" disabled={!sandboxes.length && !availableLocation && !canConnect} className="mt-4" onClick={() => sandboxes.length ? clearFilters() : beginCreation()}>{sandboxes.length ? "Clear filters" : "Create sandbox"}</Button></div>
             : <table aria-label="Sandboxes" aria-rowcount={ordered.length + 1} className="w-full min-w-[1040px] table-fixed border-separate border-spacing-0 text-xs">
               <colgroup><col style={{ width: 48 }} />{COLUMNS.map((column) => <col key={column.id} style={{ width: column.width }} />)}</colgroup>
               <thead className="sticky top-0 z-10 bg-muted"><tr aria-rowindex={1}>
@@ -323,7 +323,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <LocationProvider location={chosenLocation}><CreateSandboxDialog open={creating} onOpenChange={setCreating} onCreated={sandboxCreated} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} /></LocationProvider>
+      <LocationProvider location={chosenLocation}><CreateSandboxDialog open={creating} onOpenChange={setCreating} onCreated={sandboxCreated} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} onRefreshLocations={inventory.refresh} allowRemote={canConnect} /></LocationProvider>
     </>
   )
 }

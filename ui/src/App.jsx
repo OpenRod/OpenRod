@@ -1,9 +1,8 @@
 import * as React from "react"
-import { Monitor } from "lucide-react"
+import { Plus } from "lucide-react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
-import { GatewaySetup } from "@/components/gateway-setup"
 import { ActivityView } from "@/components/activity-view"
 import { GroupsView } from "@/components/groups-view"
 import { NetworkView } from "@/components/network-view"
@@ -86,25 +85,15 @@ function viewFromLocation() {
 function ConnectionGate({ onSetup, children }) {
   const { connection, overview } = useLive()
   if (!onSetup) return children
-  if (connection === "connecting" && !overview) return <section className="space-y-4 p-8">
+  if (connection === "connecting" && !overview) return <section className="p-8">
     <p role="status" className="text-sm text-muted-foreground">Reading connection settings…</p>
-    <Button onClick={onSetup}><Monitor aria-hidden="true" className="size-4" />Connect machine</Button>
   </section>
   if (connection !== "setup-required") return children
   return (
-    <section aria-labelledby="setup-heading" className="mx-auto my-12 w-full max-w-2xl space-y-6 px-6">
-      <div className="space-y-2">
-        <h2 id="setup-heading" className="text-2xl font-semibold">Choose where to run your sandboxes</h2>
-        <p className="text-sm text-muted-foreground">Use your existing local gateway, or connect a remote Linux Docker host through an alias in your local SSH configuration. Both gateways run on this computer; your existing local gateway stays untouched.</p>
-      </div>
-      <ol className="list-decimal space-y-3 pl-5 text-sm">
-        <li>Choose a local gateway or a concrete Host alias from <code>~/.ssh/config</code>.</li>
-        <li>For a remote host, verify trusted key-based SSH access and a running Linux Docker engine. The console checks the required OpenShell runtime images.</li>
-        <li>Missing OpenShell runtime images download automatically, or choose Upload package to provide a Docker-save archive. Docker must already be running; no gateway is installed remotely.</li>
-        <li>Create a sandbox, or choose a ready sandbox and <strong>Open SSH in terminal</strong>.</li>
-      </ol>
-      <Button onClick={onSetup}><Monitor aria-hidden="true" className="size-4" />Connect machine</Button>
-      <p className="text-xs text-muted-foreground">Connecting selects the gateway and reloads the console. Closing the console server disconnects the remote gateway and SSH tunnels; remote workloads and state are not deleted.</p>
+    <section aria-labelledby="setup-heading" className="mx-auto my-16 grid w-full max-w-md justify-items-center gap-4 px-6 text-center">
+      <h2 id="setup-heading" className="text-xl font-semibold tracking-tight">No sandbox location yet</h2>
+      <p className="text-sm text-muted-foreground">Create a sandbox on this computer or on your own server. You’ll choose where in the first step.</p>
+      <Button onClick={onSetup} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus aria-hidden="true" className="size-4" />New sandbox</Button>
     </section>
   )
 }
@@ -113,9 +102,9 @@ export function App() {
   const cloud = useCloudMode()
   const [view, setView] = React.useState(viewFromLocation)
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
-  const [setupOpen, setSetupOpen] = React.useState(false)
+  const [createRequest, setCreateRequest] = React.useState(0)
   const [pageLocation, setPageLocation] = React.useState(locationFromHash)
-  const connectMachine = cloud ? undefined : () => setSetupOpen(true)
+  const connectMachine = cloud ? undefined : () => { navigate("sandboxes"); setCreateRequest((value) => value + 1) }
   React.useEffect(() => {
     const sync = () => { setView(viewFromLocation()); setTerminal(terminalFromLocation()); setPageLocation(locationFromHash()) }
     window.addEventListener("popstate", sync)
@@ -165,7 +154,7 @@ export function App() {
           <PageBoundary key={`${view}:${pageLocation?.context ?? ""}`} view={view}>
           <ScopedPage location={pageLocation}>
           <ConnectionGate onSetup={view === "sandboxes" || view === "templates" ? undefined : connectMachine}>
-          {view === "sandboxes" && <SandboxesView onNavigate={navigate} onConnect={connectMachine} />}
+          {view === "sandboxes" && <SandboxesView onNavigate={navigate} allowRemote={!cloud} createRequest={createRequest} onCreateRequestHandled={() => setCreateRequest(0)} />}
           {view === "activity" && <ActivityView />}
           {view === "groups" && <GroupsView onNavigate={navigate} />}
           {(view === "egress" || view === "ingress") && <NetworkView tab={view} onNavigate={navigate} />}
@@ -176,7 +165,6 @@ export function App() {
           </ScopedPage>
           </PageBoundary>
         </SidebarInset>
-        {!cloud && <GatewaySetup open={setupOpen} onOpenChange={setSetupOpen} initialMode="ssh" />}
         <Toaster position="bottom-right" />
       </SidebarProvider>
     </LiveProvider>

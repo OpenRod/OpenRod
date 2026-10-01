@@ -539,7 +539,6 @@ function ScopedSetupPicker({ value = [], onChange, inherited = [], accessReview,
       <p className="font-medium">{selected.length > 1 ? 'Allowed by the setups’ egress policies' : 'Allowed by the setup’s egress policy'}</p>
       <ul className="divide-y text-[11px] text-muted-foreground">{access.covered.map(host => <li key={host} className="break-all py-1">{host}</li>)}</ul>
     </div>}
-    {!items.length && <p className="text-[11px] text-muted-foreground">Import tools from the MCPs &amp; Skills page to reuse them here.</p>}
     <ErrorMessage>{error}</ErrorMessage>
     {needsSignIn && <p className="text-[11px] text-muted-foreground">{preparationContext === 'template' ? 'Sign in after launching the sandbox.' : 'Sign in inside the sandbox after installation.'}</p>}
   </div>
