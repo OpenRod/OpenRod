@@ -32,16 +32,10 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
 usermod -aG docker openrod
 # Put Docker image/build/sandbox state on the snapshotted customer disk.
 mkdir -p /etc/docker
-# Repeated worker startup is safe only for our exact configuration.
-if [[ -e /etc/docker/daemon.json ]]; then
-  python3 - <<'PYDOCKER'
-import json,pathlib
-if json.loads(pathlib.Path('/etc/docker/daemon.json').read_text()) != {'data-root':'/var/lib/openrod/docker','ipv6':False}:
-    raise SystemExit('Existing Docker configuration differs; refusing to replace it')
-PYDOCKER
-fi
+# Accept our previous configuration and upgrade its DNS idempotently.
+# GCE's resolver shares the metadata IP, which Docker workloads must not reach.
+python3 "$config_dir/configure-docker.py"
 systemctl stop docker containerd
-printf '{"data-root":"/var/lib/openrod/docker","ipv6":false}\n' > /etc/docker/daemon.json
 # Docker 29+ stores image/container snapshots separately in containerd.
 containerd config default > /etc/containerd/config.toml
 python3 - <<'PYCONFIG'

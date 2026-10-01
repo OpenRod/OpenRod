@@ -9,6 +9,7 @@ export function createSessionRevocations(filename) {
   fs.chmodSync(filename, 0o600)
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS revoked (hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)')
   return {
+    hasDigest: hash => Boolean(db.prepare('SELECT 1 FROM revoked WHERE hash=? AND expires>?').get(hash, Date.now())),
     has: cookie => Boolean(db.prepare('SELECT 1 FROM revoked WHERE hash=? AND expires>?').get(digest(cookie), Date.now())),
     add(cookie, expires) {
       db.prepare('DELETE FROM revoked WHERE expires<=?').run(Date.now())

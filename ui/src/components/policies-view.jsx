@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { RuleLine } from "@/components/rule-editor"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/location-context"
 import { useLive } from "@/lib/live"
 
 
@@ -53,6 +53,7 @@ function TemplateSummary({ template: saved, templates }) {
 
 // Saved policies define future launches; existing sandboxes retain their rules.
 export function PoliciesView() {
+  const api = useApi()
   const live = useLive()
   const [templates, setTemplates] = React.useState(null)
   const [editing, setEditing] = React.useState(null)

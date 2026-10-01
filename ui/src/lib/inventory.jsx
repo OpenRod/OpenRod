@@ -1,38 +1,51 @@
-import * as React from "react"
-import { api } from "@/lib/api"
+import * as React from 'react'
+import { createApi } from '@/lib/api'
+import { useCompute } from '@/lib/compute'
+import { localCloudRequest } from '@/lib/local-cloud'
+import { mergeLocationInventories } from '@/lib/location-inventory'
 
 export function useInventory() {
-  const [inventory, setInventory] = React.useState({ sandboxes: [], templates: [], locations: [] })
-  const [error, setError] = React.useState(null)
-  const [loading, setLoading] = React.useState(true)
-  const [revision, refresh] = React.useReducer((value) => value + 1, 0)
-
+  const compute = useCompute()
+  const localViewer = Boolean(compute?.localViewer)
+  const cloudEnabled = localViewer && compute.connected
+  const scope = `${localViewer}:${cloudEnabled ? compute.user?.uid : ''}`
+  const [snapshot, setSnapshot] = React.useState(null)
+  const [revision, refresh] = React.useReducer(value => value + 1, 0)
   React.useEffect(() => {
-    let alive = true
-    let timer
-    let interval = 5000
+    let alive = true, timer
+    const controller = new AbortController()
+    const local = createApi('local', controller.signal)
+    let previous = null
     const load = async () => {
-      try {
-        const next = await api.inventory()
-        interval = next.templates.some((record) => record.status === "building") ? 1200 : 5000
-        if (alive) { setInventory(next); setError(null) }
-      } catch (error) {
-        // Cached state remains visible, but must not look live or accept actions.
-        if (alive) {
-          setError(error.message)
-          setInventory((current) => {
-            const locations = current.locations.map((location) => ({ ...location, connected: false, error: error.message }))
-            const owners = new Map(locations.map((location) => [location.context, location]))
-            return { locations, sandboxes: current.sandboxes.map((record) => ({ ...record, location: owners.get(record.location.context) })), templates: current.templates.map((record) => ({ ...record, location: owners.get(record.location.context) })) }
-          })
+      const results = await Promise.allSettled([
+        local.inventory(),
+        ...(cloudEnabled ? [localCloudRequest('inventory', undefined, { signal: controller.signal })] : []),
+      ])
+      if (!alive) return
+      const sources = [], errors = []
+      for (let i = 0; i < results.length; i++) {
+        const target = i === 0 ? 'local' : 'cloud', cloud = i !== 0 || !localViewer
+        const result = results[i]
+        if (result.status === 'fulfilled') {
+          sources.push({ target, cloud, inventory: result.value })
+          if (result.value.machine?.error) errors.push(result.value.machine.error)
+        } else {
+          errors.push(`${cloud ? 'Cloud' : 'Local'} inventory unavailable: ${result.reason.message}`)
+          const cached = previous?.filter(source => source.target === target)[0]?.inventory
+          if (cached) {
+            const locations = cached.locations.map(location => ({ ...location, connected: false, error: result.reason.message }))
+            sources.push({ target, cloud, inventory: { ...cached, locations } })
+          }
         }
-      } finally {
-        if (alive) { setLoading(false); timer = setTimeout(load, interval) }
       }
+      previous = sources
+      const inventory = mergeLocationInventories(sources)
+      setSnapshot({ scope, inventory, error: errors.join('; ') || null })
+      timer = setTimeout(load, inventory.templates.some(record => record.status === 'building') ? 1200 : 5000)
     }
     load()
-    return () => { alive = false; clearTimeout(timer) }
-  }, [revision])
-
-  return { ...inventory, error, loading, refresh }
+    return () => { alive = false; controller.abort(); clearTimeout(timer) }
+  }, [scope, revision, localViewer, cloudEnabled])
+  const current = snapshot?.scope === scope ? snapshot : null
+  return { ...(current?.inventory ?? { sandboxes: [], templates: [], locations: [] }), error: current?.error ?? null, loading: !current, refresh }
 }

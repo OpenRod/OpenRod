@@ -185,7 +185,7 @@ const EXPIRY_LABEL = { none: "No expiry", expired: "Expired", expiring: "Within 
 
 export function SecretsView() {
   const location = useLocation()
-  return <ScopedSecretsView key={location?.context ?? "default"} />
+  return <ScopedSecretsView key={location?.id ?? location?.context ?? "default"} />
 }
 
 function ScopedSecretsView() {

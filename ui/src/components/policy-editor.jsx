@@ -108,7 +108,7 @@ function DestinationDialog({ open, onClose, onAdd, onAdvanced, rules }) {
 
 export function PolicyEditor(props) {
   const location = useLocation()
-  return <ScopedPolicyEditor key={location?.context ?? 'default'} {...props} />
+  return <ScopedPolicyEditor key={location?.id ?? location?.context ?? 'default'} {...props} />
 }
 
 function ScopedPolicyEditor({ open, initial, onClose, onSaved, onDelete, knownPrograms, templates }) {

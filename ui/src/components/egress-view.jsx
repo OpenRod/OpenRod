@@ -920,7 +920,7 @@ const takePolicyHandoff = () => {
 
 export function EgressView(props) {
   const location = useLocation()
-  return <ScopedEgressView key={location?.context ?? "default"} {...props} />
+  return <ScopedEgressView key={location?.id ?? location?.context ?? "default"} {...props} />
 }
 
 function ScopedEgressView({ onNavigate: navigate }) {

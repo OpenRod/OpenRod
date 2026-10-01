@@ -1,3 +1,4 @@
+import { currentComputeTarget } from './compute-target.js'
 import { AGENTS } from "./image-templates.js"
 import { agentsOf } from "./agents.js"
 
@@ -106,7 +107,7 @@ export function sessionChoices(sandbox) {
 }
 // Pin a new terminal tab to its originating gateway/workspace, not whichever
 // context another console tab happens to select later.
-export function terminalHref(name, session, context) {
+export function terminalHref(name, session, context, target = typeof context === "string" ? context : context?.target ?? currentComputeTarget()) {
   const query = new URLSearchParams()
   if (session) query.set("session", session)
   const gateway = typeof context?.gateway === "string" ? context.gateway : context?.gateway?.name ?? context?.name
@@ -116,5 +117,5 @@ export function terminalHref(name, session, context) {
     query.set("workspace", workspace)
   }
   const suffix = query.toString()
-  return `#terminal/${encodeURIComponent(name)}${suffix ? `?${suffix}` : ""}`
+  return `?target=${target}#terminal/${encodeURIComponent(name)}${suffix ? `?${suffix}` : ""}`
 }

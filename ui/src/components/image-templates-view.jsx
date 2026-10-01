@@ -9,13 +9,15 @@ import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
 import { ImageTemplateBuilder } from '@/components/image-template-builder'
 import { CreateSandboxDialog } from '@/components/create-sandbox-dialog'
-import { api } from '@/lib/api'
+import { createApi } from '@/lib/api'
+import { useCompute } from '@/lib/compute'
 import { useInventory } from '@/lib/inventory'
-import { LocationProvider } from '@/lib/location-context'
+import { LocationProvider, useApi } from '@/lib/location-context'
 import { resourceKey, locationLabel } from '@/lib/locations'
 import { LocationBadge } from '@/components/location-badge'
 import { AGENTS, STARTS, pendingRecipe, pendingRecipeKey } from '@/lib/image-templates'
 
+const locationKey = (location) => location?.id ?? location?.context
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
 const working = (t) => t.status === 'building'
 // A template stays usable while its rebuild runs or after a rebuild fails.
@@ -27,12 +29,14 @@ function Status({ record }) {
 const startsIn = (command) => STARTS.find((s) => s.id === command)?.name ?? command
 
 export function TemplatesView() {
+  const api = useApi()
+  const compute = useCompute()
   const { templates: records, locations, error, refresh: load, loading } = useInventory()
   const [query, setQuery] = React.useState('')
   const [locationFilter, setLocationFilter] = React.useState('')
   const [defaultContext, setDefaultContext] = React.useState(null)
   const [editor, setEditor] = React.useState(null)
-  const draftKey = editor ? pendingRecipeKey(editor.location.context) : null
+  const draftKey = editor ? pendingRecipeKey(locationKey(editor.location)) : null
   const [selectedKey, setSelectedKey] = React.useState(null)
   const [chooseLocation, setChooseLocation] = React.useState(false)
   const [newLocation, setNewLocation] = React.useState('')
@@ -45,31 +49,31 @@ export function TemplatesView() {
   const [deleteErrors, setDeleteErrors] = React.useState([])
   React.useEffect(() => {
     let current = true
-    api.contextKey().then((context) => { if (current) setDefaultContext(context) }).catch((e) => toast.error(e.message))
+    api.contextKey().then((context) => { if (current) setDefaultContext(JSON.stringify([api.target, context])) }).catch((e) => toast.error(e.message))
     return () => { current = false }
-  }, [])
+  }, [api])
   React.useEffect(() => {
     if (restoredDraft.current || !defaultContext) return
-    const location = locations.find((location) => location.context === defaultContext)
+    const location = locations.find((location) => locationKey(location) === defaultContext)
     if (!location?.connected) return
     restoredDraft.current = true
-    const draft = pendingRecipe(pendingRecipeKey(location.context))
+    const draft = pendingRecipe(pendingRecipeKey(locationKey(location)))
     if (draft) setEditor((current) => current ?? { ...draft, location })
   }, [defaultContext, locations])
   const selected = records.find((t) => resourceKey(t) === selectedKey)
-  const owner = (t) => locations.find((location) => location.context === t.location.context) ?? t.location
+  const owner = (t) => locations.find((location) => locationKey(location) === locationKey(t.location)) ?? t.location
   const connected = (t) => owner(t).connected !== false
   const scopedApi = (t) => {
     if (!connected(t)) throw new Error(`${locationLabel(owner(t))} is disconnected. Reconnect before continuing.`)
-    return api.forContext(t.location.context)
+    return createApi(compute?.localViewer ? owner(t).target ?? "local" : api.target, api.signal, t.location.context)
   }
-  const shown = records.filter((t) => (!locationFilter || t.location.context === locationFilter) && `${t.name} ${t.image || ''} ${t.recipe.repository || ''}`.toLowerCase().includes(query.toLowerCase()))
+  const shown = records.filter((t) => (!locationFilter || locationKey(t.location) === locationFilter) && `${t.name} ${t.image || ''} ${t.recipe.repository || ''}`.toLowerCase().includes(query.toLowerCase()))
   const selectable = shown.filter((t) => !working(t) && connected(t))
   const checkedRecords = records.filter((t) => checked.has(resourceKey(t)) && !working(t) && connected(t))
   const matchingChecked = selectable.filter((t) => checked.has(resourceKey(t))).length
   const allChecked = selectable.length > 0 && matchingChecked === selectable.length
   React.useEffect(() => {
-    const available = new Set(records.filter((t) => !working(t) && (locations.find((location) => location.context === t.location.context) ?? t.location).connected !== false).map(resourceKey))
+    const available = new Set(records.filter((t) => !working(t) && (locations.find((location) => locationKey(location) === locationKey(t.location)) ?? t.location).connected !== false).map(resourceKey))
     setChecked((current) => new Set([...current].filter((key) => available.has(key))))
   }, [records, locations])
   function toggle(key) {
@@ -125,7 +129,7 @@ export function TemplatesView() {
           const result = await scopedApi(t).deleteImageTemplate(t.name)
           succeeded.add(resourceKey(t))
           const cleanup = result?.imageCleanup
-          const imageKey = JSON.stringify([t.location.context, cleanup?.image])
+          const imageKey = JSON.stringify([locationKey(t.location), cleanup?.image])
           if (cleanup?.status === 'retained') retained.set(imageKey, { image: cleanup.image, reason: cleanup.reason, location: owner(t) })
           else if (cleanup?.image) retained.delete(imageKey)
         }
@@ -146,16 +150,16 @@ export function TemplatesView() {
     setEditor({ recipe, replace, location: owner(target) })
   }
   function startTemplate() {
-    const location = locations.find((location) => location.context === newLocation)
+    const location = locations.find((location) => locationKey(location) === newLocation)
     if (!location?.connected) return
-    const draft = pendingRecipe(pendingRecipeKey(location.context))
+    const draft = pendingRecipe(pendingRecipeKey(locationKey(location)))
     setEditor({ ...(draft ?? {}), location })
     setChooseLocation(false)
   }
   function closeEditor() { try { sessionStorage.removeItem(draftKey) } catch {} setEditor(null) }
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
-    {editor && <LocationProvider location={owner(editor)}><ImageTemplateBuilder key={JSON.stringify([editor.location.context, editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></LocationProvider>}
+    {editor && <LocationProvider location={owner(editor)}><ImageTemplateBuilder key={JSON.stringify([locationKey(editor.location), editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></LocationProvider>}
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-8">
       <div className="relative mr-auto min-w-32 flex-1 sm:max-w-60">
         <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-faint" />
@@ -163,7 +167,7 @@ export function TemplatesView() {
       </div>
       <select aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
         <option value="">All locations</option>
-        {locations.map((location) => <option key={location.context} value={location.context}>{locationLabel(location)}{location.context === defaultContext ? ' (default)' : ''}{location.connected === false ? ' · disconnected' : ''}</option>)}
+        {locations.map((location) => <option key={locationKey(location)} value={locationKey(location)}>{locationLabel(location)}{locationKey(location) === defaultContext ? ' (default)' : ''}{location.connected === false ? ' · disconnected' : ''}</option>)}
       </select>
       <Button size="sm" className={action} disabled={!locations.some((location) => location.connected)} onClick={() => { setNewLocation(''); setChooseLocation(true) }}><Plus />New template</Button>
     </div>
@@ -173,7 +177,7 @@ export function TemplatesView() {
       <Button variant="destructive" size="sm" disabled={busy} onClick={() => askRemove(checkedRecords)}><Trash2 />Delete selected</Button>
     </div>}
     {error && <div role="alert" className="px-4 py-4 text-xs sm:px-8"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>}
-    {locations.filter((location) => location.connected === false).map((location) => <div key={location.context} role="status" className="border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-8">{locationLabel(location)} is disconnected. Saved templates are shown; reconnect to use or change them.{location.error && <span className="ml-1">{location.error}</span>}</div>)}
+    {locations.filter((location) => location.connected === false).map((location) => <div key={locationKey(location)} role="status" className="border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-8">{locationLabel(location)} is disconnected. Saved templates are shown; reconnect to use or change them.{location.error && <span className="ml-1">{location.error}</span>}</div>)}
     {loading && !records.length ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
       : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground">
         <p>{records.length ? 'No matching templates.' : 'No image templates yet.'}</p>
@@ -250,9 +254,9 @@ export function TemplatesView() {
       <DialogHeader><DialogTitle>New template</DialogTitle><DialogDescription>Choose where to build and save this template. Its images and saved Setups belong to that location.</DialogDescription></DialogHeader>
       <label className="space-y-2 text-xs"><span className="block font-medium">Location</span><select aria-label="New template location" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} className="h-9 w-full rounded-md border bg-card px-3">
         <option value="" disabled>Choose a location…</option>
-        {locations.map((location) => <option key={location.context} value={location.context} disabled={!location.connected}>{locationLabel(location)}{location.connected === false ? ' · disconnected' : ''}</option>)}
+        {locations.map((location) => <option key={locationKey(location)} value={locationKey(location)} disabled={!location.connected}>{locationLabel(location)}{location.connected === false ? ' · disconnected' : ''}</option>)}
       </select></label>
-      <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setChooseLocation(false)}>Cancel</Button><Button className={action} disabled={!locations.some((location) => location.context === newLocation && location.connected)} onClick={startTemplate}>Continue<ArrowRight /></Button></div>
+      <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setChooseLocation(false)}>Cancel</Button><Button className={action} disabled={!locations.some((location) => locationKey(location) === newLocation && location.connected)} onClick={startTemplate}>Continue<ArrowRight /></Button></div>
     </DialogContent></Dialog>
     {launch && <LocationProvider location={owner(launch)}><CreateSandboxDialog open initialImageTemplate={launch} onOpenChange={(open) => { if (!open) setLaunch(null) }} onCreated={() => { setLaunch(null); toast.success('Sandbox created from image template') }} /></LocationProvider>}
   </div>

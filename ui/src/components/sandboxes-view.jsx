@@ -1,9 +1,10 @@
 import * as React from "react"
-import { ArrowUpRight, ArrowUp, ArrowDown, Box, Check, Monitor, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowUpRight, ArrowUp, ArrowDown, Box, Cloud, Laptop, Check, Monitor, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
-import { api } from "@/lib/api"
+import { createApi } from "@/lib/api"
+import { useCompute } from "@/lib/compute"
 import { useInventory } from "@/lib/inventory"
-import { LocationProvider, useLocation } from "@/lib/location-context"
+import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
 import { locationLabel, resourceKey } from "@/lib/locations"
 import { LocationBadge } from "@/components/location-badge"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -25,42 +26,45 @@ const EMPTY = []
 const PREVIEW_LOCATION = { context: '["preview","default"]', gateway: "preview", workspace: "default", label: "Local", remote: false, connected: true }
 const ROW_HEIGHT = 40
 const FILTERS = ["all", "running", "sleeping", "provisioning", "error", "unknown"]
+const locationKey = (location) => location?.id ?? location?.context
 const keyOf = resourceKey
-const nameKey = (sandbox) => JSON.stringify([sandbox.location?.context, sandbox.name])
+const nameKey = (sandbox) => JSON.stringify([locationKey(sandbox.location), sandbox.name])
 const number = (value) => value.toLocaleString("en-US")
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 const COLUMNS = [{ id: "name", label: "Sandbox", width: "28%" }, { id: "phase", label: "Status", width: "12%" }, { id: "owner", label: "Owner", width: "13%" }, { id: "image", label: "Image", width: "26%" }, { id: "startedAt", label: "Uptime", width: "10%" }, { id: "createdAt", label: "Created", width: "11%" }]
 
 export function SandboxesView({ onNavigate, onConnect }) {
+  const api = useApi()
+  const compute = useCompute()
   const live = useDemoFleet(useLive())
   const inventory = useInventory()
   const { locations } = inventory
   const inheritedLocation = useLocation()
   const [selectedContext, setSelectedContext] = React.useState(null)
-  const defaultContext = inheritedLocation?.context ?? selectedContext
-  const [locationFilter, setLocationFilter] = React.useState(inheritedLocation?.context ?? "")
+  const defaultContext = locationKey(inheritedLocation) ?? selectedContext
+  const [locationFilter, setLocationFilter] = React.useState(locationKey(inheritedLocation) ?? "")
   const [creationLocation, setCreationLocation] = React.useState(null)
   const [handoff, setHandoff] = React.useState(null)
   const canConnect = Boolean(onConnect)
   React.useEffect(() => {
     let alive = true
-    api.contextKey().then((context) => { if (alive) setSelectedContext(context) }).catch(() => {})
+    api.contextKey().then((context) => { if (alive) setSelectedContext(JSON.stringify([api.target, context])) }).catch(() => {})
     return () => { alive = false }
-  }, [])
-  React.useEffect(() => { setLocationFilter(inheritedLocation?.context ?? "") }, [inheritedLocation?.context])
-  const defaultLocation = locations.find((location) => location.context === defaultContext)
-  const availableLocation = locations.find((location) => location.context === locationFilter && location.connected)
+  }, [api])
+  React.useEffect(() => { setLocationFilter(locationKey(inheritedLocation) ?? "") }, [locationKey(inheritedLocation)])
+  const defaultLocation = locations.find((location) => locationKey(location) === defaultContext)
+  const availableLocation = locations.find((location) => locationKey(location) === locationFilter && location.connected)
     ?? (defaultLocation?.connected ? defaultLocation : null)
-    ?? locations.find((location) => !location.remote && location.connected)
-    ?? locations.find((location) => location.connected)
-  const chosenLocation = locations.find((location) => location.context === creationLocation?.context) ?? creationLocation ?? availableLocation
+    ?? locations.find((location) => location.target === api.target && !location.remote && location.connected)
+    ?? locations.find((location) => location.target === api.target && location.connected)
+  const chosenLocation = locations.find((location) => locationKey(location) === locationKey(creationLocation)) ?? creationLocation ?? availableLocation
   const [creations, setCreations] = React.useState([])
   const reportedSandboxes = React.useMemo(() => live.demo
     ? (live.sandboxes ?? EMPTY).map((sandbox) => ({ ...sandbox, location: defaultLocation ?? availableLocation ?? PREVIEW_LOCATION }))
     : inventory.sandboxes, [live.demo, live.sandboxes, defaultLocation, availableLocation, inventory.sandboxes])
   const sandboxes = React.useMemo(() => {
     const reported = new Set(reportedSandboxes.map(nameKey))
-    return [...creations.filter((sandbox) => !sandbox.reported && !reported.has(nameKey(sandbox))).map((sandbox) => ({ ...sandbox, location: locations.find((location) => location.context === sandbox.location.context) ?? sandbox.location })), ...reportedSandboxes]
+    return [...creations.filter((sandbox) => !sandbox.reported && !reported.has(nameKey(sandbox))).map((sandbox) => ({ ...sandbox, location: locations.find((location) => locationKey(location) === locationKey(sandbox.location)) ?? sandbox.location })), ...reportedSandboxes]
   }, [reportedSandboxes, creations, locations])
   const [query, setQuery] = React.useState("")
   const [status, setStatus] = React.useState("all")
@@ -73,7 +77,10 @@ export function SandboxesView({ onNavigate, onConnect }) {
   const [deleting, setDeleting] = React.useState(false)
   const deletionInFlight = React.useRef(false)
   const [deleteErrors, setDeleteErrors] = React.useState([])
-  const [creating, setCreating] = React.useState(false)
+  const [creating, setCreating] = React.useState(Boolean(compute?.createRequested))
+  React.useEffect(() => {
+    if (compute?.createRequested) { setCreating(true); compute.requestCreate(false) }
+  }, [compute?.createRequested])
   const [now, setNow] = React.useState(Date.now)
   const search = React.useRef(null)
   React.useEffect(() => {
@@ -82,23 +89,32 @@ export function SandboxesView({ onNavigate, onConnect }) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); search.current?.focus() }
     }
     window.addEventListener("keydown", onKey)
+    const receiveHandoff = (event) => {
+      const value = event.detail
+      if (typeof value?.name !== "string") return
+      setHandoff({ name: value.name, context: value.location?.id ?? (value.context ? JSON.stringify([value.target ?? api.target, value.context]) : undefined) })
+      inventory.refresh()
+    }
+    window.addEventListener("openrod-sandbox-handoff", receiveHandoff)
     try {
       const stored = sessionStorage.getItem(BOX_HANDOFF)
       sessionStorage.removeItem(BOX_HANDOFF)
       if (stored) {
         let value
         try { value = JSON.parse(stored) } catch { /* Legacy handoffs contain a plain name. */ }
-        setHandoff(value && typeof value.name === "string" ? { name: value.name, context: value.location?.context ?? value.context } : { name: stored })
+        setHandoff(value && typeof value.name === "string" ? { name: value.name, context: locationKey(value.location) ?? (value.context && value.target ? JSON.stringify([value.target, value.context]) : value.context) } : { name: stored })
       }
     } catch { /* optional storage */ }
-    return () => { clearInterval(timer); window.removeEventListener("keydown", onKey) }
+    return () => { clearInterval(timer); window.removeEventListener("keydown", onKey); window.removeEventListener("openrod-sandbox-handoff", receiveHandoff) }
   }, [])
   React.useEffect(() => {
     const context = handoff?.context ?? defaultContext
     if (!handoff || !context || inventory.loading) return
-    const sandbox = sandboxes.find((sandbox) => sandbox.name === handoff.name && sandbox.location?.context === context)
-    if (sandbox?.location.connected) setOpened(sandbox)
+    const sandbox = sandboxes.find((sandbox) => sandbox.name === handoff.name && locationKey(sandbox.location) === context)
+    if (!sandbox?.location.connected) return
+    setOpened(sandbox)
     setHandoff(null)
+    try { sessionStorage.removeItem(BOX_HANDOFF) } catch {}
   }, [handoff, defaultContext, inventory.loading, sandboxes])
   React.useEffect(() => {
     const names = new Set(reportedSandboxes.map(nameKey))
@@ -113,7 +129,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
     setOpened(null)
     setCreations((current) => [...current.filter((item) => nameKey(item) !== nameKey(created)), created])
     setQuery(""); setStatus("all"); setImageFilter("")
-    setLocationFilter(created.location.context)
+    setLocationFilter(locationKey(created.location))
     setSort({ key: "createdAt", direction: "desc" })
     inventory.refresh()
   }
@@ -122,7 +138,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
   const images = React.useMemo(() => [...new Set(indexed.map((row) => row.image))].sort(collator.compare), [indexed])
   const ordered = React.useMemo(() => {
     const q = deferredQuery.trim().toLowerCase()
-    const matched = indexed.filter((row) => (!locationFilter || row.sandbox.location?.context === locationFilter) && (status === "all" || statusOf(row.sandbox.phase) === status) && (!imageFilter || row.image === imageFilter) && (!q || row.search.includes(q)))
+    const matched = indexed.filter((row) => (!locationFilter || locationKey(row.sandbox.location) === locationFilter) && (status === "all" || statusOf(row.sandbox.phase) === status) && (!imageFilter || row.image === imageFilter) && (!q || row.search.includes(q)))
     const value = (row) => sort.key === "owner" || sort.key === "image" ? row[sort.key] : sort.key === "startedAt" ? row.sandbox.phase === "ready" ? row.sandbox.startedAt : null : row.sandbox[sort.key]
     return matched.sort((a, b) => {
       const av = value(a), bv = value(b)
@@ -173,9 +189,9 @@ export function SandboxesView({ onNavigate, onConnect }) {
       while (cursor < deleteTargets.length) {
         const sandbox = deleteTargets[cursor++]
         try {
-          const location = locations.find((location) => location.context === sandbox.location.context)
+          const location = locations.find((location) => locationKey(location) === locationKey(sandbox.location))
           if (!location?.connected) throw new Error("Location is disconnected. Reconnect before deleting.")
-          await api.forContext(sandbox.location.context).lifecycle(sandbox.name, "delete")
+          await createApi(compute?.localViewer ? location.target ?? "local" : api.target, api.signal, location.context).lifecycle(sandbox.name, "delete")
           succeeded.add(keyOf(sandbox))
         } catch (error) {
           failures.push({ key: keyOf(sandbox), name: sandbox.name, location: sandbox.location, message: error.message })
@@ -205,12 +221,12 @@ export function SandboxesView({ onNavigate, onConnect }) {
   const openedSandbox = opened && (sandboxes.find((sandbox) => keyOf(sandbox) === keyOf(opened))
     ?? (opened.id == null ? sandboxes.find((sandbox) => nameKey(sandbox) === nameKey(opened)) : null)
     ?? opened)
-  const openedLocation = openedSandbox && (locations.find((location) => location.context === openedSandbox.location?.context) ?? openedSandbox.location)
+  const openedLocation = openedSandbox && (locations.find((location) => locationKey(location) === locationKey(openedSandbox.location)) ?? openedSandbox.location)
   const openedLive = openedSandbox ? {
     ...live,
     sandboxes: [openedSandbox],
-    events: openedLocation?.context === defaultContext ? live.events : EMPTY,
-    overview: openedLocation?.context === defaultContext ? live.overview : { gateway: { name: openedLocation?.gateway, workspace: openedLocation?.workspace, remote: openedLocation?.remote } },
+    events: locationKey(openedLocation) === defaultContext ? live.events : EMPTY,
+    overview: locationKey(openedLocation) === defaultContext ? live.overview : { gateway: { name: openedLocation?.gateway, workspace: openedLocation?.workspace, remote: openedLocation?.remote } },
     refresh: inventory.refresh,
   } : null
   const beginCreation = () => { setCreationLocation(availableLocation ?? null); setCreating(true) }
@@ -232,7 +248,7 @@ export function SandboxesView({ onNavigate, onConnect }) {
           {Object.entries(all.status).map(([key, value]) => value > 0 && <span key={key} className={STATUS[key].strip} style={{ width: `${value / all.total * 100}%` }} />)}
         </div>
         {inventory.error && sandboxes.length > 0 && <p role="alert" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">Inventory refresh failed. Showing the last reading. {inventory.error}</p>}
-        {locations.filter((location) => !location.connected).map((location) => <p key={location.context} role="status" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">{locationLabel(location)} disconnected. Its last inventory is retained; reconnect to use these resources.{location.error ? ` ${location.error}` : ""}</p>)}
+        {locations.filter((location) => !location.connected).map((location) => <p key={locationKey(location)} role="status" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">{locationLabel(location)} disconnected. Its last inventory is retained; reconnect to use these resources.{location.error ? ` ${location.error}` : ""}</p>)}
         {creations.map((created) => {
           const sandbox = sandboxes.find((item) => nameKey(item) === nameKey(created)) ?? created
           const ready = sandbox.phase === "ready"
@@ -250,12 +266,12 @@ export function SandboxesView({ onNavigate, onConnect }) {
             <Input ref={search} value={query} onChange={(e) => { setQuery(e.target.value) }} placeholder="Search name, owner, image…" aria-label="Search sandboxes" className="h-9 pl-9 pr-8 text-xs" />
             {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
           </div>
-          <Select value={locationFilter} onValueChange={(value) => setLocationFilter(value ?? "")} items={[{ value: "", label: "All locations" }, ...locations.map((location) => ({ value: location.context, label: locationLabel(location) }))]}>
+          <Select value={locationFilter} onValueChange={(value) => setLocationFilter(value ?? "")} items={[{ value: "", label: "All locations" }, ...locations.map((location) => ({ value: locationKey(location), label: locationLabel(location) }))]}>
             <SelectTrigger aria-label="Filter by location" className="h-8 w-44 bg-card text-xs"><SelectValue className="min-w-0 truncate" /></SelectTrigger>
             <SelectContent align="end" alignItemWithTrigger={false}>
               <SelectGroup>
                 <SelectItem value="" className="text-xs">All locations</SelectItem>
-                {locations.map((location) => <SelectItem key={location.context} value={location.context} className="text-xs">{locationLabel(location)}{!location.connected ? " · Disconnected" : ""}</SelectItem>)}
+                {locations.map((location) => <SelectItem key={locationKey(location)} value={locationKey(location)} className="text-xs">{locationLabel(location)}{!location.connected ? " · Disconnected" : ""}</SelectItem>)}
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -331,7 +347,7 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
   const label = `${sandbox.name} at ${locationLabel(sandbox.location)}`
   return <tr aria-rowindex={index} aria-disabled={disconnected || undefined} onClick={() => { if (!disconnected) onOpen(sandbox) }} className={`group transition-colors ${disconnected ? "opacity-60" : "cursor-pointer hover:bg-muted/60 focus-within:bg-muted/60"} ${selected ? "bg-accent/40" : "bg-card"}`}>
     <td className={cell} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${label}`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
-    <td className={`${cell} pl-6`}><button disabled={disconnected} aria-haspopup="dialog" aria-label={`Open ${label}`} onClick={(event) => { event.stopPropagation(); if (!disconnected) onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"><Box aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><LocationBadge location={sandbox.location} /><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+    <td className={`${cell} pl-6`}><button disabled={disconnected} aria-haspopup="dialog" aria-label={`Open ${label}`} onClick={(event) => { event.stopPropagation(); if (!disconnected) onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"><LocationIcon location={sandbox.location} /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><LocationBadge location={sandbox.location} /><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
     <td className={cell}><span className="flex items-center gap-1.5 whitespace-nowrap"><span className={`size-1.5 shrink-0 rounded-full ${styleOf(sandbox.phase).bar}`} />{PHASE_LABEL[sandbox.phase] ?? "Unknown"}</span></td>
     <td className={cell}><span className="block truncate" title={owner}>{owner}</span></td>
     <td className={cell}><span className="block truncate font-mono text-[11px]" title={sandbox.image || image}>{image}</span></td>
@@ -339,6 +355,13 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
     <td className={cell}><span className="block truncate tabular-nums" title={sandbox.createdAt || "Not reported"}>{elapsedSince(sandbox.createdAt, now)}{sandbox.createdAt ? " ago" : ""}</span></td>
   </tr>
 })
+
+function LocationIcon({ location }) {
+  const cloud = location?.cloud || location?.target === "cloud"
+  const Icon = cloud ? Cloud : location?.remote ? Monitor : Laptop
+  const label = cloud ? "Cloud compute" : location?.remote ? "SSH machine" : "Local compute"
+  return <span role="img" aria-label={label} title={label}><Icon aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /></span>
+}
 
 function SelectionCheckbox({ label, checked, mixed = false, disabled, onChange }) {
   const ref = React.useRef(null)

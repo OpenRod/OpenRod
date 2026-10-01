@@ -196,7 +196,7 @@ function collapseVisits(events) {
 
 export function IngressView() {
   const location = useLocation()
-  return <ScopedIngressView key={location?.context ?? "default"} />
+  return <ScopedIngressView key={location?.id ?? location?.context ?? "default"} />
 }
 
 function ScopedIngressView() {
