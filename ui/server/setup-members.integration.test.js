@@ -10,14 +10,17 @@ async function fixture(t, saved) {
   const source = path.resolve(import.meta.dirname, '..')
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-setup-identity-')))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const previousData = process.env.OPENSHELL_CONSOLE_DATA_DIR
+  process.env.OPENSHELL_CONSOLE_DATA_DIR = path.join(root, 'state')
+  t.after(() => {
+    if (previousData === undefined) delete process.env.OPENSHELL_CONSOLE_DATA_DIR
+    else process.env.OPENSHELL_CONSOLE_DATA_DIR = previousData
+  })
   for (const dir of ['server', 'shared', 'src']) await fs.cp(path.join(source, dir), path.join(root, dir), { recursive: true })
   await fs.copyFile(path.join(source, 'package.json'), path.join(root, 'package.json'))
   await fs.symlink(path.join(source, 'node_modules'), path.join(root, 'node_modules'), 'dir')
-  const write = async (file, value) => { const dest = path.join(root, file); await fs.mkdir(path.dirname(dest), { recursive: true }); await fs.writeFile(dest, JSON.stringify(value)) }
-  await write('.state/setup-members.json', saved)
-  await write(`policies/egress/setup-${SETUP}.json`, { id: `setup-${SETUP}`, name: 'Setup access', action: 'allow', destinations: ['setup.example.com'], appliesTo: { setups: [SETUP] } })
   const gatewayPath = path.join(root, 'server/gateway.js'), original = await fs.readFile(gatewayPath, 'utf8')
-  await fs.writeFile(gatewayPath, original.replace('export async function gateway()', 'async function unusedLiveGateway()') + `
+  await fs.writeFile(gatewayPath, original.replace('export async function gateway(', 'async function unusedLiveGateway(') + `
 export const setupIdentityState = { endpoint: 'https://gateway-a', id: 'box-original', rules: {}, updates: [], staged: null, failApply: false, created: [] }
 const record = () => ({ metadata: { id: setupIdentityState.id, name: 'web' }, status: { phase: 2 } })
 const client = { raw: {
@@ -48,12 +51,17 @@ const client = { raw: {
 } }
 export async function gateway() { return { client, target: { endpoint: setupIdentityState.endpoint } } }
 `)
+  const { policyDirectory, scopedStateDirectory } = await import(pathToFileURL(path.join(root, 'server/paths.js')))
+  const policyDir = await policyDirectory(), stateDir = scopedStateDirectory()
+  const write = async (file, value) => { const dest = file.startsWith('policies/') ? path.join(policyDir, file.slice(9)) : file.startsWith('.state/') ? path.join(stateDir, file.slice(7)) : path.join(root, file); await fs.mkdir(path.dirname(dest), { recursive: true }); await fs.writeFile(dest, JSON.stringify(value)) }
+  await write('.state/setup-members.json', saved)
+  await write(`policies/egress/setup-${SETUP}.json`, { id: `setup-${SETUP}`, name: 'Setup access', action: 'allow', destinations: ['setup.example.com'], appliesTo: { setups: [SETUP] } })
   const org = await import(pathToFileURL(path.join(root, 'server/org.js')))
   const gateway = await import(pathToFileURL(gatewayPath))
   const members = await import(pathToFileURL(path.join(root, 'server/setup-members.js')))
   const deployment = await import(pathToFileURL(path.join(root, 'server/setup-deployment.js')))
   const setups = await import(pathToFileURL(path.join(root, 'server/setups.js')))
-  return { ...org, ...members, ...gateway, ...deployment, ...setups, root, write }
+  return { ...org, ...members, ...gateway, ...deployment, ...setups, setupStore: setups.getSetupStore(), root, stateDir, write }
 }
 
 test('actual sync and overview never grant legacy name-only setup membership', async t => {
@@ -141,7 +149,7 @@ test('setup removal reports a failed membership write so the operator can retry 
   const preview = await h.deploymentRoute('POST', ['setups', setup.id, 'preview'], { sandbox: 'web', targets: ['claude'] })
   const rename = fs.rename
   fs.rename = async (from, to) => {
-    if (to === path.join(h.root, '.state/setup-members.json')) throw Object.assign(new Error('Membership revocation denied'), { code: 'EACCES' })
+    if (to === path.join(h.stateDir, 'setup-members.json')) throw Object.assign(new Error('Membership revocation denied'), { code: 'EACCES' })
     return rename(from, to)
   }
   try {
@@ -182,7 +190,7 @@ for (const change of ['sandbox', 'gateway']) test(`creation installation rejects
  const readFile=fs.readFile;let reads=0
  fs.readFile=async (...args)=>{
   const value=await readFile(...args)
-  if(args[0]===path.join(h.root,'.state/setups',setup.id+'.json')&&++reads===2){
+  if(args[0]===path.join(h.stateDir,'setups',setup.id+'.json')&&++reads===2){
    if(change==='sandbox')current.id='box-replacement'
    else current.endpoint='https://gateway-b'
   }

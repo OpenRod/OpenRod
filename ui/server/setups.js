@@ -139,7 +139,7 @@ export async function resolveSetups(ids = []) {
 }
 // Each saved Setup keeps one managed egress policy in step with its items.
 // A policy problem is reported, never undoes the Setup change.
-async function syncEgress(id) {
+async function syncEgress(setupStore, id) {
   try { const { syncSetupPolicy } = await import('./setup-egress.js'); return { egressPolicy: await syncSetupPolicy(await setupStore.get(id)) } }
   catch (e) { return { egressPolicy: null, egressPolicyError: e.status ? e.message : 'The policy file could not be written.' } }
 }
@@ -167,6 +167,6 @@ export async function setupRoute(method, parts, input) {
   if (parts[1] === 'review') return setupStore.review(input.token, input.ids)
   if (parts[1] === 'remove-review-item') return setupStore.removeReviewItem(input.token, input.item)
   if (parts[1] === 'file') return setupStore.file(input.token, input.item, input.path)
-  if (parts[1] === 'save') { const view = await setupStore.save(input.token, input.name, input.acknowledged); return { ...view, ...(await syncEgress(view.id)) } }
+  if (parts[1] === 'save') { const view = await setupStore.save(input.token, input.name, input.acknowledged); return { ...view, ...(await syncEgress(setupStore, view.id)) } }
   return undefined
 }
