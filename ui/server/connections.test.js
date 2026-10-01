@@ -299,7 +299,7 @@ test('disconnect restores local context or requires selection instead of retaini
       OpenShellClient.connect = async ({ gateway }) => {
         const name = names[Number(new URL(gateway).port) - 10001]
         if (name !== ${JSON.stringify(managed)} && !scenario.reachable.includes(name)) throw Error('Local gateway unavailable')
-        return { raw: { listWorkspaces: async () => ({ workspaces: ['default', 'team'].map(name => ({ metadata: { name } })) }) } }
+        return { transport: { unary() {}, stream() {} }, raw: { listWorkspaces: async () => ({ workspaces: ['default', 'team'].map(name => ({ metadata: { name } })) }) } }
       }
       let deselected = false
       const connections = createRemoteConnections({ onDeselected: () => { deselected = true }, logger: { warn() {} } })

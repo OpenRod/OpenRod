@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Combined local and SSH inventories
+
+- Sandboxes and Templates now show local and managed SSH resources together, with location badges, an All locations filter, and location-qualified identity for same-named resources.
+- Details, terminals, files, policy edits, creation and template/bulk actions retain the resource's owning gateway/workspace. Creation selects its location explicitly; using a template inherits its location.
+- Disconnected remote inventory is retained across reload/restart with disabled actions; local resources remain usable. AWS EKS is excluded from this local/SSH flow.
+- Explicit location requests reject unknown or disconnected owners; OpenRod Cloud authorization remains selected-context-only.
+- Fixed Setup-save policy synchronization to use the context-scoped store after the global store removal; migrated policy/membership integration fixtures to scoped state.
+- Browser smoke against both existing gateways verified combined inventories, location filtering, local details while SSH was selected, owner-restricted creation templates, and retained disabled remote rows after an isolated disconnect. A live local overview remained available; the server rejected a disconnected remote mutation with HTTP 409. No live workloads or policies were changed.
+- Verified all 461 regression tests and the production build. A throwaway real Setup-save route exercise persisted the expected scoped MCP egress policy. Browser creation proof stopped before provisioning; real cross-location sandbox creation and terminal execution were not performed.
+
 ### SSH connection recovery and preparation
 
 - Disconnect now restores the available local gateway/workspace or requires connection selection, rather than retaining the stopped SSH gateway endpoint.

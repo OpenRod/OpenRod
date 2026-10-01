@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
-import { api } from "@/lib/api"
+import { useApi, useLocation } from "@/lib/location-context"
 import { useLive } from "@/lib/live"
 import { relativeTime } from "@/lib/format"
 import { styleOf } from "@/lib/sandboxes"
@@ -65,6 +65,7 @@ function CopyButton({ text }) {
 
 // One open door: the sentence first, the controls after it.
 function ServiceDoor({ service, visits, now, onChanged, remote }) {
+  const api = useApi()
   const [busy, setBusy] = React.useState(null)
   const [extending, setExtending] = React.useState(false)
   const label = service.name || "default"
@@ -122,6 +123,7 @@ function ServiceDoor({ service, visits, now, onChanged, remote }) {
 }
 
 function OpenDoorForm({ sandbox, onOpened }) {
+  const api = useApi()
   const [port, setPort] = React.useState("")
   const [name, setName] = React.useState("")
   const [minutes, setMinutes] = React.useState(60)
@@ -193,15 +195,23 @@ function collapseVisits(events) {
 }
 
 export function IngressView() {
+  const location = useLocation()
+  return <ScopedIngressView key={location?.context ?? "default"} />
+}
+
+function ScopedIngressView() {
+  const api = useApi()
+  const location = useLocation()
+  const scopeKey = location ? `ingress-scope:${location.context}` : "ingress-scope"
   const live = useLive()
   const now = useNow()
   const sandboxes = (live.sandboxes ?? []).filter((s) => s.phase !== "deleting")
-  const [scope, setScope] = React.useState(() => { try { return sessionStorage.getItem("ingress-scope") } catch { return null } })
+  const [scope, setScope] = React.useState(() => { try { return sessionStorage.getItem(scopeKey) } catch { return null } })
   const selected = sandboxes.find((s) => s.name === scope)?.name ?? sandboxes[0]?.name ?? null
-  React.useEffect(() => { try { if (selected) sessionStorage.setItem("ingress-scope", selected) } catch { /* optional */ } }, [selected])
+  React.useEffect(() => { try { if (selected) sessionStorage.setItem(scopeKey, selected) } catch { /* optional */ } }, [selected, scopeKey])
 
   const [data, setData] = React.useState(null)
-  const load = React.useCallback(() => api.ingress().then(setData).catch((e) => setData({ error: e.message })), [])
+  const load = React.useCallback(() => api.ingress().then(setData).catch((e) => setData({ error: e.message })), [api])
   React.useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [load])
 
   const services = (data?.services ?? []).filter((s) => s.sandbox === selected)

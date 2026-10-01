@@ -29,6 +29,7 @@ test('expiry closes only its originating gateway and workspace after selection c
   const services = new Map()
   const serviceKey = (endpoint, request) => JSON.stringify([endpoint, request.workspaceScope.selection.value, request.sandbox, request.name])
   t.mock.method(OpenShellClient, 'connect', async ({ gateway: endpoint }) => ({
+    transport: { unary() {}, stream() {} },
     raw: {
       exposeService: async (request) => {
         services.set(serviceKey(endpoint, request), { endpoint: { sandbox: request.sandbox, name: request.name, targetPort: request.targetPort } })

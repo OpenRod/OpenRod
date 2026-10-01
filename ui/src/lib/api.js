@@ -9,11 +9,7 @@ async function loadContext() {
   const context = await response.json()
   if (!response.ok) throw new Error(context.error ?? "Could not read gateway registrations.")
   if (!binding) {
-    const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "")
-    binding = JSON.stringify([
-      params.get("gateway") || context.gateway,
-      params.get("workspace") || context.workspace,
-    ])
+    binding = JSON.stringify([context.gateway, context.workspace])
   }
   return context
 }
@@ -26,13 +22,17 @@ async function boundContext() {
   return binding
 }
 
+function createApi(locationContext = null) {
+const contextKey = () => locationContext == null ? boundContext() : Promise.resolve(locationContext)
+
 async function request(path, { method = "GET", body, signal, scoped = true } = {}) {
-  const context = scoped ? await boundContext() : null
+  const context = scoped ? await contextKey() : null
   const response = await fetch(`/api/os${path}`, {
     method,
     signal,
     headers: {
       ...(context ? { "x-openshell-context": context } : {}),
+      ...(context && locationContext ? { "x-openshell-location": "1" } : {}),
       ...(method === "GET" ? {} : { "content-type": "application/json", "x-openshell-console": "1" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -43,22 +43,25 @@ async function request(path, { method = "GET", body, signal, scoped = true } = {
   return payload
 }
 
-export const api = {
+return {
+  forContext: createApi,
+  inventory: (signal) => request("/inventory", { signal, scoped: false }),
   context: loadContext,
-  contextKey: boundContext,
+  contextKey,
   connections: (signal) => request("/connections", { signal, scoped: false }),
   connectionJob: (id, signal) => request(`/connections/jobs/${encodeURIComponent(id)}`, { signal, scoped: false }),
   connect: (body) => request("/connections/connect", { method: "POST", body }),
   installConnectionDocker: (id) => request(`/connections/jobs/${encodeURIComponent(id)}/docker`, { method: "POST", body: { approve: true } }),
   installConnectionRuntime: (id) => request(`/connections/jobs/${encodeURIComponent(id)}/install`, { method: "POST", body: { method: "download" } }),
   uploadConnectionPackage: async (id, file) => {
-    const context = await boundContext()
+    const context = await contextKey()
     const response = await fetch(`/api/os/connections/jobs/${encodeURIComponent(id)}/package`, {
       method: "POST",
       headers: {
         "content-type": "application/octet-stream",
         "x-openshell-console": "1",
         "x-openshell-context": context,
+        ...(locationContext ? { "x-openshell-location": "1" } : {}),
       },
       body: file,
     })
@@ -150,9 +153,9 @@ export const api = {
   prepareDownload: (sandbox, path) => request(`/files/${encodeURIComponent(sandbox)}/download`, { method: "POST", body: { path } }),
   startUpload: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/uploads`, { method: "POST", body: {} }),
   uploadFile: async (sandbox, id, path, file, signal) => {
-    const context = await boundContext()
+    const context = await contextKey()
     const response = await fetch(`/api/os/files/${encodeURIComponent(sandbox)}/uploads/${id}?path=${encodeURIComponent(path)}`, {
-      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1", "x-openshell-context": context }, body: file, signal,
+      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1", "x-openshell-context": context, ...(locationContext ? { "x-openshell-location": "1" } : {}) }, body: file, signal,
     })
     const payload = await response.json().catch(() => ({}))
     if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
@@ -168,3 +171,6 @@ export const api = {
   closeService: (service) => request("/ingress/close", { method: "POST", body: { sandbox: service.sandbox, name: service.name } }),
   extendService: (service, closeAfterMinutes) => request("/ingress/extend", { method: "POST", body: { sandbox: service.sandbox, name: service.name, closeAfterMinutes } }),
 }
+}
+
+export const api = createApi()
