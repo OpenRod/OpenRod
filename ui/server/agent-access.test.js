@@ -19,6 +19,38 @@ test('Cursor agent transport retains scoped TLS passthrough through launch compo
 })
 
 const recipe = { source: 'build', agents: ['claude', 'codex', 'opencode'] }
+test('Antigravity launch denies hosted URL fetching on every Code Assist host without disabling model access', async () => {
+  const { policy } = await planSandbox({ template: 'locked-down', agentRules: agentAccessRules({ source: 'build', agents: ['antigravity'] }) })
+  const rule = policy.networkPolicies['agent-antigravity']
+  for (const host of ['cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.sandbox.googleapis.com']) {
+    const endpoint = rule.endpoints.find(e => e.host === host)
+    assert.equal(endpoint.protocol, 'rest')
+    assert.equal(endpoint.enforcement, 1)
+    assert.equal(endpoint.access, 2)
+    assert(!endpoint.tls)
+    assert.deepEqual(endpoint.denyRules, [
+      { method: '*', path: '/**:fetchFromTrawlerCache*' },
+      { method: '*', path: '/**:rewriteUri*' },
+      { method: '*', path: '/**:generateContent*' },
+    ])
+  }
+  assert.deepEqual(rule.endpoints.find(e => e.host === 'oauth2.googleapis.com').denyRules, [])
+})
+
+test('Antigravity eligibility can read profile images without granting write access', async () => {
+  const rules = agentAccessRules({ source: 'build', agents: ['antigravity'] })
+  const { policy } = await planSandbox({ template: 'locked-down', agentRules: rules })
+  const rule = policy.networkPolicies['agent-antigravity']
+  const image = rule.endpoints.find(e => e.host === 'lh3.googleusercontent.com')
+  assert.equal(image.port, 443)
+  assert.equal(image.protocol, 'rest')
+  assert.equal(image.access, 1)
+  assert.equal(image.enforcement, 1)
+  assert(!image.tls)
+  assert(rule.binaries.some(b => b.path === '/sandbox/.local/bin/agy'))
+  assert(!rule.endpoints.some(e => e.host === '*.googleusercontent.com'))
+})
+
 test('multi-agent image gets additive access with a locked-down preset', async () => {
   const { policy } = await planSandbox({ template: 'locked-down', agentRules: agentAccessRules(recipe) })
   assert.deepEqual(Object.keys(policy.networkPolicies), ['agent-claude', 'agent-codex', 'agent-opencode'])
