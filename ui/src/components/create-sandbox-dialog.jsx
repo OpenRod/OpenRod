@@ -96,27 +96,27 @@ function FolderSummary({ plan, sandbox }) {
 }
 
 // Which group the sandbox joins, and what network access that brings.
-function GroupField({ org, value, onChange, onCreated, onAddPolicy, setups = [] }) {
+function GroupField({ org, value, onChange, onCreated, onAddPolicy, invalid = false }) {
   const reducedMotion = useReducedMotion()
   const reach = groupNetworkPolicies(org.policies, value)
-  // Setup egress policies come with the selected MCPs & Skills, not the groups.
-  const fromSetups = (org.policies ?? []).filter((p) => (p.appliesTo.setups ?? []).some((id) => setups.includes(id)))
   const counts = Object.fromEntries(org.groups.map((g) => [g.id, org.members?.[g.id]?.length ?? 0]))
   const chosen = org.groups.filter((g) => value.includes(g.id))
   return (
-    <fieldset className="grid min-w-0 gap-2.5">
-      <legend className="mb-2.5 text-xs font-medium">Groups <span className="text-muted-foreground">· Required</span></legend>
+    <div id="sandbox-groups" className={`-m-3 rounded-lg p-3 transition-colors ${invalid ? "bg-destructive/5 ring-1 ring-destructive/60" : ""}`}>
+    <fieldset aria-invalid={invalid || undefined} className="grid min-w-0 gap-2.5">
+      <legend className="mb-2.5 text-xs font-medium">Groups <span className={invalid ? "text-destructive" : "text-muted-foreground"}>· Required</span></legend>
       <GroupPicker multiple required groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
-      <motion.p key={value.join(",") || "empty"} initial={reducedMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} aria-live="polite" className="text-[11px] leading-relaxed text-muted-foreground">
+      <motion.p key={value.join(",") || "empty"} initial={reducedMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} aria-live="polite" className={`text-[11px] leading-relaxed ${invalid ? "text-destructive" : "text-muted-foreground"}`}>
         {reach.length
           ? <>Gets {reach.length === 1 ? "this network rule" : `these ${reach.length} network rules`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
           : chosen.length ? <>Add a network rule to at least one selected group before creating a sandbox.</>
-          : org.groups.length ? "Groups let network rules follow sandboxes. Choose one or more. You can change memberships later on the Groups page."
+          : invalid ? (org.groups.length ? "Choose at least one group to create a sandbox." : "Create a group to create a sandbox.")
+          : org.groups.length ? null
           : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
       </motion.p>
-      {fromSetups.length > 0 && <p className="text-[11px] leading-relaxed text-muted-foreground">Its MCPs &amp; Skills add <span className="text-foreground">{fromSetups.map((p) => p.name).join(", ")}</span>.</p>}
       {chosen.length > 0 && !reach.length && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={onAddPolicy}>Add network rule</Button>}
     </fieldset>
+    </div>
   )
 }
 
@@ -201,9 +201,9 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
   const [org, setOrg] = React.useState(null)
-  // A prepared Quick-setup snapshot gets the egress policy of the setup it was prepared from.
-  const [setupSources, setSetupSources] = React.useState({})
   const [group, setGroup] = React.useState([])
+  // Set by pressing Create while something is missing, so the missing fields turn red.
+  const [showMissing, setShowMissing] = React.useState(false)
 
   // A fresh sandbox starts in Quick setup; launching a saved template opens its tab.
   React.useEffect(() => {
@@ -228,9 +228,8 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     setChosen([])
     setError(null); setPolicyDraft(null); setOrg(null)
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
-    setGroup([])
+    setGroup([]); setShowMissing(false)
     api.org().then((value) => { if (current) setOrg(value) }).catch((e) => { if (current) { setOrg(null); setError(`Could not load groups: ${e.message}`) } })
-    api.setups().then((list) => { if (current) setSetupSources(Object.fromEntries(list.filter((s) => s.preparedFrom).map((s) => [s.id, s.preparedFrom.id]))) }).catch(() => { if (current) setSetupSources({}) })
     return () => { current = false }
   }, [open, api, location?.connected, initialImageTemplate])
 
@@ -279,7 +278,13 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   // progress, build logs and result follow as a notification.
   function submit(event) {
     event.preventDefault()
-    if (location?.connected === false || !groupReady || missingSetupAgent || (mode === "template" && !chosenImage)) return
+    if (location?.connected === false) return
+    const missing = [!name && "sandbox-name", mode === "template" && !chosenImage && "sandbox-image-template", !groupReady && "sandbox-groups"].find(Boolean)
+    if (missing || !startReady || missingSetupAgent) {
+      setShowMissing(true)
+      if (missing) document.getElementById(missing)?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" })
+      return
+    }
     const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
     const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
     const setups = setupIds, accessReview = setupAccessReview, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
@@ -347,7 +352,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
               className="grid min-w-0 content-start gap-6 p-5 @3xl:overflow-y-auto @3xl:p-7">
             <div className="grid gap-1.5">
               <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
-              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="h-10 font-mono text-sm" required
+              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="h-10 font-mono text-sm" required aria-invalid={(showMissing && !name) || undefined}
                 pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
 
@@ -417,12 +422,13 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
               <div className="grid gap-1.5">
                 <Label htmlFor="sandbox-image-template" className="text-xs">Environment</Label>
                 <Select value={imageTemplate} onValueChange={(value) => setImageTemplate(value ?? "")}>
-                  <SelectTrigger id="sandbox-image-template" className="w-full text-xs"><SelectValue>{imageTemplate || "Choose a template"}</SelectValue></SelectTrigger>
+                  <SelectTrigger id="sandbox-image-template" aria-invalid={(showMissing && !chosenImage) || undefined} className="w-full text-xs"><SelectValue>{imageTemplate || "Choose a template"}</SelectValue></SelectTrigger>
                   <SelectContent align="start" alignItemWithTrigger={false}><SelectGroup>
                     {images.map((item) => <SelectItem key={item.name} value={item.name} className="text-xs">{item.name}</SelectItem>)}
                   </SelectGroup></SelectContent>
                 </Select>
-                {!images.length && <p className="text-[11px] text-muted-foreground">No ready templates. Use Quick setup or create one in Templates.</p>}
+                {showMissing && !chosenImage && images.length > 0 && <p className="text-[11px] text-destructive">Choose a template to create a sandbox.</p>}
+                {!images.length && <p className={`text-[11px] ${showMissing ? "text-destructive" : "text-muted-foreground"}`}>No ready templates. Use Quick setup or create one in Templates.</p>}
                 {chosenImage && <p className="text-[11px] text-muted-foreground">{templateAgents ? `Included tools: ${[...templateAgents.map((agent) => agent.name), ...(chosenImage.recipe.customAgents ?? []).map((agent) => agent.name), "Terminal"].join(", ")}` : "Installed tools are not reported by this template."}</p>}
               </div>
             </TabsContent>
@@ -453,7 +459,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
 
             <motion.aside initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
               className="grid min-w-0 content-start gap-6 border-t border-border bg-muted/25 p-5 @3xl:overflow-y-auto @3xl:border-t-0 @3xl:border-l @3xl:p-6">
-            {org ? <GroupField org={org} value={group} onChange={setGroup} setups={(mode === "quick" ? setupIds : chosenImage?.recipe?.setups ?? []).flatMap((id) => [id, setupSources[id]].filter(Boolean))}
+            {org ? <GroupField org={org} value={group} onChange={setGroup} invalid={showMissing && !groupReady}
               onAddPolicy={() => setPolicyDraft(newPolicy({ appliesTo: { everyone: false, groups: group, sandboxes: [] } }))}
               onCreated={(g) => setOrg((o) => ({ ...o, groups: [...o.groups, g].sort((a, b) => a.name.localeCompare(b.name)), members: { ...o.members, [g.id]: [] } }))} />
               : <p role="status" className="text-xs text-muted-foreground">{error ? "Groups unavailable. Reopen this dialog to retry." : "Loading groups…"}</p>}
@@ -522,7 +528,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
 
           <DialogFooter className="mx-0 mb-0 shrink-0 items-center rounded-none border-t border-border bg-popover px-5 py-4 @3xl:px-7">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={location?.connected === false || !groupReady || !name || !startReady || missingSetupAgent || (mode === "template" && !chosenImage)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">Create sandbox</Button>
+            <Button type="submit" disabled={location?.connected === false} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">Create sandbox</Button>
           </DialogFooter>
           </Tabs>
         </form>
