@@ -152,7 +152,7 @@ test('every agent choice generates an installer, its runtime, and a session', as
   assert.equal(isSession('toString'), false)
 })
 
-const deletionFixture = async ({ shared = false, sandbox = false, dockerError, listError, absent = false } = {}) => {
+const deletionFixture = async ({ shared = false, sandbox = false, source, image = 'openshell-template/test:one', dockerError, listError, absent = false } = {}) => {
   const { deleteImageTemplate } = await import('./image-templates.js')
   const calls = []
   const template = (name) => ({ metadata: { name }, spec: { workload: { image: 'openshell-template/test:one' } } })
@@ -165,7 +165,7 @@ const deletionFixture = async ({ shared = false, sandbox = false, dockerError, l
     raw: { listSandboxes: async ({ pageToken }) => {
       if (listError) throw new Error('Gateway unavailable')
       if (!pageToken) return { sandboxes: [], nextPageToken: 'second' }
-      return { sandboxes: sandbox ? [{ phase: 'stopped', spec: { template: { image: 'openshell-template/test:one' } } }] : [] }
+      return { sandboxes: sandbox ? [{ metadata: { name: 'sandbox-1' }, createdFromWorkloadTemplate: source ? { name: source } : undefined, phase: 'stopped', spec: { template: { image } } }] : [] }
     } },
   }
   const operation = () => deleteImageTemplate(client, 'test', {
@@ -181,8 +181,8 @@ test('template deletion removes its exact Docker reference before deleting the r
   assert.deepEqual(calls, [['docker', ['image', 'rm', '--', 'openshell-template/test:one'], { engine: { endpoint: 'unix:///test.sock' } }], ['delete', 'test']])
 })
 
-test('shared images and stopped sandbox references on later pages are retained explicitly', async () => {
-  for (const options of [{ shared: true }, { sandbox: true }]) {
+test('images shared with other templates and their sandboxes are retained explicitly', async () => {
+  for (const options of [{ shared: true }, { sandbox: true, source: 'other' }]) {
     const { operation, calls } = await deletionFixture(options)
     const result = await operation()
     assert.equal(result.imageCleanup.status, 'retained')
@@ -205,6 +205,38 @@ test('already absent Docker images and template records can be deleted idempoten
     assert.equal((await operation()).imageCleanup.status, 'absent')
     assert.deepEqual(calls.at(-1), ['delete', 'test'])
   }
+})
+
+
+test('existing sandbox usage blocks deletion before Docker or template mutation, including older builds', async () => {
+  for (const options of [{ sandbox: true }, { sandbox: true, source: 'test', image: 'old-build' }]) {
+    const { operation, calls } = await deletionFixture(options)
+    await assert.rejects(operation(), (error) => {
+      assert.equal(error.status, 409)
+      assert.equal(error.code, 'TEMPLATE_IN_USE')
+      assert.deepEqual(error.sandboxes, [{ name: 'sandbox-1' }])
+      return true
+    })
+    assert.deepEqual(calls, [])
+  }
+})
+
+test('usage returns every blocker across pages and permits deletion once they are removed', async () => {
+  const { imageTemplateUsage, deleteImageTemplate } = await import('./image-templates.js')
+  let sandboxes = [
+    { metadata: { name: 'running', labels: { 'openshell.console/image-template-name': 'test' } } },
+    { metadata: { name: 'stopped' }, createdFromWorkloadTemplate: { name: 'test' } },
+  ]
+  const calls = []
+  const client = {
+    raw: { listSandboxes: async ({ pageToken }) => ({ sandboxes: sandboxes.slice(pageToken ? 1 : 0, pageToken ? 2 : 1), nextPageToken: pageToken ? '' : 'next' }) },
+    sandboxTemplates: { get: async () => ({}), delete: async () => calls.push('delete') },
+  }
+  assert.deepEqual((await imageTemplateUsage(client, 'test')).sandboxes, [{ name: 'running' }, { name: 'stopped' }])
+  await assert.rejects(deleteImageTemplate(client, 'test'), { code: 'TEMPLATE_IN_USE' })
+  sandboxes = []
+  assert.equal((await deleteImageTemplate(client, 'test')).ok, true)
+  assert.deepEqual(calls, ['delete'])
 })
 
 test('image builds select the inspected engine and native platform despite an inherited AMD default', async () => {

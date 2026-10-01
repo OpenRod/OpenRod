@@ -154,7 +154,7 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
                   const unsupported = inventory?.status === "unsupported"
                   const items = checked ? inventory.items : []
                   const key = `${agent.name}:${kind}`
-                  return <Group key={kind} title={title} aria-label={`${agent.name} ${title}`} count={checked ? items.length : "—"} icon={icon}
+                  return <Group key={kind} title={title} aria-label={`${agent.name} ${title}`} count={checked ? items.length : "-"} icon={icon}
                     summary={unsupported ? "Setup integration unavailable" : checked ? "In agent user configuration" : "Inventory unavailable"} open={!!expanded[key]} onToggle={() => toggle(key)}
                     className={cn("border-0 shadow-none", kind === "skills" && "border-t border-border/60")}>
                     <div data-resource-list className="max-h-48 touch-pan-y select-text space-y-0.5 overflow-y-auto overscroll-contain">

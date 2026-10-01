@@ -85,7 +85,7 @@ async function inspectTarget(name, id, targets) {
   const binaries = targets.map((t) => probe?.networkExecutables?.[COMMAND[t]] || 'unverified-script-caller')
   if (probe) for (const [command, found] of Object.entries(probe.executables)) if (!found) problems.push(`${command} is missing. Rebuild the image with this executable installed.`)
   if (setup.items.some(i => i.config?.url) && binaries.includes('unverified-script-caller')) problems.push('A selected harness has an unrecognized network launcher. Use a supported native or Node.js harness image.')
-  const member = { name, group: fleet.assignments?.[name] ?? null }
+  const member = { name, groups: fleet.assignments?.[name] ?? [] }
   const grants = []
   const network = setup.items.flatMap((item) => item.requirements.filter((r) => ['runtime', 'auth'].includes(r.phase)).map((requirement, index) => {
     const callers = requirement.phase === 'auth' ? [...new Set(binaries.filter(b => b !== 'unverified-script-caller'))] : item.config?.command ? [probe?.networkExecutables?.[item.config.command]].filter(Boolean) : [...new Set([...binaries.filter(b => b !== 'unverified-script-caller'), probe?.networkExecutables?.node].filter(Boolean))]

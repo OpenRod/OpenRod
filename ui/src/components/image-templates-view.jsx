@@ -61,7 +61,37 @@ export function TemplatesView() {
       return next
     })
   }
-  function askRemove(targets) { setDeleteErrors([]); setRemove(targets) }
+  async function checkUsage(targets) {
+    const failures = []
+    for (const t of targets) {
+      try {
+        const usage = await api.imageTemplateUsage(t.name)
+        if (usage.sandboxes.length) failures.push({ name: t.name, message: 'This template cannot be deleted while sandboxes use it.', sandboxes: usage.sandboxes })
+      } catch (e) { failures.push({ name: t.name, message: e.message }) }
+    }
+    setDeleteErrors(failures)
+  }
+  async function askRemove(targets) {
+    if (deleting.current) return
+    deleting.current = true
+    setBusy(true)
+    setDeleteErrors([])
+    setSelectedName(null)
+    setRemove(targets)
+    try { await checkUsage(targets) } finally { deleting.current = false; setBusy(false) }
+  }
+  async function deleteUsingSandbox(name) {
+    if (deleting.current) return
+    deleting.current = true
+    setBusy(true)
+    try {
+      await api.lifecycle(name, 'delete')
+      toast.success(`Deleted sandbox ${name}`)
+      await checkUsage(remove)
+      await load()
+    } catch (e) { toast.error(e.message) }
+    finally { deleting.current = false; setBusy(false) }
+  }
   async function deleteTemplates() {
     if (deleting.current || !remove?.length) return
     deleting.current = true
@@ -77,7 +107,7 @@ export function TemplatesView() {
           if (cleanup?.status === 'retained') retained.set(cleanup.image, cleanup.reason)
           else if (cleanup?.image) retained.delete(cleanup.image)
         }
-        catch (e) { failures.push({ name: t.name, message: e.message }) }
+        catch (e) { failures.push({ name: t.name, message: e.message, sandboxes: e.sandboxes }) }
       }
       for (const [image, reason] of retained) toast.warning(reason, { description: image, duration: 10000 })
       setChecked((current) => new Set([...current].filter((name) => !succeeded.has(name))))
@@ -122,7 +152,7 @@ export function TemplatesView() {
               <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedName(t.name)}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
               </td>
-              <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '—' : startsIn(t.recipe.command)}</td>
+              <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '-' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>
               <td className="px-4 py-2 text-right sm:pr-8"><div className="flex items-center justify-end gap-1">{!working(t) && (t.status === 'failed' || (t.status === 'ready' && t.managed)) && <Button variant="ghost" size="xs" aria-label={`Edit ${t.name}`} onClick={() => edit(t.recipe, t.status === 'ready' || Boolean(t.exists))}><Pencil />Edit</Button>}<Button variant="ghost" size="xs" onClick={() => launchable(t) ? setLaunch(t) : setSelectedName(t.name)}>{launchable(t) ? 'Use template' : working(t) ? 'View progress' : 'Details'}<ArrowRight /></Button><Button variant="ghost" size="icon-sm" aria-label={`Delete ${t.name}`} title={working(t) ? "Cancel the build before deleting this template" : `Delete ${t.name}`} disabled={busy || working(t)} onClick={() => askRemove([t])}><Trash2 /></Button></div></td>
@@ -156,10 +186,20 @@ export function TemplatesView() {
           </>}</div>
       </>}
     </DialogContent></Dialog>
-    <Dialog open={Boolean(remove)} onOpenChange={(open) => { if (!open && !deleting.current) setRemove(null) }}><DialogContent>
-      <DialogHeader><DialogTitle>Delete {remove?.length === 1 ? 'this template' : `${remove?.length ?? 0} templates`}?</DialogTitle><DialogDescription>The selected templates and their unused local Docker images will be deleted. Images still needed by other templates or sandboxes are kept. Existing sandboxes stay.</DialogDescription></DialogHeader>
+    <Dialog open={Boolean(remove)} onOpenChange={(open) => { if (!open && !deleting.current) setRemove(null) }}><DialogContent className="max-h-[85svh] overflow-y-auto">
+      <DialogHeader><DialogTitle>Delete {remove?.length === 1 ? 'this template' : `${remove?.length ?? 0} templates`}?</DialogTitle><DialogDescription>The selected templates and their unused local Docker images will be deleted. Templates used by existing sandboxes cannot be deleted. Images shared with other templates are kept.</DialogDescription></DialogHeader>
       <ul className="max-h-40 overflow-y-auto text-xs">{remove?.map((t) => <li key={t.name} className="break-all py-1 font-mono">{t.name}</li>)}</ul>
-      {deleteErrors.length > 0 && <div role="alert" className="rounded-md border border-destructive/30 p-3 text-xs"><p>Some templates could not be deleted. Retry the remaining templates.</p><ul className="mt-2 space-y-1">{deleteErrors.map((e) => <li key={e.name}><span className="font-mono">{e.name}</span>: {e.message}</li>)}</ul></div>}
+      {deleteErrors.length > 0 && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
+        <p>Cannot delete {remove?.length === 1 ? 'this template' : 'these templates'}.</p>
+        <ul className="mt-2 space-y-3">{deleteErrors.map((e) => <li key={e.name}>
+          <p><span className="font-mono">{e.name}</span>: {e.message}</p>
+          {e.sandboxes?.length > 0 && <><p className="mt-1 text-muted-foreground">Delete the sandboxes below, then retry. Deleting a sandbox permanently removes its files.</p>
+            <ul className="mt-2 space-y-2">{e.sandboxes.map((sandbox) => <li key={sandbox.name} className="flex items-center justify-between gap-3">
+              <span className="break-all font-mono">{sandbox.name}</span>
+              <Button variant="destructive" size="sm" disabled={busy} aria-label={`Delete sandbox ${sandbox.name}`} onClick={() => deleteUsingSandbox(sandbox.name)}><Trash2 />Delete sandbox</Button>
+            </li>)}</ul></>}
+        </li>)}</ul>
+      </div>}
       <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={() => setRemove(null)}>Cancel</Button><Button variant="destructive" disabled={busy} onClick={deleteTemplates}>{busy && <Spinner />}{busy ? 'Deleting…' : deleteErrors.length ? 'Retry deletion' : remove?.length === 1 ? 'Delete template' : 'Delete templates'}</Button></div>
     </DialogContent></Dialog>
     <CreateSandboxDialog open={Boolean(launch)} initialImageTemplate={launch} onOpenChange={(open) => { if (!open) setLaunch(null) }} onCreated={() => { setLaunch(null); toast.success('Sandbox created from image template') }} />

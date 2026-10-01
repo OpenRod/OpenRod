@@ -127,7 +127,7 @@ export async function buildPackage(plan, { signal, progress = async () => {} } =
   const pinned = await resolvePackage(plan, fetch, signal)
   const { client } = await gateway()
   const name = 'sp-' + randomUUID().slice(0, 12)
-  const base = await planSandbox({ name, template: 'locked-down' })
+  const base = await planSandbox({ name, systemBaseline: true })
   base.policy.networkPolicies = {}
   base.policy.networkPolicies.setup_registry = { name:'setup_registry', binaries:[{path:'/usr/local/bin/node'}],endpoints:[{host:'registry.npmjs.org',port:443,protocol:'rest',access:1,enforcement:1,allowEncodedSlash:true}] }
   let created = false, temporary

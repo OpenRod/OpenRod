@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
 function GroupChip({ pressed, onClick, children, count, muted }) {
   return (
     <button type="button" aria-pressed={pressed} onClick={onClick}
-      className={cn("flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+      className={cn("flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
         pressed ? "border-foreground/25 bg-accent text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
       {pressed ? <Check className="size-3" aria-hidden="true" /> : !muted && <Users className="size-3 opacity-60" aria-hidden="true" />}
       {children}
@@ -42,7 +42,7 @@ function NewGroup({ onCreated, existing }) {
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)}
-        className="flex items-center gap-1 rounded-md border border-dashed border-border px-2.5 py-1 text-[11px] text-muted-foreground outline-none transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        className="flex items-center gap-1 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground outline-none transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
         <Plus className="size-3" aria-hidden="true" />New group
       </button>
     )
@@ -62,20 +62,28 @@ function NewGroup({ onCreated, existing }) {
   )
 }
 
-// Pick one group (`multiple` false, with "No group") or several.
-export function GroupPicker({ groups, counts = {}, value, onChange, multiple = false, onCreated }) {
+// Required single selection uses native radios for keyboard navigation.
+export function GroupPicker({ groups, counts = {}, value, onChange, multiple = false, required = false, allowCreate = true, onCreated }) {
+  const radioName = React.useId()
   const selected = multiple ? value : value ? [value] : []
   const toggle = (id) => {
     if (multiple) onChange(selected.includes(id) ? selected.filter((g) => g !== id) : [...selected, id])
     else onChange(id)
   }
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {!multiple && <GroupChip pressed={!value} onClick={() => onChange(null)} muted>No group</GroupChip>}
+    <div role="group" aria-label={multiple ? "Choose groups" : "Choose a group"} className="flex flex-wrap items-center gap-1.5">
+      {!multiple && !required && <GroupChip pressed={!value} onClick={() => onChange(null)} muted>No group</GroupChip>}
       {groups.map((g) => (
-        <GroupChip key={g.id} pressed={selected.includes(g.id)} onClick={() => toggle(g.id)} count={counts[g.id]}>{g.name}</GroupChip>
+        required && !multiple ? <label key={g.id} className="relative min-w-0 cursor-pointer">
+          <input type="radio" name={radioName} value={g.id} checked={value === g.id} onChange={() => onChange(g.id)} required className="peer sr-only" />
+          <span className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground peer-checked:border-foreground/25 peer-checked:bg-accent peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+            {value === g.id ? <Check className="size-3 shrink-0" aria-hidden="true" /> : <Users className="size-3 shrink-0 opacity-60" aria-hidden="true" />}
+            <span className="break-words">{g.name}</span>
+            {counts[g.id] != null && <span aria-label={`${counts[g.id]} sandboxes`} className="font-mono text-[10px] text-faint">{counts[g.id]}</span>}
+          </span>
+        </label> : <GroupChip key={g.id} pressed={selected.includes(g.id)} onClick={() => toggle(g.id)} count={counts[g.id]}>{g.name}</GroupChip>
       ))}
-      <NewGroup existing={groups} onCreated={(group) => { onCreated?.(group); toggle(group.id) }} />
+      {allowCreate && <NewGroup existing={groups} onCreated={(group) => { onCreated?.(group); toggle(group.id) }} />}
     </div>
   )
 }

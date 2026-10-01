@@ -6,6 +6,15 @@ const endpoint = (host, access = 'read-write') => ({ host, ports: [443], protoco
 // only to the listed destinations. Never substitute an all-hosts allow rule.
 const node = ['/usr/local/bin/node', '/usr/bin/node']
 const google = ['generativelanguage.googleapis.com', 'cloudcode-pa.googleapis.com', 'oauth2.googleapis.com', 'accounts.google.com', 'www.googleapis.com', 'aiplatform.googleapis.com', '*.aiplatform.googleapis.com']
+const codeAssistHosts = new Set(['cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.sandbox.googleapis.com'])
+// These RPCs retrieve arbitrary websites through Google's backend, outside
+// sandbox destination enforcement. The installed CLI's search_web uses the
+// non-streaming generateContent RPC; normal chat uses streamGenerateContent.
+// This blocks those built-in tools, not grounding in arbitrary model bodies.
+const antigravityEndpoint = (host) => ({
+  ...endpoint(host),
+  ...(codeAssistHosts.has(host) ? { deny: ['fetchFromTrawlerCache', 'rewriteUri', 'generateContent'].map(rpc => ({ method: '*', path: `/**:${rpc}*` })) } : {}),
+})
 const modelProviders = ['api.anthropic.com', 'api.openai.com', 'openrouter.ai', 'api.groq.com', 'api.deepseek.com', 'api.mistral.ai', 'api.x.ai', 'generativelanguage.googleapis.com']
 const profile = (name, binaries, hosts) => ({ name, binaries, endpoints: [...new Set(hosts)].map(host => endpoint(host)) })
 // Sources: Gemini CLI code_assist/server.ts and oauth2.ts; NVIDIA provider
@@ -51,7 +60,14 @@ export const AGENT_ACCESS = {
       { host: 'agentn.global.api5.cursor.sh', ports: [443], protocol: 'tcp', tlsSkip: true },
     ],
   },
-  antigravity: profile('Antigravity', ['/sandbox/.local/bin/agy', '/sandbox/.antigravity/**', '/sandbox/.local/share/antigravity/**', '/usr/local/bin/agy', ...node], [...google, 'antigravity.google', 'daily-cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.sandbox.googleapis.com']),
+  antigravity: {
+    ...profile('Antigravity', ['/sandbox/.local/bin/agy', '/sandbox/.antigravity/**', '/sandbox/.local/share/antigravity/**', '/usr/local/bin/agy', ...node], []),
+    endpoints: [
+      ...[...google, 'antigravity.google', 'daily-cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.sandbox.googleapis.com'].map(antigravityEndpoint),
+      // Sign-in eligibility fetches the Google account's profile picture.
+      endpoint('lh3.googleusercontent.com', 'read-only'),
+    ],
+  },
   kiro: profile('Kiro', ['/sandbox/.local/bin/kiro-cli', '/sandbox/.local/bin/kiro-cli-chat', '/usr/local/bin/kiro-cli'], ['app.kiro.dev', 'prod.us-east-1.auth.desktop.kiro.dev', 'runtime.us-east-1.kiro.dev', 'runtime.eu-central-1.kiro.dev', 'management.us-east-1.kiro.dev', 'management.eu-central-1.kiro.dev', 'q.us-east-1.amazonaws.com', 'q.eu-central-1.amazonaws.com', 'oidc.us-east-1.amazonaws.com', 'oidc.eu-central-1.amazonaws.com', 'cognito-identity.us-east-1.amazonaws.com', 'view.awsapps.com']),
   droid: profile('Factory Droid', ['/sandbox/.local/bin/droid', '/sandbox/.factory/bin/**', '/usr/local/bin/droid'], ['factory.ai', '*.factory.ai', ...modelProviders]),
 

@@ -17,7 +17,7 @@ export async function checkRemote(item, signal) {
     const profile = (await client.raw.getProviderProfile({id:provider.type,workspaceScope:WORKSPACE})).profile
     if (!profile || profile.endpoints.length) throw fail('Reconnect a dedicated MCP credential; the profile changed.')
   }
-  const base = await planSandbox({name,template:'locked-down'})
+  const base = await planSandbox({name,systemBaseline:true})
   base.policy.networkPolicies = { setup_check: {name:'setup_check',binaries:[{path:'/usr/local/bin/node'}],endpoints:[{host:url.hostname,port:Number(url.port||443),path:url.pathname,protocol:'rest',enforcement:1,access:2,...(item.credentialRef?{credentialBinding:{provider:item.credentialRef.provider}}:{})}]} }
   let created = false
   try {
