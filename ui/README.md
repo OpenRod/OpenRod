@@ -7,6 +7,20 @@ npm install
 npm run dev        # http://127.0.0.1:4600
 ```
 
+## Local and OpenRod Cloud modes
+
+Local use stays account-free and bound to localhost. For a built local server:
+
+```bash
+npm ci
+npm run build
+npm start
+```
+
+Cloud mode uses Google Identity Platform sign-in and backend-enforced organization membership. Each organization runs a dedicated console/gateway VM. Missing cloud configuration stops startup. Use `npm start` behind the configured HTTPS proxy; the development server is not a cloud deployment server.
+
+See [the GCP deployment guide](../deploy/gcp/README.md) and [.env.example](.env.example). Run `npm test` for the console and authentication regression suite.
+
 ## Pages
 
 - **Sandboxes**: a compact virtualized inventory table with sticky sortable columns, status counts, image and group filters, and search across the entire loaded fleet. Rows show name, status, owner, image, group, uptime, and creation age. Only viewport rows plus overscan are mounted; filtering and sorting are memoized separately from live traffic updates. A single click opens a centered popup with the access graph and a compact summary shown first. Rules, Activity, and Details tabs separate the longer content; navigation and lifecycle actions remain visible while each panel scrolls independently. The development-only `?fleet=1000` and `?fleet=10000` previews exercise large inventories without creating real sandboxes. This is client-side windowing over the loaded inventory, not server-side pagination. Owner comes from the owner field or labels; uptime requires a reported start time, and missing data is shown as “Not reported” instead of using creation age. A ready sandbox has **Open in Cursor** and **Open in VS Code** buttons (only for editors installed on this machine). They run `openshell sandbox connect <name> --editor …`, so OpenShell adds its managed SSH config (one `Include` line in `~/.ssh/config`, Host blocks in `~/.config/openshell/ssh_config`) and the editor connects over Remote-SSH. **Open in browser** runs the sandbox's session (its agent, or a shell) in a new browser tab: xterm.js in the page, a WebSocket to the console, and the gateway's interactive exec behind it (the RPC `openshell sandbox exec --tty` uses). The tab's menu starts another session as a shell or any installed agent. Each tab is one session, and it ends when the tab closes.

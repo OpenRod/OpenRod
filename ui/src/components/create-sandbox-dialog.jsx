@@ -1,6 +1,7 @@
 import { PolicyDialog, newPolicy } from "@/components/egress-policies"
 import { groupNetworkPolicies } from "../../shared/group-network.js"
 import { motion, useReducedMotion } from "motion/react"
+import { useCloudMode } from "./auth-gate"
 import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
@@ -157,6 +158,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
   const [start, setStart] = React.useState("empty")
+  const cloud = useCloudMode()
   const [folder, setFolder] = React.useState("")
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
@@ -405,7 +407,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 <div className="grid min-w-0 gap-1.5">
                   <span className="text-xs font-medium">Start with</span>
                   <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-                    {FILE_STARTS.map((s) => (
+                    {FILE_STARTS.filter((s) => !cloud || s.id !== "folder").map((s) => (
                       <button key={s.id} type="button" onClick={() => setStart(s.id)} aria-pressed={start === s.id}
                         className={`flex-1 rounded px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${start === s.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                         {s.label}
