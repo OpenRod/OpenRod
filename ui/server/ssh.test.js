@@ -72,7 +72,7 @@ test('native SSH keeps config private, uses the context workspace, and cleans af
   const executable = path.join(root, 'ssh')
   await writeFile(executable, `#!${process.execPath}
 const fs = require('node:fs'), path = require('node:path')
-const args = process.argv.slice(2), config = args[1]
+const args = process.argv.slice(2), config = args[args.indexOf('-F') + 1]
 fs.writeFileSync(process.env.SSH_REPORT, JSON.stringify({
   args, config: fs.readFileSync(config, 'utf8'),
   directoryMode: fs.statSync(path.dirname(config)).mode & 0o777,
@@ -83,7 +83,7 @@ process.exit(23)
   const result = await sshRoute('POST', ['sandboxes', 'demo', 'ssh-open'], {}, {
     env: { ...tools, PATH: `${root}:/usr/bin:/bin` },
     platform: 'darwin',
-    loadContext: async () => ({ sandbox: ready(), target: remote, workspace: 'team' }),
+    loadContext: async () => ({ sandbox: ready({ labels: { 'openshell.console/persistent-terminal': '1' } }), target: { ...remote, name: 'console-ssh-' + 'a'.repeat(24) }, workspace: 'team' }),
     runOpenShell: async (args, options) => ({
       code: 0, stdout: `Host openshell-demo.${options.workspace}\n    User sandbox\n`,
     }),
@@ -94,12 +94,14 @@ process.exit(23)
   })
   assert.deepEqual(result, { ok: true, mode: 'ssh' })
   const observed = JSON.parse(await readFile(report, 'utf8'))
-  assert.equal(observed.args[0], '-F')
-  assert.equal(observed.args[2], 'openshell-demo.team')
+  assert.equal(observed.args[0], '-t')
+  assert.equal(observed.args[1], '-F')
+  assert.equal(observed.args[3], 'openshell-demo.team')
+  assert.match(observed.args[4], /tmux.*console-shell/)
   assert.equal(observed.directoryMode, 0o700)
   assert.equal(observed.configMode, 0o600)
   assert.match(observed.config, /Host openshell-demo.team/)
-  await assert.rejects(stat(path.dirname(observed.args[1])), { code: 'ENOENT' })
+  await assert.rejects(stat(path.dirname(observed.args[2])), { code: 'ENOENT' })
 })
 
 test('terminal launch failure removes the private config directory', async (t) => {

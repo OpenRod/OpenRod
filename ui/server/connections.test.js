@@ -121,7 +121,7 @@ if (command.includes('apt-get install -y --no-install-recommends docker.io')) {
   const ready = process.env.READY || fs.existsSync(process.env.INSTALLED)
   console.log('OPENSHELL_HOST_OS=Linux\\nOPENSHELL_HOST_ARCH=x86_64\\nOPENSHELL_HOST_KERNEL=6.8.0\\nOPENSHELL_SOCKET=/run/docker.sock')
   console.log('OPENSHELL_ENGINE=' + JSON.stringify({ ID: 'engine-one', OSType: 'linux', Architecture: 'x86_64', KernelVersion: '6.8.0', OperatingSystem: 'Ubuntu', SecurityOptions: ['name=seccomp'] }))
-  for (const [index, kind] of ['sandbox', 'supervisor'].entries()) {
+  for (const [index, kind] of ['sandbox', 'supervisor', 'gateway'].entries()) {
     console.log('OPENSHELL_IMAGE_' + index + '=' + JSON.stringify(ready ? { Os: 'linux', Architecture: 'amd64', RepoTags: ['ghcr.io/nvidia/openshell/' + kind + ':0.1.2'] } : null))
   }
 }

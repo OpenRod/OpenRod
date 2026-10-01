@@ -97,7 +97,7 @@ export async function prepareGatewayState(host, probe, socketPath, { rootDirecto
   }
   const configFile = path.join(root, 'gateway.toml')
   await privateWrite(configFile, stringify(config))
-  return { root, name, port: settings.port, tls, configFile, env: gatewayEnvironment(root) }
+  return { root, name, port: settings.port, tls, configFile, socketPath, env: gatewayEnvironment(root) }
 }
 
 export async function registerManagedGateway(state, host, { configDir = CONFIG_DIR } = {}) {

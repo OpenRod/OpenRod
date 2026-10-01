@@ -170,7 +170,7 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
 
       {job.status === "needs-install" && <div className="grid gap-2 border-t border-border pt-3">
         <Button type="button" variant="outline" size="sm" className="justify-self-start" disabled={locked} onClick={() => run("download", () => api.installConnectionRuntime(job.id))}>{busy === "download" ? "Starting download…" : "Download on host"}</Button>
-        <p className="text-muted-foreground">Or upload a <code className="font-mono">docker save</code> .tar for this host’s architecture.</p>
+        <p className="text-muted-foreground">Or upload a <code className="font-mono">docker save</code> .tar with the sandbox, supervisor and gateway images for this host’s architecture.</p>
         <div className="flex gap-2">
           <Input aria-label="Docker-save package (.tar)" type="file" accept=".tar,application/x-tar" className="h-8 flex-1 text-xs" disabled={locked} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(null) }} />
           <Button type="button" variant="outline" size="sm" disabled={locked || !file?.name.toLowerCase().endsWith(".tar")} onClick={() => run("upload", () => api.uploadConnectionPackage(job.id, file))}>{busy === "upload" ? "Uploading…" : "Upload"}</Button>

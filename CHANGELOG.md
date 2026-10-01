@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Persistent SSH work and local configuration reuse
+
+- Run the managed SSH gateway on the remote host in a pinned Docker container with persistent state and restart policy. Laptop sleep, console shutdown and viewer disconnect close only local tunnels.
+- Remote browser terminals, native SSH shells and copied Exec commands reattach to named tmux sessions. Console-built images include tmux, and new remote sandboxes receive explicit PTY device grants.
+- Remote sandbox creation automatically offers local network-policy templates, egress rules, MCPs & Skills, and Groups as versioned snapshots. Remapped identities preserve existing remote policy and membership; local sandbox grants and original-gateway secrets are excluded.
+- Prepared MCP archives retain digest verification and are rebuilt for incompatible remote architectures. Credentialed MCPs indicate destination credentials are required.
+- Imported access presets preserve their type through storage and can be selected in saved policy combinations. A new import generation replaces earlier copies in the creation picker while retaining existing sandbox snapshots.
+- Migrate legacy remote-work gateway SQLite/WAL state and driver files over SSH, retaining the original copy and refusing conflicting or missing remote state.
+- Verified 547 tests and the production build after rebasing onto current main. An isolated real EC2 sandbox continued successful HTTPS requests while its terminal, viewer and all test gateway tunnels were disconnected, then reattached to the same session. A second EC2 sandbox built and installed an imported local Skill with its Group and network policy; MCP credentials and a real model conversation were not exercised.
+
 ### Combined local and SSH inventories
 
 - Sandboxes and Templates now show local and managed SSH resources together, with location badges, an All locations filter, and location-qualified identity for same-named resources.

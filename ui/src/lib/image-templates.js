@@ -108,7 +108,7 @@ export function dockerfileFor(recipe) {
   const agents = selectedAgents(recipe)
   const hasNode = Boolean(recipe.setups?.length) || recipe.runtimes.includes('node') || agents.some((a) => a.npm)
   const hasPython = Boolean(recipe.setups?.length) || recipe.runtimes.includes('python') || agents.some((a) => a.python)
-  const packages = [...new Set(['ca-certificates', 'curl', 'iproute2', ...recipe.packages, ...agents.flatMap((a) => a.packages ?? []), ...(recipe.repository ? ['git'] : []), ...(hasPython ? ['python3', 'python3-venv'] : [])])]
+  const packages = [...new Set(['ca-certificates', 'curl', 'iproute2', 'tmux', ...recipe.packages, ...agents.flatMap((a) => a.packages ?? []), ...(recipe.repository ? ['git'] : []), ...(hasPython ? ['python3', 'python3-venv'] : [])])]
   const lines = [`FROM ${recipe.base}`, '', 'USER root', 'ENV DEBIAN_FRONTEND=noninteractive', `RUN apt-get update --error-on=any && apt-get install -y --no-install-recommends ${packages.map(quote).join(' ')} && rm -rf /var/lib/apt/lists/*`, 'RUN if getent passwd 1000 >/dev/null; then usermod --login sandbox --home /sandbox --move-home --shell /bin/bash "$(getent passwd 1000 | cut -d: -f1)"; else useradd --uid 1000 --create-home --home-dir /sandbox --shell /bin/bash sandbox; fi && chown -R 1000:1000 /sandbox']
   if (hasNode) lines.push('', 'COPY --from=node:22-bookworm-slim /usr/local/ /usr/local/')
   if (hasPython) lines.push('', 'RUN python3 -m venv /usr/local/venv', 'ENV PATH="/usr/local/venv/bin:${PATH}"')
