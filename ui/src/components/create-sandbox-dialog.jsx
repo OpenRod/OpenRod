@@ -2,10 +2,11 @@ import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
-import { Check, ChevronRight, Info, Terminal } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Info, Terminal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -21,6 +22,10 @@ import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQu
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { policiesFor } from "@/lib/groups"
 import { agentAccessFor } from "../../shared/agent-access.js"
+
+const PRIMARY_QUICK_AGENTS = ["claude", "codex", "cursor", "pi", "antigravity", "opencode"]
+  .map((id) => QUICK_AGENTS.find((agent) => agent.id === id)).filter(Boolean)
+const OTHER_QUICK_AGENTS = QUICK_AGENTS.filter((agent) => !PRIMARY_QUICK_AGENTS.includes(agent))
 
 const FILE_STARTS = [
   { id: "empty", label: "Empty" },
@@ -272,7 +277,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-xs font-medium">Agents</legend>
                 <div className="grid grid-cols-2 gap-2">
-                  {QUICK_AGENTS.map((agent) => (
+                  {PRIMARY_QUICK_AGENTS.map((agent) => (
                     <label key={agent.id} className="relative min-w-0">
                       <input type="checkbox" checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} disabled={busy} className="peer sr-only" />
                       <span className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:pointer-events-none peer-disabled:opacity-50">
@@ -283,6 +288,20 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                     </label>
                   ))}
                 </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button type="button" variant="outline" disabled={busy} className="mt-2 w-full justify-between text-xs" />}>
+                    <span className="truncate">{OTHER_QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id)).map((agent) => agent.name).join(", ") || "More agents"}</span>
+                    <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {OTHER_QUICK_AGENTS.map((agent) => (
+                      <DropdownMenuCheckboxItem key={agent.id} checked={agentIds.includes(agent.id)} onCheckedChange={() => toggleAgent(agent.id)} closeOnClick={false} disabled={busy} className="text-xs">
+                        <img src={agent.logo} alt="" className="size-4 shrink-0 object-contain" />
+                        {agent.name}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </fieldset>
               {selectedAgents.length > 0 && <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-xs font-medium">Open in</legend>
