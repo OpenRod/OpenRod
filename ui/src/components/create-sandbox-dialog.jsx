@@ -1,7 +1,7 @@
 import { PolicyDialog, newPolicy } from "@/components/egress-policies"
 import { groupNetworkPolicies } from "../../shared/group-network.js"
 import { motion, useReducedMotion } from "motion/react"
-import { useCloudMode } from "./auth-gate"
+import { useCompute } from "@/lib/compute"
 import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
@@ -26,6 +26,7 @@ import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQu
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { agentAccessFor } from "../../shared/agent-access.js"
 
+const locationKey = (location) => location?.id ?? location?.context
 const PRIMARY_QUICK_AGENTS = ["claude", "codex", "cursor", "pi", "antigravity", "opencode"]
   .map((id) => QUICK_AGENTS.find((agent) => agent.id === id)).filter(Boolean)
 const OTHER_QUICK_AGENTS = QUICK_AGENTS.filter((agent) => !PRIMARY_QUICK_AGENTS.includes(agent))
@@ -128,24 +129,25 @@ function nextName(taken, prefix = "sandbox") {
 
 export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, ...props }) {
   const inheritedLocation = useLocation()
+  const api = useApi()
   const [selectedContext, setSelectedContext] = React.useState(null)
   const templateLocation = props.initialImageTemplate?.location
   const available = locations ?? []
   const owner = templateLocation ?? requestedLocation
   const location = owner
-    ? available.find((item) => item.context === owner.context) ?? (inheritedLocation?.context === owner.context ? inheritedLocation : owner)
-    : available.find((item) => item.context === selectedContext) ?? inheritedLocation ?? available.find((item) => item.connected) ?? null
+    ? available.find((item) => locationKey(item) === locationKey(owner)) ?? (locationKey(inheritedLocation) === locationKey(owner) ? inheritedLocation : owner)
+    : available.find((item) => locationKey(item) === selectedContext) ?? inheritedLocation ?? available.find((item) => item.target === api.target && item.connected) ?? null
   React.useEffect(() => {
     if (!props.open) setSelectedContext(null)
   }, [props.open])
   const changeLocation = (context) => {
-    const next = available.find((item) => item.context === context && item.connected)
+    const next = available.find((item) => locationKey(item) === context && item.connected)
     if (!next) return
     setSelectedContext(context)
     onLocationChange?.(next)
   }
   return <LocationProvider location={location}>
-    <CreateSandboxForm key={location?.context ?? "default"} {...props} locations={available} onLocationChange={changeLocation} />
+    <CreateSandboxForm key={locationKey(location) ?? "default"} {...props} locations={available} onLocationChange={changeLocation} />
   </LocationProvider>
 }
 
@@ -187,7 +189,8 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
   const [start, setStart] = React.useState("empty")
-  const cloud = useCloudMode()
+  const compute = useCompute()
+  const cloud = Boolean(location?.cloud || (location?.target ?? compute?.target) === "cloud")
   const [folder, setFolder] = React.useState("")
   const [preview, setPreview] = React.useState(null)
   const [repository, setRepository] = React.useState("")
@@ -297,6 +300,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
       if (controller.signal.aborted) return
       setPreparing(false); reportProgress("Creating sandbox…")
       const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, groups: group, ...files })
+      if (api.signal?.aborted || controller.signal.aborted) return
       toast.success(`Creating ${created.name}`)
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
@@ -319,9 +323,9 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
           </DialogHeader>
           {locations.length > 0 && !initialImageTemplate ? <div className="grid shrink-0 gap-1.5">
             <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
-            <Select value={location?.context ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: item.context, label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
+            <Select value={locationKey(location) ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: locationKey(item), label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
               <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
-              <SelectContent>{locations.map((item) => <SelectItem key={item.context} value={item.context} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
+              <SelectContent>{locations.map((item) => <SelectItem key={locationKey(item)} value={locationKey(item)} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
             </Select>
           </div> : <LocationBadge location={location} />}
           {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to create a sandbox.</p>}

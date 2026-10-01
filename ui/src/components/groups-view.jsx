@@ -17,7 +17,7 @@ import { GroupPicker } from "@/components/group-picker"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { POLICY_HANDOFF } from "@/components/egress-view"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/location-context"
 import { useLive } from "@/lib/live"
 import { groupId, groupPolicies, policiesFor, groupFor } from "@/lib/groups"
 import { styleOf } from "@/lib/sandboxes"
@@ -103,6 +103,7 @@ function FirstRun({ onCreate, onPolicy }) {
 // ---- create -----------------------------------------------------------------
 
 function NewGroupDialog({ open, onOpenChange, groups, sandboxes, assignments, onCreated }) {
+  const api = useApi()
   const [name, setName] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [picked, setPicked] = React.useState([])
@@ -182,6 +183,7 @@ function NewGroupDialog({ open, onOpenChange, groups, sandboxes, assignments, on
 // ---- one group --------------------------------------------------------------
 
 function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
+  const api = useApi()
   const [name, setName] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [busy, setBusy] = React.useState(false)
@@ -313,6 +315,7 @@ function GroupCard({ group, members, policies, onOpen, delay }) {
 }
 
 export function GroupsView({ onNavigate }) {
+  const api = useApi()
   const live = useLive()
   const [org, setOrg] = React.useState(null)
   const [creating, setCreating] = React.useState(false)

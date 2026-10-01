@@ -70,7 +70,7 @@ function SetupItemTabs({ items, children }) {
 
 export function SetupsView(props) {
   const location = useLocation()
-  return <ScopedSetupsView key={location?.context ?? 'default'} {...props} />
+  return <ScopedSetupsView key={location?.id ?? location?.context ?? 'default'} {...props} />
 }
 
 function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
@@ -425,7 +425,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   const [error, setError] = React.useState('')
   React.useEffect(() => {
     let current = true
-    api.overview().then((r) => { if (current) { setSandboxes(r.sandboxes); setContext(r.gateway) } }).catch((e) => { if (current) setError(e.message) })
+    api.overview().then((r) => { if (current) { setSandboxes(r.sandboxes); setContext({ ...r.gateway, target: location?.target }) } }).catch((e) => { if (current) setError(e.message) })
     return () => { current = false }
   }, [api])
   React.useEffect(() => {
@@ -491,7 +491,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
 
 export function SetupPicker(props) {
   const location = useLocation()
-  return <ScopedSetupPicker key={location?.context ?? 'default'} {...props} />
+  return <ScopedSetupPicker key={location?.id ?? location?.context ?? 'default'} {...props} />
 }
 
 function ScopedSetupPicker({ value = [], onChange, inherited = [], accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox' }) {

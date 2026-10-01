@@ -1,76 +1,71 @@
 // Browser side of the console API. Every call is same-origin; the server
 // holds the gateway certificate, so nothing here carries a credential.
 
-let binding
-let loadingBinding
+import { computeApiPath, currentComputeTarget, currentCloudOwner } from './compute-target.js'
 
-async function loadContext() {
-  const response = await fetch("/api/os/context")
-  const context = await response.json()
-  if (!response.ok) throw new Error(context.error ?? "Could not read gateway registrations.")
-  if (!binding) {
-    binding = JSON.stringify([context.gateway, context.workspace])
+export function createApi(target, signal, locationContext = null, boundOwner = currentCloudOwner()) {
+  const selected = () => target ?? currentComputeTarget()
+  const owner = boundOwner
+  let binding, loadingBinding
+  const path = suffix => computeApiPath(selected(), suffix)
+  const requestSignal = extra => signal && extra ? AbortSignal.any([signal, extra]) : signal ?? extra
+  async function loadContext() {
+    signal?.throwIfAborted()
+    const response = await fetch(path('/context'), { signal, headers: selected() === 'cloud' && owner ? { 'x-openrod-local-owner': owner } : undefined })
+    const context = await response.json()
+    signal?.throwIfAborted()
+    if (response.status === 401 || context.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
+    if (!response.ok) throw new Error(context.error ?? 'Could not read gateway registrations.')
+    binding ??= JSON.stringify([context.gateway, context.workspace])
+    return context
   }
-  return context
-}
-
-async function boundContext() {
-  if (!binding) {
-    loadingBinding ??= loadContext().finally(() => { loadingBinding = null })
-    await loadingBinding
+  async function contextKey() {
+    signal?.throwIfAborted()
+    if (locationContext != null) return locationContext
+    if (!binding) {
+      loadingBinding ??= loadContext().finally(() => { loadingBinding = null })
+      await loadingBinding
+    }
+    return binding
   }
-  return binding
-}
-
-function createApi(locationContext = null) {
-const contextKey = () => locationContext == null ? boundContext() : Promise.resolve(locationContext)
-
-async function request(path, { method = "GET", body, signal, scoped = true } = {}) {
-  const context = scoped ? await contextKey() : null
-  const response = await fetch(`/api/os${path}`, {
-    method,
-    signal,
-    headers: {
-      ...(context ? { "x-openshell-context": context } : {}),
-      ...(context && locationContext ? { "x-openshell-location": "1" } : {}),
-      ...(method === "GET" ? {} : { "content-type": "application/json", "x-openshell-console": "1" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const payload = await response.json().catch(() => ({}))
-  if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
-  if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes })
-  return payload
-}
-
-return {
-  forContext: createApi,
-  inventory: (signal) => request("/inventory", { signal, scoped: false }),
-  context: loadContext,
-  contextKey,
-  connections: (signal) => request("/connections", { signal, scoped: false }),
-  connectionJob: (id, signal) => request(`/connections/jobs/${encodeURIComponent(id)}`, { signal, scoped: false }),
-  connect: (body) => request("/connections/connect", { method: "POST", body }),
-  installConnectionDocker: (id) => request(`/connections/jobs/${encodeURIComponent(id)}/docker`, { method: "POST", body: { approve: true } }),
-  installConnectionRuntime: (id) => request(`/connections/jobs/${encodeURIComponent(id)}/install`, { method: "POST", body: { method: "download" } }),
-  uploadConnectionPackage: async (id, file) => {
-    const context = await contextKey()
-    const response = await fetch(`/api/os/connections/jobs/${encodeURIComponent(id)}/package`, {
-      method: "POST",
+  async function request(suffix, { method = 'GET', body, signal: extraSignal, scoped = true, raw = false } = {}) {
+    const currentSignal = requestSignal(extraSignal)
+    currentSignal?.throwIfAborted()
+    const context = scoped ? await contextKey() : null
+    currentSignal?.throwIfAborted()
+    const response = await fetch(path(suffix), {
+      method, signal: currentSignal,
       headers: {
-        "content-type": "application/octet-stream",
-        "x-openshell-console": "1",
-        "x-openshell-context": context,
-        ...(locationContext ? { "x-openshell-location": "1" } : {}),
+        ...(selected() === 'cloud' && owner ? { 'x-openrod-local-owner': owner } : {}),
+        ...(context ? { 'x-openshell-context': context } : {}),
+        ...(context && locationContext ? { 'x-openshell-location': '1' } : {}),
+        ...(method === 'GET' ? {} : { 'content-type': raw ? 'application/octet-stream' : 'application/json', 'x-openshell-console': '1' }),
       },
-      body: file,
+      body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
     })
     const payload = await response.json().catch(() => ({}))
-    if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
-    if (!response.ok) throw new Error(payload.error ?? `Package upload failed (${response.status})`)
+    currentSignal?.throwIfAborted()
+    if (response.status === 401 || payload.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
+    if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes })
     return payload
-  },
-  disconnectRemote: () => request("/connections/disconnect", { method: "POST", body: {} }),
+  }
+  return {
+    target, signal, path, owner,
+    url: (suffix, params = {}) => {
+      const query = new URLSearchParams({ ...params, ...(selected() === 'cloud' && owner ? { owner } : {}) })
+      return path(suffix) + (query.size ? '?' + query : '')
+    },
+    forContext: context => createApi(target, signal, context, owner),
+    inventory: extraSignal => request('/inventory', { signal: extraSignal, scoped: false }),
+    context: loadContext,
+    contextKey,
+    connections: extraSignal => request('/connections', { signal: extraSignal, scoped: false }),
+    connectionJob: (id, extraSignal) => request(`/connections/jobs/${encodeURIComponent(id)}`, { signal: extraSignal, scoped: false }),
+    connect: body => request('/connections/connect', { method: 'POST', body }),
+    installConnectionDocker: id => request(`/connections/jobs/${encodeURIComponent(id)}/docker`, { method: 'POST', body: { approve: true } }),
+    installConnectionRuntime: id => request(`/connections/jobs/${encodeURIComponent(id)}/install`, { method: 'POST', body: { method: 'download' } }),
+    uploadConnectionPackage: (id, file) => request(`/connections/jobs/${encodeURIComponent(id)}/package`, { method: 'POST', body: file, raw: true }),
+    disconnectRemote: () => request('/connections/disconnect', { method: 'POST', body: {} }),
   setups: () => request('/setups'),
   discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
   reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),
@@ -152,16 +147,7 @@ return {
   retrySeed: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/seed/retry`, { method: "POST", body: {} }),
   prepareDownload: (sandbox, path) => request(`/files/${encodeURIComponent(sandbox)}/download`, { method: "POST", body: { path } }),
   startUpload: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/uploads`, { method: "POST", body: {} }),
-  uploadFile: async (sandbox, id, path, file, signal) => {
-    const context = await contextKey()
-    const response = await fetch(`/api/os/files/${encodeURIComponent(sandbox)}/uploads/${id}?path=${encodeURIComponent(path)}`, {
-      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1", "x-openshell-context": context, ...(locationContext ? { "x-openshell-location": "1" } : {}) }, body: file, signal,
-    })
-    const payload = await response.json().catch(() => ({}))
-    if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))
-  if (!response.ok) throw new Error(payload.error ?? `Upload failed (${response.status})`)
-    return payload
-  },
+  uploadFile: (sandbox, id, filePath, file, uploadSignal) => request(`/files/${encodeURIComponent(sandbox)}/uploads/${id}?path=${encodeURIComponent(filePath)}`, { method: 'POST', body: file, raw: true, signal: uploadSignal }),
   commitUpload: (sandbox, id, dir) => request(`/files/${encodeURIComponent(sandbox)}/uploads/${id}/commit`, { method: "POST", body: { dir } }),
   cancelUpload: (sandbox, id) => request(`/files/${encodeURIComponent(sandbox)}/uploads/${id}/cancel`, { method: "POST", body: {} }),
 

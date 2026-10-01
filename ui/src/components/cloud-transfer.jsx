@@ -3,67 +3,68 @@ import { Cloud, Laptop } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { createApi } from '@/lib/api'
+import { useCompute } from '@/lib/compute'
 import { useApi, useLocation } from '@/lib/location-context'
-import { CLOUD_ORIGIN, LOCAL_ORIGIN, cloudHandoffUrl, localHandoffUrl, isCloudReadyMessage, isLocalHandoffMessage } from '@/lib/cloud-transfer'
+import { useInventory } from '@/lib/inventory'
+import { copyLocalSandbox, copyCloudSandboxToLocal, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
+import { useTransferGroups } from '@/components/transfer-groups'
+import { LOCAL_ORIGIN, localHandoffUrl, isLocalHandoffMessage } from '@/lib/cloud-transfer'
 
 export function ContinueInCloud({ name, sandbox }) {
   const api = useApi()
+  const compute = useCompute()
   const location = useLocation()
+  const { refresh } = useInventory()
+  const { chooseGroups, dialog } = useTransferGroups()
+  const transfer = React.useRef(null)
+  React.useEffect(() => () => transfer.current?.abort(), [])
   const [stage, setStage] = React.useState(null)
-  const handoff = React.useRef(null)
-  React.useEffect(() => {
-    let active = true
-    const receive = async (event) => {
-      const current = handoff.current
-      if (!current || current.accepted || !isCloudReadyMessage(event, current.popup, current.nonce)) return
-      current.accepted = true
+  async function copy() {
+    if (stage || location?.connected === false) return
+    const controller = new AbortController()
+    transfer.current = controller
+    const signal = api.signal ? AbortSignal.any([api.signal, controller.signal]) : controller.signal
+    setStage('signin')
+    try {
+      await compute.connect()
+      setStage('prepare')
+      signal.throwIfAborted()
+      await waitForCloudReady(() => localCloudRequest('machine', undefined, { signal }), { signal })
+      const destination = createApi('cloud', signal)
+      setStage('groups')
+      const groups = await chooseGroups(destination, 'cloud', signal)
       setStage('transfer')
-      try {
-        const result = await api.cloudTransfer(current.name, event.data.ticket)
-        current.popup.postMessage({ type: 'openrod-cloud-result', nonce: current.nonce, name: result.name, warning: result.warning }, CLOUD_ORIGIN)
-        if (active) toast.success('Workspace ready in cloud', { description: result.warning || 'Reconnect your agent credentials in cloud to continue.' })
-      } catch (error) {
-        current.popup.postMessage({ type: 'openrod-cloud-result', nonce: current.nonce, error: error.message }, CLOUD_ORIGIN)
-        if (active) toast.error('Couldn’t continue in cloud', { description: error.message })
-      } finally {
-        if (handoff.current === current) handoff.current = null
-        if (active) setStage(null)
-      }
-    }
-    window.addEventListener('message', receive)
-    const timer = setInterval(() => {
-      const current = handoff.current
-      if (current && !current.accepted && (current.popup.closed || Date.now() > current.expires)) {
-        handoff.current = null
-        setStage(null)
-        if (!current.popup.closed) toast.error('Cloud sign-in timed out. Try again.')
-      }
-    }, 1000)
-    return () => { active = false; window.removeEventListener('message', receive); clearInterval(timer); handoff.current = null }
-  }, [name, api])
-
+      const result = await copyLocalSandbox(createApi(api.target, signal, location?.context), destination, name, groups)
+      signal.throwIfAborted()
+      toast.success('Workspace ready in cloud', { description: result.warning || 'Reconnect your agent credentials to continue.' })
+      const context = await destination.contextKey()
+      try { sessionStorage.setItem('gateway-box', JSON.stringify({ name: result.name, context, target: 'cloud' })) } catch {}
+      refresh()
+      compute.selectTarget('cloud')
+      window.dispatchEvent(new CustomEvent('openrod-sandbox-handoff', { detail: { name: result.name, context, target: 'cloud' } }))
+    } catch (error) { if (error.name !== 'AbortError') toast.error('Couldn’t continue in cloud', { description: error.message }) }
+    finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
+  }
   if (sandbox?.phase !== 'ready') return null
-  return (
-    <div className="space-y-1.5">
-      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
-        const nonce = crypto.randomUUID()
-        // The opener is required for the origin-checked one-use ticket exchange.
-        const popup = window.open(cloudHandoffUrl(window.location.origin, nonce), '_blank')
-        if (!popup) { toast.error('Allow popups to continue in cloud.'); return }
-        handoff.current = { popup, nonce, name, accepted: false, expires: Date.now() + 15 * 60_000 }
-        setStage('signin')
-      }}>
-        {stage ? <Spinner className="size-3.5" /> : <Cloud className="size-3.5" aria-hidden="true" />}
-        {stage === 'signin' ? 'Sign in to cloud…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue in cloud'}
-      </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">Copies workspace files and rebuilds saved templates. Secrets stay local; reconnect agents in cloud.</p>
-    </div>
-  )
+  return <div className="space-y-1.5">
+    {dialog}
+    <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={copy}>
+      {stage ? <Spinner className="size-3.5" /> : <Cloud className="size-3.5" aria-hidden="true" />}
+      {stage === 'signin' ? 'Sign in to cloud…' : stage === 'prepare' ? 'Preparing cloud machine…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue in cloud'}
+    </Button>
+    <p className="text-[11px] leading-relaxed text-muted-foreground">Copies workspace files and rebuilds saved templates. Your local source stays available. Credential files are excluded; reconnect agents in cloud.</p>
+  </div>
 }
 
 export function ContinueLocally({ name, sandbox }) {
   const api = useApi()
+  const compute = useCompute()
   const location = useLocation()
+  const { locations, refresh } = useInventory()
+  const { chooseGroups, dialog } = useTransferGroups()
+  const transfer = React.useRef(null)
+  React.useEffect(() => () => transfer.current?.abort(), [])
   const [stage, setStage] = React.useState(null)
   const handoff = React.useRef(null)
   React.useEffect(() => {
@@ -107,9 +108,35 @@ export function ContinueLocally({ name, sandbox }) {
   }, [name, api])
 
   if (sandbox?.phase !== 'ready') return null
+  async function importLocally() {
+    if (stage || location?.connected === false) return
+    const destinationLocation = locations.find(item => item.target !== 'cloud' && !item.remote && item.connected)
+    if (!destinationLocation) { toast.error('Connect a local gateway before importing this workspace.'); return }
+    const controller = new AbortController()
+    transfer.current = controller
+    const signal = api.signal ? AbortSignal.any([api.signal, controller.signal]) : controller.signal
+    setStage('transfer')
+    try {
+      const destination = createApi('local', signal, destinationLocation.context)
+      setStage('groups')
+      const groups = await chooseGroups(destination, 'local OpenRod', signal)
+      setStage('transfer')
+      const result = await copyCloudSandboxToLocal(createApi(api.target, signal, location?.context), destination, name, groups)
+      signal.throwIfAborted()
+      toast.success('Workspace running locally', { description: result.warning || 'Your cloud source is unchanged. Reconnect agent credentials locally.' })
+      try { sessionStorage.setItem('gateway-box', JSON.stringify({ name: result.name, context: destinationLocation.context, target: 'local' })) } catch {}
+      refresh()
+      compute.selectTarget('local')
+      window.dispatchEvent(new CustomEvent('openrod-sandbox-handoff', { detail: { name: result.name, context: destinationLocation.context, target: 'local' } }))
+    } catch(error) {
+      if(error.name !== 'AbortError') toast.error('Couldn’t import locally', {description:error.message})
+    } finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
+  }
   return (
     <div className="space-y-1.5">
+      {dialog}
       <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
+        if (compute?.localViewer) { importLocally(); return }
         const nonce = crypto.randomUUID()
         const popup = window.open(localHandoffUrl(nonce), '_blank')
         if (!popup) { toast.error('Allow popups to continue locally.'); return }
@@ -117,9 +144,9 @@ export function ContinueLocally({ name, sandbox }) {
         setStage('connect')
       }}>
         {stage ? <Spinner className="size-3.5" /> : <Laptop className="size-3.5" aria-hidden="true" />}
-        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue locally'}
+        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Import and run locally'}
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">Open OpenRod on this computer first. Copies files and rebuilds saved templates; reconnect agents locally.</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{compute?.localViewer ? 'Creates a separate local sandbox, copies files and rebuilds the image for this computer. Your cloud source stays available.' : 'Open OpenRod on this computer first. Creates a local sandbox, copies files and rebuilds saved templates.'} Reconnect agents locally.</p>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { verifyWorkerRequest } from './worker-auth.js'
 import { isIP } from 'node:net'
+import {createHash} from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 export function requestPath(req) {
   if (typeof req.url !== 'string' || !req.url.startsWith('/') || req.url.startsWith('//') || req.url.includes('\\')) throw fail('Invalid request target', 400)
@@ -127,10 +128,10 @@ export function createSecurity(config, auth, revocations = { has: () => false, a
     const expiry = setTimeout(() => target.destroy(), Math.max(1, identity.expires-Date.now()))
     expiry.unref?.()
     const check = config.mode === 'worker' ? null : setInterval(() => { authenticate(req).catch(() => target.destroy()) }, 60000)
-    check.unref?.()
+    check?.unref?.()
     target.once('close', () => { clearTimeout(expiry); clearInterval(check) })
   }
-  return { config, authenticate, isAllowed, originFor, middleware, watch }
+  return { config, authenticate, isAllowed, originFor, middleware, watch, sessionHash: req => createHash('sha256').update(cookieOf(req) ?? '').digest('hex'), isSessionRevoked: hash => revocations.hasDigest?.(hash) ?? false }
 }
 export function assertCloudOperation(parts, input = {}) {
   if (!identityContext.getStore()) return

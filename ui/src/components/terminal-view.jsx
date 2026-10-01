@@ -43,7 +43,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
     Promise.all([api.sandbox(name), api.contextKey()]).then(([record, key]) => {
       if (!current) return
       const [gateway, workspace] = JSON.parse(key)
-      setSandbox(record); setContext({ gateway, workspace })
+      setSandbox(record); setContext({ gateway, workspace, target: location?.target })
     }).catch((error) => { if (current) setLoadError(error.message) })
     return () => { current = false }
   }, [name, api])
@@ -83,7 +83,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
         const { ticket } = await api.terminalSession(name, { session, setupLogin, mcp, cols: term.cols, rows: term.rows })
         if (closed) return
         const scheme = window.location.protocol === "https:" ? "wss" : "ws"
-        socket = new WebSocket(`${scheme}://${window.location.host}/api/os/terminal?ticket=${encodeURIComponent(ticket)}`)
+        socket = new WebSocket(`${scheme}://${window.location.host}${api.url("/terminal", { ticket })}`)
         socket.binaryType = "arraybuffer"
         // A socket from a finished attempt must not touch the next one's state.
         socket.onmessage = (event) => {

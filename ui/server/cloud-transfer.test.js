@@ -2,14 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Readable } from 'node:stream'
 import fs from 'node:fs/promises'
-import { transferPathAllowed, validateTransfer, localTransfer, importTransfer, CLOUD_TRANSFER_LIMIT } from './cloud-transfer.js'
+import { transferPathAllowed, validateTransfer, localTransfer, importTransfer as runImportTransfer, CLOUD_TRANSFER_LIMIT } from './cloud-transfer.js'
+
+const importTransfer = (req, options) => runImportTransfer(req, { resolveGroups: async () => ['destination'], ...options })
 
 const launch = { name: 'my-work', image: 'ubuntu:24.04', session: 'shell' }
 const bundle = (files = [{ path: 'src/main.js', data: Buffer.from('hello').toString('base64'), executable: false }]) => ({ version: 1, launch, files })
 const request = (value) => Readable.from([JSON.stringify(value)])
 
 test('workspace transfer excludes secrets, dependency trees, caches and invalid paths', () => {
-  for (const value of ['.env', '.env.local', 'app/.env.production', '.git/config', 'node_modules/x.js', '.ssh/id_rsa', 'keys/private.pem', 'credentials.json', '.npmrc', '.claude.json', '.git-credentials', '.bash_history', '.pytest_cache/results', '.aws/config', '__pycache__/x', '../escape', '/absolute', 'a/../b', 'a\\b', 'a\0b']) assert.equal(transferPathAllowed(value), false, value)
+  for (const value of ['.env', '.env.local', 'app/.env.production', '.git/config', '.openshell/bundles/setup.json', '.openshell/installed-setups/local.json', 'node_modules/x.js', '.ssh/id_rsa', 'keys/private.pem', 'credentials.json', '.npmrc', '.claude.json', '.git-credentials', '.bash_history', '.pytest_cache/results', '.aws/config', '__pycache__/x', '../escape', '/absolute', 'a/../b', 'a\\b', 'a\0b']) assert.equal(transferPathAllowed(value), false, value)
   for (const value of ['.env.example', 'src/.env.sample', '.env.template', 'app/main.js', 'README.md']) assert.equal(transferPathAllowed(value), true, value)
 })
 
@@ -36,10 +38,11 @@ function localClient() {
 
 test('local export sends sanitized data only to the fixed cloud endpoint with one-use ticket', async () => {
   let sent
-  const result = await localTransfer({ name: 'my-work', ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { connect: async () => ({ client: localClient() }), fetch: async (url, options) => { sent = { url, ...options }; return Response.json({ name: 'my-work' }) } })
+  const result = await localTransfer({ name: 'my-work', destinationGroups: ['destination'], ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { connect: async () => ({ client: localClient() }), fetch: async (url, options) => { sent = { url, ...options }; return Response.json({ name: 'my-work' }) } })
   assert.equal(sent.url, 'https://cloud.example.com/api/cloud/import')
   assert.equal(sent.headers.authorization, 'Bearer ' + ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)))
   assert.deepEqual(JSON.parse(sent.body).files.map((f) => f.path), ['src/main.js'])
+  assert.deepEqual(JSON.parse(sent.body).destinationGroups, ['destination'])
   assert.equal(result.name, 'my-work')
 })
 
@@ -53,7 +56,7 @@ test('invalid transfer and cloud rejection do not create or upload a sandbox', a
 test('import stages regular files with safe permissions and uploads to a new sandbox', async () => {
   let uploaded = false, staged
   const result = await importTransfer(request(bundle()), {
-    createSandbox: async (spec) => { assert.deepEqual(spec, { ...launch, name: spec.name }); return { name: 'my-work' } },
+    createSandbox: async (spec) => { assert.deepEqual(spec, { ...launch, name: spec.name, groups: ['destination'] }); return { name: 'my-work' } },
     waitReady: async () => {},
     upload: async (name, root) => { staged = root; assert.equal(name, 'my-work'); assert.equal(await fs.readFile(root + '/src/main.js', 'utf8'), 'hello'); assert.equal((await fs.stat(root + '/src/main.js')).mode & 0o777, 0o644); uploaded = true },
   })
@@ -84,12 +87,16 @@ test('local built template sends a rebuild recipe and drops stored environment',
   record.sandbox.createdFromWorkloadTemplate = { name: 'local-template' }
   record.sandbox.spec.template.image = 'openshell-template/local-template:arm64'
   client.raw.getSandbox = async () => record
-  client.sandboxTemplates = { get: async () => ({ metadata: { name: 'local-template', annotations: { [RECIPE_ANNOTATION]: JSON.stringify(newRecipe({ name: 'local-template', command: 'claude' })) } }, spec: { workload: { image: 'openshell-template/local-template:arm64', environment: { REGION: 'local' } } } }) }
+  client.sandboxTemplates = { get: async () => ({ metadata: { name: 'local-template', annotations: { [RECIPE_ANNOTATION]: JSON.stringify(newRecipe({ name: 'local-template', command: 'claude', setups: ['b'.repeat(24)], setupRevisions: {['b'.repeat(24)]: 'a'.repeat(64)} })) } }, spec: { workload: { image: 'openshell-template/local-template:arm64', environment: { REGION: 'local' } } } }) }
   let payload
-  await localTransfer({ name: 'my-work', ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { connect: async () => ({ client }), fetch: async (url, options) => { payload = JSON.parse(options.body); return Response.json({ name: 'my-work' }) } })
+  const result = await localTransfer({ name: 'my-work', ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { connect: async () => ({ client }), fetch: async (url, options) => { payload = JSON.parse(options.body); return Response.json({ name: 'my-work' }) } })
   assert.equal(payload.recipe.source, 'build')
   assert.equal(payload.recipe.command, 'claude')
   assert.deepEqual(payload.recipe.environment, [])
+  assert.deepEqual(payload.recipe.setups, [])
+  assert.deepEqual(payload.recipe.setupRevisions, {})
+  assert.match(result.warning, /Reconnect saved MCP/)
+  assert.equal(payload.launch.session, 'shell')
   assert.equal(payload.launch.image, 'ubuntu:24.04')
 })
 
@@ -122,6 +129,10 @@ test('real workspace export shell excludes symlinks and credentials and preserve
   const { execFileSync } = await import('node:child_process')
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'openrod-export-test-')))
   try {
+    await fs.mkdir(root + '/.openshell/bundles', {recursive:true})
+    await fs.writeFile(root + '/.openshell/bundles/local-arm64.tar.gz', 'architecture-specific runtime state')
+    await fs.mkdir(root + '/.openshell/installed-setups')
+    await fs.writeFile(root + '/.openshell/installed-setups/local.json', 'stale local setup reference')
     await fs.mkdir(root + '/node_modules')
     await fs.writeFile(root + '/node_modules/ignored.js', 'not exported')
     await fs.writeFile(root + '/.env', 'token=not exported')
