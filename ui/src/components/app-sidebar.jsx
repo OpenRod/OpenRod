@@ -1,4 +1,5 @@
-import { Activity, Box, Building2, Layers3, KeyRound, Network, ShieldCheck, Users } from "lucide-react"
+import { ThemeSwitcher } from "@/components/theme-switcher"
+import { Activity, Package, Box, Building2, DoorOpen, Layers3, Inbox, KeyRound, Network, ShieldCheck, Users } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -19,6 +20,7 @@ import { useLive } from "@/lib/live"
 const NAV = [
   { label: "Sandboxes", icon: Box, view: "sandboxes" },
   { label: "Templates", icon: Layers3, view: "templates" },
+  { label: "MCPs & Skills", icon: Package, view: "setups" },
   { label: "Activity", icon: Activity, view: "activity" },
 ]
 
@@ -46,14 +48,14 @@ export function AppSidebar({ view, onNavigate }) {
 
   return (
     <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
-      <SidebarHeader className="p-6">
+      <SidebarHeader className="h-14 shrink-0 justify-center px-6 py-0">
         <div className="flex items-center gap-2">
-          <img src="/openrod.svg" alt="" aria-hidden="true" className="h-7 w-auto shrink-0" />
-          <span className="sidebar-wordmark text-lg font-normal tracking-tight">OpenShell</span>
+          <img src="/openegg.png" alt="" aria-hidden="true" className="size-9 shrink-0 object-contain" />
+          <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">OpenEgg Shell</span>
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="px-3">
+      <SidebarContent className="px-3 pt-4">
         <SidebarGroup className="p-0">
           <SidebarGroupContent>
             <SidebarMenu>
@@ -95,6 +97,7 @@ export function AppSidebar({ view, onNavigate }) {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
+        <ThemeSwitcher />
         {/* The gateway is status, not a destination: its facts live here. */}
         <Popover>
           <PopoverTrigger className="flex w-full items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
@@ -116,18 +119,9 @@ export function AppSidebar({ view, onNavigate }) {
               {gateway ? (gateway.status === "healthy" ? "Healthy" : gateway.status) : overview?.error ? "Unreachable" : "Reading…"}
             </p>
             {gateway ? (
-              <dl className="grid gap-2.5">
-                {[
-                  ["Endpoint", gateway.endpoint, true],
-                  ["Authentication", gateway.authMode === "mtls" ? "mTLS" : gateway.authMode],
-                  ["Runtime", gateway.drivers.map((d) => `${d.driver}${d.version ? ` ${d.version}` : ""}`).join(", ") || "-", true],
-                  ["Location", gateway.remote ? "Remote" : "This Mac"],
-                ].map(([label, value, mono]) => (
-                  <div key={label}>
-                    <dt className="text-[10px] text-muted-foreground">{label}</dt>
-                    <dd className={`break-all ${mono ? "font-mono text-[11px]" : "text-xs"}`}>{value}</dd>
-                  </div>
-                ))}
+              <dl>
+                <dt className="text-[10px] text-muted-foreground">Gateway endpoint</dt>
+                <dd className="break-all font-mono text-[11px]">{gateway.endpoint}</dd>
               </dl>
             ) : overview?.error ? <p className="font-mono text-[10px] text-muted-foreground">{overview.error}</p> : null}
           </PopoverContent>

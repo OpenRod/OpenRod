@@ -160,7 +160,7 @@ function BlockedRow({ b, onDecide }) {
       <span className="truncate font-mono text-[11.5px] text-muted-foreground">{[...b.programs].map(program).join(", ") || "-"}</span>
       <span className="flex items-center justify-end gap-1.5">
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--action)] px-2.5 text-[12px] font-medium text-white outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
+          <DropdownMenuTrigger className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--action)] px-2.5 text-[12px] font-medium text-[var(--action-foreground)] outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
             Allow<ChevronDown className="size-3 opacity-70" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
@@ -384,10 +384,10 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
         </>}
         <Button variant="ghost" size="icon-sm" aria-label="Refresh egress" onClick={onRefresh}><RefreshCw className="size-3.5" /></Button>
         <Button variant="outline" size="sm" onClick={() => onOpen("global")}><Network className="size-3.5" />Global policy</Button>
-        <Button size="sm" className="bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus className="size-3.5" />Add rule</Button>
+        <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus className="size-3.5" />Add rule</Button>
       </div>
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-        {count === 0 && !(view === "rules" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-white hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
+        {count === 0 && !(view === "rules" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
             {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} />}
             {view === "destinations" && <>
@@ -480,7 +480,7 @@ function RuleRow({ rule, onOp, onDelete, busy, locked, managedBy, onManage }) {
     <div>
       <button onClick={() => setOpen(!open)} aria-expanded={open}
         className="flex w-full items-center gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-stone-50/70 focus-visible:bg-stone-50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-linear-to-b from-white to-stone-100" title={SOURCE[source].label}>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-linear-to-b from-card to-stone-100" title={SOURCE[source].label}>
           <Icon strokeWidth={1.5} className="size-3.5 text-stone-600" />
         </span>
         <span className="min-w-0 flex-1">
@@ -662,7 +662,7 @@ function FilesStrip({ filesystem, landlock, failureMode }) {
     <Card>
       <button onClick={() => setOpen(!open)} aria-expanded={open} title="Set at creation"
         className="flex w-full items-center gap-4 rounded-2xl px-5 py-3.5 text-left outline-none transition-colors hover:bg-stone-50/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-linear-to-b from-white to-stone-100">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-linear-to-b from-card to-stone-100">
           <FolderLock strokeWidth={1.5} className="size-3.5 text-stone-600" />
         </span>
         <span className="flex-1 text-[13.5px] font-medium">Files</span>

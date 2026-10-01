@@ -43,7 +43,7 @@ export const RECIPE_ANNOTATION = 'openshell.console/recipe'
 export const requiresShell = (recipe) => recipe.source === 'build' && Array.isArray(recipe.agents) && (new Set(recipe.agents).size + (Array.isArray(recipe.customAgents) ? recipe.customAgents.length : 0)) > 1
 
 export function newRecipe(values = {}) {
-  const recipe = { name: '', source: 'build', agents: ['claude'], customAgents: [], repository: '', runtimes: [], base: BASES[0].id, packages: [...DEFAULT_PACKAGES], setup: '', image: '', environment: [], command: 'claude', ...values }
+  const recipe = { name: '', source: 'build', agents: ['claude'], customAgents: [], repository: '', runtimes: [], base: BASES[0].id, packages: [...DEFAULT_PACKAGES], setup: '', image: '', environment: [], command: 'claude', setups: [], setupRevisions: {}, ...values }
   if (requiresShell(recipe)) recipe.command = ''
   return recipe
 }
@@ -59,13 +59,15 @@ export function pendingRecipe() {
 // template's own environment map.
 export function storedRecipe(r) {
   return r.source === 'image'
-    ? { source: 'image', image: r.image, command: r.command }
-    : { source: 'build', agents: r.agents, ...(r.customAgents?.length ? { customAgents: r.customAgents } : {}), repository: r.repository, runtimes: r.runtimes, base: r.base, packages: r.packages, setup: r.setup, command: r.command }
+    ? { source: 'image', image: r.image, command: r.command, ...(r.setups?.length ? { setups: r.setups, setupRevisions: r.setupRevisions || {} } : {}) }
+    : { source: 'build', agents: r.agents, ...(r.setups?.length ? { setups: r.setups, setupRevisions: r.setupRevisions || {} } : {}), ...(r.customAgents?.length ? { customAgents: r.customAgents } : {}), repository: r.repository, runtimes: r.runtimes, base: r.base, packages: r.packages, setup: r.setup, command: r.command }
 }
 const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'"
 const imagePattern = /^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,255}$/
 export function recipeErrors(recipe) {
   const errors = {}
+  if (!Array.isArray(recipe.setups) || recipe.setups.length > 8 || recipe.setups.some((id) => typeof id !== 'string' || !/^[a-f0-9]{24}$/.test(id)) || new Set(recipe.setups).size !== recipe.setups.length) errors.setups = 'Choose up to eight unique saved Setups.'
+  if (recipe.setupRevisions && (typeof recipe.setupRevisions !== 'object' || Array.isArray(recipe.setupRevisions) || Object.entries(recipe.setupRevisions).some(([id, rev]) => !recipe.setups?.includes(id) || !/^[a-f0-9]{64}$/.test(rev)))) errors.setups = 'Invalid pinned Setup revision.'
   if (!NAME_PATTERN.test(recipe.name || '')) errors.name = 'Use lowercase letters, digits and dashes for the name, up to 19 characters.'
   if (recipe.source === 'build') {
     if (!Array.isArray(recipe.agents) || recipe.agents.some((r) => !AGENTS.some((a) => a.id === r))) errors.agents = 'Choose a supported agent.'
@@ -94,8 +96,8 @@ export function recipeErrors(recipe) {
 
 export function dockerfileFor(recipe) {
   const agents = selectedAgents(recipe)
-  const hasNode = recipe.runtimes.includes('node') || agents.some((a) => a.npm)
-  const hasPython = recipe.runtimes.includes('python') || agents.some((a) => a.python)
+  const hasNode = Boolean(recipe.setups?.length) || recipe.runtimes.includes('node') || agents.some((a) => a.npm)
+  const hasPython = Boolean(recipe.setups?.length) || recipe.runtimes.includes('python') || agents.some((a) => a.python)
   const packages = [...new Set(['ca-certificates', 'curl', 'iproute2', ...recipe.packages, ...agents.flatMap((a) => a.packages ?? []), ...(recipe.repository ? ['git'] : []), ...(hasPython ? ['python3', 'python3-venv'] : [])])]
   const lines = [`FROM ${recipe.base}`, '', 'USER root', 'ENV DEBIAN_FRONTEND=noninteractive', `RUN apt-get update && apt-get install -y --no-install-recommends ${packages.map(quote).join(' ')} && rm -rf /var/lib/apt/lists/*`, 'RUN if getent passwd 1000 >/dev/null; then usermod --login sandbox --home /sandbox --move-home --shell /bin/bash "$(getent passwd 1000 | cut -d: -f1)"; else useradd --uid 1000 --create-home --home-dir /sandbox --shell /bin/bash sandbox; fi && chown -R 1000:1000 /sandbox']
   if (hasNode) lines.push('', 'COPY --from=node:22-bookworm-slim /usr/local/ /usr/local/')
@@ -108,6 +110,7 @@ export function dockerfileFor(recipe) {
   for (const agent of recipe.customAgents ?? []) lines.push(`RUN ${JSON.stringify(['/bin/bash', '-euo', 'pipefail', '-c', agent.install])}`)
   if (recipe.repository) lines.push(`RUN git clone -- ${quote(recipe.repository)} /sandbox/project`, 'WORKDIR /sandbox/project')
   if (recipe.setup.trim()) lines.push('COPY --chown=1000:1000 setup.sh /tmp/template-setup.sh', 'RUN bash -eu /tmp/template-setup.sh')
+  if (recipe.setups?.length) lines.push('COPY --chown=1000:1000 setup-bundles/ /sandbox/.openshell/bundles/')
   // Environment and the start command live in the OpenShell template, not in image layers.
   lines.push('', 'CMD ["/bin/bash"]', '')
   return lines.join('\n')

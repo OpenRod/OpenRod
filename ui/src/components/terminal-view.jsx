@@ -25,7 +25,7 @@ const STATUS = {
 // One browser tab, one session. The page asks the console for a ticket, then
 // streams keystrokes and output over a WebSocket; closing the tab ends the
 // session, like closing a terminal window.
-export function TerminalView({ name, session: requested }) {
+export function TerminalView({ name, session: requested, setupLogin, mcp }) {
   const [sandbox, setSandbox] = React.useState(null)
   const [loadError, setLoadError] = React.useState(null)
   const [state, setState] = React.useState({ status: "connecting" })
@@ -49,7 +49,7 @@ export function TerminalView({ name, session: requested }) {
     if (!session || !element) return undefined
     const term = new Terminal({
       cursorBlink: true, fontSize: 13, lineHeight: 1.2, scrollback: 10000, theme: THEME,
-      fontFamily: '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -71,7 +71,7 @@ export function TerminalView({ name, session: requested }) {
     setState({ status: "connecting" })
     ;(async () => {
       try {
-        const { ticket } = await api.terminalSession(name, { session, cols: term.cols, rows: term.rows })
+        const { ticket } = await api.terminalSession(name, { session, setupLogin, mcp, cols: term.cols, rows: term.rows })
         if (closed) return
         const scheme = window.location.protocol === "https:" ? "wss" : "ws"
         socket = new WebSocket(`${scheme}://${window.location.host}/api/os/terminal?ticket=${encodeURIComponent(ticket)}`)
@@ -94,13 +94,14 @@ export function TerminalView({ name, session: requested }) {
       }
     })()
     return () => { closed = true; observer.disconnect(); socket?.close(); term.dispose() }
-  }, [name, session, attempt])
+  }, [name, session, attempt, setupLogin, mcp])
 
   const status = STATUS[state.status]
   const choices = sandbox ? sessionChoices(sandbox) : []
   const over = state.status === "ended" || state.status === "failed"
   return (
     <div className="flex h-svh flex-col" style={{ background: BACKGROUND }}>
+      {setupLogin && <div className="border-b border-border bg-card px-4 py-3 text-xs text-foreground">Connect this MCP with Codex. Open the authorization link it prints, complete sign-in, and paste the callback URL here when prompted. No inbound port is opened.</div>}
       <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border bg-card px-3 text-xs">
         <TerminalIcon className="size-4 text-muted-foreground" aria-hidden="true" />
         <span className="font-medium">{name}</span>
