@@ -1,6 +1,6 @@
 import { SetupsView } from "@/components/setups-view"
 import * as React from "react"
-import { AlertTriangle, Box, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Terminal, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, Copy, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Terminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -57,77 +57,47 @@ function useEditors() {
   return editors
 }
 
-// Same as `openshell sandbox connect --editor`: OpenShell adds its SSH config
-// and the editor connects over Remote-SSH, so files open in place.
-function OpenInEditor({ name, editors }) {
-  const [opening, setOpening] = React.useState(null)
-  async function open(editor) {
-    setOpening(editor.id)
-    try {
-      await api.openEditor(name, editor.id)
-      toast.success(`Opening ${name} in ${editor.label}`)
-    } catch (e) {
-      toast.error(e.message)
-    } finally {
-      setOpening(null)
-    }
-  }
-  return (
-    <div className="flex flex-col gap-1.5">
-      {editors.map((editor) => (
-        <Button key={editor.id} variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(opening)}
-          title="Connects over SSH through OpenShell. The first time, OpenShell adds one Include line to ~/.ssh/config."
-          onClick={() => open(editor)}>
-          {opening === editor.id ? <Spinner className="size-3.5" />
-            : editor.id === "cursor" ? <img src="/logos/cursor.svg" alt="" aria-hidden="true" className="size-3.5 dark:invert" draggable={false} />
-            : <SquareCode className="size-3.5" aria-hidden="true" />}
-          Open in {editor.label}
-        </Button>
-      ))}
-    </div>
-  )
-}
-
-// The session opens in a new browser tab, so this stays a plain link.
-function OpenWebTerminal({ name }) {
-  return (
-    <Button variant="outline" size="sm" className="w-full justify-start text-xs" nativeButton={false}
-      render={<a href={terminalHref(name)} target="_blank" rel="noreferrer" />}>
-      <Terminal className="size-3.5" aria-hidden="true" />Open in browser
-    </Button>
-  )
-}
-
-function NativeSsh({ name }) {
+function OpenIn({ name, editors }) {
   const [connection, setConnection] = React.useState(null)
   const [error, setError] = React.useState(null)
-  const [mode, setMode] = React.useState("exec")
   const [opening, setOpening] = React.useState(false)
   const [loadingConfig, setLoadingConfig] = React.useState(false)
   const [config, setConfig] = React.useState(null)
 
   React.useEffect(() => {
     let cancelled = false
-    setConnection(null); setError(null); setMode("exec"); setConfig(null)
+    setConnection(null); setError(null); setConfig(null)
     api.sshConnection(name)
       .then((value) => { if (!cancelled) setConnection(value) })
       .catch((e) => { if (!cancelled) setError(e.message) })
     return () => { cancelled = true }
   }, [name])
 
-  if (error) return <p role="alert" className="text-[11px] text-destructive">{error}</p>
-  if (!connection) return <p role="status" className="text-[11px] text-muted-foreground">Checking SSH…</p>
-
-  const plan = connection.modes[mode] ?? connection.modes.exec
-  const unavailable = !connection.cliInstalled ? "Install the openshell CLI to connect."
+  const plan = connection?.modes.exec
+  const unavailable = error || (!connection ? "Checking connection…"
+    : !connection.cliInstalled ? "Install the openshell CLI to connect."
     : !connection.sshInstalled ? "Install OpenSSH to connect."
     : !connection.terminalSupported ? "Opening a system terminal is supported on macOS and Linux."
-    : null
+    : null)
+
+  async function openEditor(editor) {
+    setOpening(true)
+    try {
+      await api.openEditor(name, editor.id)
+      toast.success(`Opening ${name} in ${editor.label}`)
+    } catch (e) { toast.error(e.message) }
+    finally { setOpening(false) }
+  }
+
+  async function copyCommand() {
+    try { await navigator.clipboard.writeText(plan.command); toast.success("SSH command copied") }
+    catch { toast.error("Couldn’t copy SSH command") }
+  }
 
   async function open() {
     setOpening(true)
     try {
-      await api.openSshTerminal(name, mode)
+      await api.openSshTerminal(name, "exec")
       toast.success(`Opening ${name} over SSH`)
     } catch (e) {
       toast.error("Couldn’t open SSH terminal", { description: e.message })
@@ -145,32 +115,35 @@ function NativeSsh({ name }) {
 
   return (
     <>
-      <div className="rounded-md border border-border bg-background p-2.5">
-        <div className="mb-2 flex items-center justify-between gap-2 text-[11px]">
-          <span className="font-medium">Native SSH</span>
-          <span className="truncate text-muted-foreground" title={connection.gateway.endpoint}>{connection.gateway.remote ? "Remote" : "Local"} gateway · {connection.gateway.name}</span>
-        </div>
-        {connection.modes.attach && (
-          <div className="mb-2 grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
-            <Button type="button" variant={mode === "exec" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("exec")}>New session</Button>
-            <Button type="button" variant={mode === "attach" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("attach")}>Attach</Button>
-          </div>
-        )}
-        <div className="space-y-1.5">
-          <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={!connection.canOpenTerminal || opening} onClick={open}>
-            {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" aria-hidden="true" />}Open in terminal
+      <Section title="Open in">
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button variant="outline" size="sm" className="justify-start text-xs" disabled={!connection?.canOpenTerminal || opening} title={unavailable ?? undefined} onClick={open}>
+            {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" />}Terminal
           </Button>
-          {plan && <CopyCommand command={plan.command} />}
-          <Button variant="ghost" size="sm" className="w-full justify-start text-xs" disabled={!connection.cliInstalled || loadingConfig} onClick={showConfig}>
-            {loadingConfig ? <Spinner className="size-3.5" /> : <SquareCode className="size-3.5" aria-hidden="true" />}Show SSH config
+          {[{ id: "cursor", label: "Cursor" }, { id: "vscode", label: "VS Code" }].map((editor) => {
+            const installed = editors.some((item) => item.id === editor.id)
+            return <Button key={editor.id} variant="outline" size="sm" className="justify-start text-xs" disabled={!installed || opening} title={!installed ? `${editor.label} is not installed.` : undefined} onClick={() => openEditor(editor)}>
+              <img src={`/logos/${editor.id}.svg`} alt="" className="size-3.5 dark:invert" />{editor.label}
+            </Button>
+          })}
+          <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} render={<a href={terminalHref(name)} target="_blank" rel="noreferrer" />}>
+            <Globe className="size-3.5" />Browser
           </Button>
         </div>
-        {unavailable && <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">{unavailable}</p>}
-      </div>
+        <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3">
+          <Button variant="outline" size="sm" className="justify-start text-xs font-normal text-muted-foreground" disabled={!plan} onClick={copyCommand}>
+            <Copy className="size-3.5" />Copy SSH command
+          </Button>
+          <Button variant="outline" size="sm" className="justify-start text-xs font-normal text-muted-foreground" disabled={!connection?.cliInstalled || loadingConfig} onClick={showConfig}>
+            {loadingConfig ? <Spinner className="size-3.5" /> : <SquareCode className="size-3.5" />}SSH configuration
+          </Button>
+        </div>
+        {unavailable && <p role={error ? "alert" : "status"} className="mt-2 text-[11px] text-muted-foreground">{unavailable}</p>}
+      </Section>
       <Dialog open={Boolean(config)} onOpenChange={(open) => { if (!open) setConfig(null) }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>SSH config for {name}</DialogTitle>
+            <DialogTitle>SSH configuration for {name}</DialogTitle>
             <DialogDescription>The console does not change ~/.ssh/config. Review and add this Host block yourself, then connect with the command below.</DialogDescription>
           </DialogHeader>
           {config && <>
@@ -304,15 +277,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && (
-                      <Section title="Connect">
-                        <div className="space-y-2">
-                          {!live.demo && <OpenInEditor name={name} editors={editors} />}
-                          {!live.demo && <OpenWebTerminal name={name} sandbox={sandbox} />}
-                          {!live.demo && <NativeSsh name={name} />}
-                        </div>
-                      </Section>
-                    )}
+                    {phase === "ready" && !live.demo && <OpenIn key={name} name={name} editors={editors} />}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}
