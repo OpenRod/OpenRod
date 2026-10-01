@@ -2,14 +2,14 @@
 
 A local web console for OpenShell sandboxes on your computer or a remote SSH machine.
 
-Choose an SSH alias, connect, and install the remote OpenShell runtime only if it is missing. Your existing local gateway stays untouched. The console runs a **second gateway on your computer** for remote workloads; no gateway is installed on the SSH host. This is an independent community project, not an NVIDIA-supported product.
+Choose an SSH alias, connect, and install the remote OpenShell runtime only if it is missing. Your existing local gateway stays untouched. The console runs a **persistent second gateway on the SSH host** for remote workloads. Remote agent terminals use reattachable tmux sessions, so work continues while your computer sleeps. This is an independent community project, not an NVIDIA-supported product.
 
 ## Before you start
 
 - **Node.js 22.13+** and npm.
 - **OpenShell CLI 0.1.2** on your computer for CLI-backed actions. For SSH connections, the console reuses an installed `openshell-gateway`, or automatically downloads gateway 0.1.2 into its private data directory. Automatic installation supports Apple Silicon macOS and arm64/x64 Linux, requires `tar`, and verifies the pinned [official release](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.2) SHA-256 digest before running it. No sudo or existing-gateway changes are needed.
 - **OpenSSH and OpenSSL** locally. Native terminal launch supports macOS Terminal and Linux `x-terminal-emulator`.
-- For remote work: a concrete `Host` alias in `~/.ssh/config`, trusted key-based SSH access, and a native **Linux amd64/arm64 host with a running rootful Docker Engine**. The SSH user must have read/write access to its Unix socket without an interactive sudo prompt. Docker Desktop, rootless Docker, and Docker contexts targeting a different machine are not supported by the reverse-tunnel topology.
+- For remote work: a concrete `Host` alias in `~/.ssh/config`, trusted key-based SSH access, and a native **Linux amd64/arm64 host with a running rootful Docker Engine**. The SSH user must have read/write access to its Unix socket without an interactive sudo prompt. Docker Desktop, rootless Docker, and Docker contexts targeting a different machine are not supported by the managed SSH topology. Python 3 is also required on the host.
 
 The remote machine does not need OpenShell installed. The console checks for sandbox and supervisor images matching the local gateway version and downloads missing images, or accepts your runtime package. If Docker itself is genuinely absent on Ubuntu or Debian with systemd, connection pauses for **Install Docker and continue** approval. This requires root or passwordless sudo, installs the distribution `docker.io` package and dependencies, enables its service, and grants the SSH user root-equivalent Docker group access. Existing or broken Docker installations are not replaced or repaired automatically; other distributions require manual setup. A Docker daemon on your workstation is not required just to connect.
 
@@ -65,46 +65,50 @@ Use `OPENSHELL_BIN` if the CLI is not on `PATH`.
 
 Aliases in `Include` files are discovered too. Wildcard and negated `Host` patterns are not selectable destinations. Host settings are resolved by OpenSSH, not translated into a separate connection form.
 
-The second gateway has its own database, certificates, providers and sandbox inventory. An SSH tunnel carries its Docker API connection, and a reverse loopback tunnel lets remote supervisors reach it. Only one remote host is connected at a time; switching remote hosts disconnects the previous remote gateway. Local and remote configuration are not automatically copied between gateways.
+The second gateway has its own database, certificates, providers and sandbox inventory on the remote host. It runs as a Docker container with `--restart unless-stopped`, binds to remote loopback, and uses host-local Docker. SSH forwards its authenticated API to your computer; a separate Docker tunnel supports image builds. Only one remote host is connected to the console at a time; switching hosts closes the previous viewer connection without stopping its gateway or work.
+
+When **New sandbox** targets SSH, your local network-policy templates, egress rules, MCPs & Skills, and Groups are offered automatically alongside remote settings. Imports are versioned snapshots: local changes create new identities and existing remote sandboxes retain their policy and membership. Local sandbox memberships and sandbox-specific grants are excluded. Rules for everyone are scoped to the imported groups. Secret values are not copied: credentialed MCPs show the required destination sign-in or credential setup. Prepared npm bundles are copied with digest verification, or rebuilt for a different remote CPU architecture.
 
 ### Local and remote inventories
 
 - Rows are marked **Local** or **SSH · host-alias**. Filter either inventory by location; identical names on different gateways remain separate resources.
 - Details, terminals, files, policy changes, template builds and bulk actions use each resource's owning gateway/workspace, not the most recently selected connection.
-- Creation lists only the templates, providers, groups and Setups available at its chosen location. Templates are not implicitly copied between gateways.
+- Creation uses the chosen location and automatically imports local network templates, Groups, and Setups for SSH destinations. Workload-image templates and provider secrets remain location-specific.
 - After disconnect, the last remote inventory remains visible with **Disconnected** markers and disabled actions. Local resources remain usable. Reconnect to refresh remote state; cached status is not a live health check.
 - Other standalone pages keep the selected connection. Navigation from a resource's details preserves its location for related Network, Activity and Secrets pages.
 
 ### Uploading a runtime package
 
-Use a trusted, uncompressed `docker save` archive containing both runtime images for the version and architecture shown in the dialog. On a networked Docker computer, for an amd64 host and OpenShell 0.1.2:
+Use a trusted, uncompressed `docker save` archive containing the sandbox, supervisor, and gateway images for the version and architecture shown in the dialog. On a networked Docker computer, for an amd64 host and OpenShell 0.1.2:
 
 ```bash
 docker pull --platform linux/amd64 ghcr.io/nvidia/openshell/sandbox:0.1.2
 docker pull --platform linux/amd64 ghcr.io/nvidia/openshell/supervisor:0.1.2
+docker pull --platform linux/amd64 ghcr.io/nvidia/openshell/gateway:0.1.2
 docker save --output openshell-runtime-0.1.2-linux-amd64.tar \
   ghcr.io/nvidia/openshell/sandbox:0.1.2 \
-  ghcr.io/nvidia/openshell/supervisor:0.1.2
+  ghcr.io/nvidia/openshell/supervisor:0.1.2 \
+  ghcr.io/nvidia/openshell/gateway:0.1.2
 ```
 
-Use `linux/arm64` for an arm64 host. Select the resulting `.tar` in **Upload package**. The console stages at most 4 GiB in a private temporary file, streams it to `docker load` over SSH, verifies both image tags/platforms, and removes the staged file. It does not execute an installer script from the archive. Remote download instead pulls the two pinned tags directly on the host.
+Use `linux/arm64` for an arm64 host. Select the resulting `.tar` in **Upload package**. The console stages at most 4 GiB in a private temporary file, streams it to `docker load` over SSH, verifies the sandbox and supervisor tags/platforms, and removes the staged file. Gateway startup additionally verifies the gateway image against its pinned digest and platform. It does not execute an installer script from the archive. Remote download pulls the runtime images directly on the host.
 
 Workload images are separate from these runtime images. **Build an image** uses Docker on your computer, targets the selected SSH host’s architecture, then automatically loads the result onto that host through its existing SSH tunnel. The console verifies the engine identity, image ID, and platform before registering the template in the originating gateway/workspace. Local Docker must be running and support the target architecture; no registry is required. **Use an existing image** instead checks the selected remote engine or pulls the reference there. Adding MCP/Skill bundles to an existing remote image imports its base locally under a temporary build-owned tag, without overwriting local user tags. Temporary archives are removed; published images remain on their engines until explicitly removed.
 
 ### Disconnecting and reconnecting
 
-**Disconnect remote gateway** stops the app-managed local process and tunnels, not remote containers or saved state. Stopping the console server does the same; closing a browser tab or the connection dialog does not. Remote sessions lose gateway connectivity until you reconnect.
+**Disconnect from remote** closes the local SSH tunnels. Stopping the console server, shutting down your computer, or putting it to sleep does not stop the remote Docker gateway or persistent terminal sessions. Reconnect to the same SSH host and reopen the same terminal to reattach. The remote machine must remain running; an agent waiting for your input still waits. Stopping/deleting its sandbox or exiting the agent ends its work. Existing images must include `tmux`; console-built images include it automatically. Recreate older sandboxes through the console to receive the required `/dev/ptmx` and `/dev/pts` filesystem grants. MCP OAuth login terminals are short-lived and are not persistent agent sessions.
 
 Gateway state is retained separately for each SSH alias/Docker-engine identity. Reconnecting to the same engine reuses its state and keys. Repointing an alias to a different engine does not reuse the old engine's sandbox records. An SSH failure is shown explicitly; no automatic reconnect or installation retry runs.
 
-Your original local gateway continues independently. Selecting it does not stop an already-running remote gateway; use **Disconnect** when you want that remote connection closed. After a console restart, choose the SSH host and connect again to restart its managed gateway.
+Your original local gateway continues independently. Selecting it does not stop an already-running remote gateway; use **Disconnect** when you want that remote connection closed. After a console restart, choose the SSH host and connect again to reattach to its running remote gateway.
 
 ### Terminal and workspace behavior
 
 - **Open in browser** uses SDK interactive exec, not OpenSSH.
 - **SSH shell → Open SSH in terminal** uses real OpenSSH through the selected gateway's authenticated sandbox relay.
 - **Exec new**, **Attach**, **Copy command**, **Show SSH config**, and editor integration remain available. Attach requires a canonical TTY.
-- Commands and terminal tickets remain pinned to gateway/workspace. Switching the console does not retarget existing sessions; disconnecting their gateway does interrupt them.
+- Commands and terminal tickets remain pinned to gateway/workspace. Switching the console does not retarget existing sessions; disconnecting the viewer detaches remote tmux sessions without ending the agent. Local interactive exec retains its existing lifecycle.
 - Workspace selection is automatic: reuse the prior accessible workspace, otherwise use `default` or the first returned workspace. There is no workspace chooser.
 
 Gateway precedence remains `OPENSHELL_GATEWAY` → saved console selection → CLI/default suggestion. Environment variables pin their respective fields; remove `OPENSHELL_GATEWAY` and restart to select an SSH host. With no saved selection or gateway pin, host discovery does not start activity collection. Successful connection saves the console selection separately from the CLI's active gateway.
@@ -131,7 +135,7 @@ Both the OpenShell CLI and console use `CONFIG_DIR = $XDG_CONFIG_HOME/openshell`
 | Action / data | Persistent effect |
 | --- | --- |
 | **Connect → Local** | Reads the existing registration, discovers an accessible workspace, saves `CONFIG_DIR/console-context.json`, and starts activity collection. Does not change the original gateway service. |
-| **Connect → SSH** | Probes the selected host. Once runtime images are available, creates isolated state under `STATE_DIR/remote-gateways/console-ssh-<hash>/`, registers a distinct local mTLS endpoint under `CONFIG_DIR/gateways/`, and starts the second gateway and SSH tunnels. |
+| **Connect → SSH** | Probes the selected host. Once runtime images are available, creates isolated state under `STATE_DIR/remote-gateways/console-ssh-<hash>/`, registers a distinct local mTLS endpoint under `CONFIG_DIR/gateways/`, and starts the persistent remote Docker gateway and local SSH tunnels. |
 | Runtime installation | **Connect** downloads missing runtime images by default; **Upload package** instead waits for a trusted Docker-save archive. Uploaded packages are temporary. No remote gateway, cloud cluster, or privileged Docker installation. |
 | Activity and policies | Stored per gateway/workspace in `STATE_DIR/contexts/<scope-hash>/`: `activity.sqlite`, `activity-delivery.sqlite`, and `policies/` (including organization rules and memberships). SQLite companion files can exist alongside databases. |
 | Remote inventory cache | `STATE_DIR/remote-gateways/last-location.json` remembers local/SSH locations; `last-inventory.json` retains the last remote sandbox/template metadata and recipes. These private snapshots survive disconnect/restart but do not restart SSH or authorize disconnected actions. |

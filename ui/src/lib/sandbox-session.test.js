@@ -4,9 +4,26 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { connectionPlan } from './sandbox-session.js'
+import { connectionPlan, persistentSessionArgv, persistentTerminalPolicy, terminalHref } from './sandbox-session.js'
 
 const sandbox = (extra = {}) => ({ name: 'demo', phase: 'ready', tty: false, labels: {}, ...extra })
+
+test('remote exec and SSH attach to stable sessions and terminal navigation retains remote identity', () => {
+  const plan = connectionPlan(sandbox({ labels: { 'openshell.console/session': 'codex' } }), { gateway: 'remote', remote: true })
+  assert.deepEqual(plan.argv.slice(-3), persistentSessionArgv('codex'))
+  assert.match(connectionPlan(sandbox(), { gateway: 'remote', remote: true, mode: 'ssh' }).command, /tmux/)
+  assert.throws(() => persistentSessionArgv('codex; rm -rf /'), /Unknown/)
+  assert.match(terminalHref('demo', 'codex', { gateway: 'remote', workspace: 'default', remote: true }), /remote=1/)
+})
+
+test('persistent terminals add only explicit PTY access while preserving the filesystem baseline', () => {
+  const policy = { filesystem: { readOnly: ['/usr'], readWrite: ['/tmp'] }, networkPolicies: { existing: {} } }
+  const extended = persistentTerminalPolicy(policy)
+  assert.deepEqual(extended.filesystem.readWrite, ['/tmp', '/dev/ptmx', '/dev/pts'])
+  assert.deepEqual(extended.filesystem.readOnly, ['/usr'])
+  assert.deepEqual(policy.filesystem.readWrite, ['/tmp'])
+  assert.equal(extended.networkPolicies, policy.networkPolicies)
+})
 
 test('a new native session is gateway-pinned and starts in its validated project folder', () => {
   const plan = connectionPlan(sandbox({ labels: {

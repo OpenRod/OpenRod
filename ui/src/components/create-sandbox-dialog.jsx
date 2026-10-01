@@ -19,6 +19,7 @@ import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
 import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
 import { locationLabel } from "@/lib/locations"
+import { persistentGateway } from "@/lib/sandbox-session"
 import { LocationBadge } from "@/components/location-badge"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { AGENTS } from "@/lib/image-templates"
@@ -198,6 +199,9 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
   // A prepared Quick-setup snapshot gets the egress policy of the setup it was prepared from.
   const [setupSources, setSetupSources] = React.useState({})
   const [group, setGroup] = React.useState([])
+  const [localCatalog, setLocalCatalog] = React.useState(null)
+  const [catalogLoading, setCatalogLoading] = React.useState(false)
+  const [catalogAttempt, setCatalogAttempt] = React.useState(0)
 
   // A fresh sandbox starts in Quick setup; launching a saved template opens its tab.
   React.useEffect(() => {
@@ -224,10 +228,20 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
     setError(null); setPolicyDraft(null); setOrg(null)
     setStart("empty"); setFolder(""); setPreview(null); setRepository("")
     setGroup([])
-    api.org().then((value) => { if (current) setOrg(value) }).catch((e) => { if (current) { setOrg(null); setError(`Could not load groups: ${e.message}`) } })
-    api.setups().then((list) => { if (current) setSetupSources(Object.fromEntries(list.filter((s) => s.preparedFrom).map((s) => [s.id, s.preparedFrom.id]))) }).catch(() => { if (current) setSetupSources({}) })
+    setLocalCatalog(null); setCatalogLoading(persistentGateway(location))
+    const catalog = persistentGateway(location) ? api.syncLocalCatalog() : Promise.resolve(null)
+    catalog.then(async (copied) => {
+      if (!current) return
+      const [value, list] = await Promise.all([api.org(), api.setups()])
+      if (!current) return
+      // Offer the latest local snapshot alongside remote-authored groups;
+      // retained snapshots keep supporting their existing remote sandboxes.
+      if (copied?.available) value.groups = value.groups.filter(g => !copied.importedGroups.includes(g.id) || copied.groups.includes(g.id))
+      setOrg(value); setLocalCatalog(copied)
+      setSetupSources(Object.fromEntries(list.filter(s => s.preparedFrom).map(s => [s.id, s.preparedFrom.id])))
+    }).catch((e) => { if (current) { setOrg(null); setError(`Could not load sandbox settings: ${e.message}`) } }).finally(() => { if (current) setCatalogLoading(false) })
     return () => { current = false }
-  }, [open, api, location?.connected, initialImageTemplate])
+  }, [open, api, location?.connected, location?.remote, initialImageTemplate, catalogAttempt])
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
   const selectedAgents = QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id))
@@ -321,6 +335,9 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
           <DialogHeader className="shrink-0">
             <DialogTitle>New sandbox</DialogTitle>
           </DialogHeader>
+          {catalogLoading && <p role="status" className="text-xs text-muted-foreground">Loading your local network policies, MCPs &amp; Skills, and Groups…</p>}
+          {localCatalog?.available && <p className="text-xs text-muted-foreground">Your local network policies, MCPs &amp; Skills, and Groups are available here. Existing remote sandboxes keep their settings.</p>}
+          {location?.remote && !catalogLoading && !org && <Button type="button" variant="outline" size="sm" onClick={() => setCatalogAttempt(n => n + 1)}>Retry loading settings</Button>}
           {locations.length > 0 && !initialImageTemplate ? <div className="grid shrink-0 gap-1.5">
             <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
             <Select value={locationKey(location) ?? ""} onValueChange={onLocationChange} disabled={busy} items={locations.map((item) => ({ value: locationKey(item), label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
@@ -426,7 +443,7 @@ function CreateSandboxForm({ open, onOpenChange, onCreated, initialImageTemplate
             </TabsContent>
 
             {(mode === "quick" || (hasSetups && (missingSetupAgent || setupAgentIds.includes('aider')))) && <div className="space-y-3 border-t pt-4">
-              {mode === "quick" && <SetupPicker autoPrepare automaticAccess preparationContext="sandbox" accessReview={setupAccessReview} onAccessReview={setSetupAccessReview} value={setupIds} onChange={setSetupIds} />}
+              {mode === "quick" && !catalogLoading && org && <SetupPicker localCatalog={localCatalog} autoPrepare automaticAccess preparationContext="sandbox" accessReview={setupAccessReview} onAccessReview={setSetupAccessReview} value={setupIds} onChange={setSetupIds} />}
               {hasSetups && missingSetupAgent && <p role="alert" className="text-xs text-destructive">
                 {setupAgentIds.includes('aider') ? 'Setup installation is unavailable for Aider. Choose another agent.' : mode === "quick" ? 'Choose an agent to use this Setup.' : 'Choose a template with a supported agent to use this Setup.'}
               </p>}

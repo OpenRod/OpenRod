@@ -283,7 +283,7 @@ ${refs.map((ref, index) => `image=$(engine image inspect --format '{{json .}}' $
   if (!fields.get('HOST_KERNEL') || info.KernelVersion !== fields.get('HOST_KERNEL')) throw fail('Docker must run directly on the SSH host, not inside a separate VM. Select this host’s native Docker Engine socket.', 409)
   if (!SOCKET.test(dockerSocket ?? '') || dockerSocket.split('/').some((part) => part === '.' || part === '..')) throw fail('The Docker socket must be a safe absolute Unix socket path.', 409)
   if (!Array.isArray(info.SecurityOptions) || !info.SecurityOptions.some((option) => /^name=seccomp(?:,|$)/.test(option))) throw fail('Enable Docker Engine seccomp support before running non-root OpenShell workloads.', 409)
-  if (info.SecurityOptions.some((option) => /^name=rootless(?:,|$)/.test(option))) throw fail('Rootless Docker cannot reach the SSH reverse tunnel on the host loopback interface. Select a rootful Docker Engine on this Linux host; workloads still run non-root.', 409)
+  if (info.SecurityOptions.some((option) => /^name=rootless(?:,|$)/.test(option))) throw fail('Rootless Docker is not supported by persistent remote gateways. Select a rootful Docker Engine on this Linux host; workloads still run non-root.', 409)
   if (typeof info.ID !== 'string' || !info.ID.trim()) throw fail('Docker Engine did not report its identity; upgrade or repair the daemon before connecting.', 409)
   const runtimeReady = images.every((image, index) => image?.Os === 'linux' && architecture(image.Architecture) === arch && image.RepoTags?.includes(refs[index]))
   return { os: 'linux', arch, dockerSocket, runtimeReady, version, engineId: info.ID, dockerInstalled: true }

@@ -66,6 +66,7 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     installConnectionRuntime: id => request(`/connections/jobs/${encodeURIComponent(id)}/install`, { method: 'POST', body: { method: 'download' } }),
     uploadConnectionPackage: (id, file) => request(`/connections/jobs/${encodeURIComponent(id)}/package`, { method: 'POST', body: file, raw: true }),
     disconnectRemote: () => request('/connections/disconnect', { method: 'POST', body: {} }),
+    syncLocalCatalog: () => request('/local-catalog', { method: 'POST', body: {} }),
   setups: () => request('/setups'),
   discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
   reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),
