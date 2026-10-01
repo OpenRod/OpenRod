@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# One shared OpenShell sandbox that Claude desktop and the Codex app open
+# projects in over SSH. Projects live in ~/projects inside the sandbox.
+#
+#   openshell-workspace up       build the image, start the sandbox, register it with both apps
+#   openshell-workspace status   show the sandbox and SSH reachability
+#   openshell-workspace stop     stop the sandbox, keeping its files
+#   openshell-workspace remove   delete the sandbox and unregister it
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+sandbox="${OPENSHELL_WORKSPACE_SANDBOX:-workspace}"
+image="${OPENSHELL_WORKSPACE_IMAGE:-openshell-workspace:dev}"
+host="openshell-$sandbox"
+openshell="$(command -v openshell)"
+ssh_dir="$HOME/.ssh/openshell/config.d"
+ssh_conf="$ssh_dir/$sandbox.conf"
+include_line="Include $ssh_dir/*.conf"
+claude_settings="$HOME/.claude/settings.json"
+claude_id="openshell.$sandbox"
+
+phase() { "$openshell" sandbox get "$sandbox" 2>/dev/null | awk '/^  Phase:/ {print $2}'; }
+
+wait_ready() {
+  for _ in $(seq 1 60); do
+    [ "$(phase)" = Ready ] && return 0
+    sleep 2
+  done
+  echo "Sandbox $sandbox did not become ready" >&2
+  return 1
+}
+
+write_ssh_config() {
+  mkdir -p "$ssh_dir"
+  chmod 700 "$HOME/.ssh/openshell" "$ssh_dir"
+  # Rename OpenShell's generated alias (openshell-<name>.<workspace>) to a stable one
+  "$openshell" sandbox ssh-config "$sandbox" | sed "1s/^Host .*/Host $host/" > "$ssh_conf"
+  # An Include below a Host block would only apply to that host, so it goes first
+  if ! grep -qxF "$include_line" "$HOME/.ssh/config" 2>/dev/null; then
+    [ -f "$HOME/.ssh/config" ] && cp "$HOME/.ssh/config" "$HOME/.ssh/config.bak-openshell"
+    { echo "# OpenShell sandboxes, added by openshell-workspace"; echo "$include_line"; echo; cat "$HOME/.ssh/config" 2>/dev/null; } > "$HOME/.ssh/config.tmp"
+    mv "$HOME/.ssh/config.tmp" "$HOME/.ssh/config"
+    chmod 600 "$HOME/.ssh/config"
+  fi
+}
+
+# Claude desktop reads SSH connections from sshConfigs in ~/.claude/settings.json.
+# The Codex app lists ~/.ssh/config hosts on its own.
+claude_register() {
+  mkdir -p "$(dirname "$claude_settings")"
+  [ -f "$claude_settings" ] && cp "$claude_settings" "$claude_settings.bak-openshell"
+  ID="$claude_id" HOST="$host" NAME="OpenShell · $sandbox" MODE="$1" FILE="$claude_settings" node -e '
+    const fs = require("fs"), { ID, HOST, NAME, MODE, FILE } = process.env
+    const settings = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : {}
+    const others = (settings.sshConfigs ?? []).filter(c => c.id !== ID)
+    settings.sshConfigs = MODE === "add" ? [...others, { id: ID, name: NAME, sshHost: HOST, startDirectory: "~/projects" }] : others
+    fs.writeFileSync(FILE, JSON.stringify(settings, null, 2) + "\n")'
+}
+
+up() {
+  docker image inspect "$image" >/dev/null 2>&1 || docker build -t "$image" "$here"
+  case "$(phase)" in
+    "") "$openshell" sandbox create --name "$sandbox" --from "$image" --policy "$here/policy.yaml" \
+          --label openshell.console/group=workspace --label "openshell.console/owner=$(whoami)" --label "openshell.console/created-by=$(whoami)" --no-auto-providers --no-tty --detach >/dev/null ;;
+    Ready) ;;
+    *) "$openshell" sandbox start "$sandbox" >/dev/null ;;
+  esac
+  wait_ready
+  write_ssh_config
+  claude_register add
+  ssh "$host" true
+  cat <<EOF
+Sandbox "$sandbox" is ready as SSH host "$host".
+
+  Claude desktop: pick "OpenShell · $sandbox" in the environment dropdown.
+  Codex app:      Settings > Connections > enable "$host", then add a project
+                  under ~/projects. Sign in once first:
+                    ssh -t $host codex login --device-auth
+EOF
+}
+
+status() {
+  "$openshell" sandbox get "$sandbox" 2>/dev/null | sed -n '/^Sandbox:/,/^  Resource/p' || echo "No sandbox named $sandbox"
+  if ssh -o ConnectTimeout=10 "$host" 'ls -1 ~/projects' 2>/dev/null | sed 's/^/  project: /'; then echo "SSH: $host reachable"; else echo "SSH: $host not reachable"; fi
+}
+
+case "${1:-}" in
+  up) up ;;
+  status) status ;;
+  stop)
+    # `sandbox stop` doesn't flush the VM's page cache: recent writes and
+    # deletes were lost on restart without this sync (OpenShell 0.1.2)
+    ssh -o ConnectTimeout=10 "$host" sync || echo "Could not sync before stopping; recent changes may be lost" >&2
+    "$openshell" sandbox stop "$sandbox" ;;
+  remove)
+    read -r -p "Delete sandbox $sandbox and every project in it? [y/N] " answer
+    [ "$answer" = y ] || exit 1
+    "$openshell" sandbox delete "$sandbox"
+    rm -f "$ssh_conf"
+    claude_register remove ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

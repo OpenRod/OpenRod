@@ -64,6 +64,7 @@ export const api = {
   deleteSecret: (name) => request(`/secrets/${encodeURIComponent(name)}/delete`, { method: "POST", body: {} }),
   attachSecret: (name, sandbox, attach) => request(`/secrets/${encodeURIComponent(name)}/${attach ? "attach" : "detach"}`, { method: "POST", body: { sandbox } }),
   importProfile: (id) => request("/profiles/import", { method: "POST", body: { id } }),
+  deleteTemplates: (ids) => request("/templates/delete", { method: "POST", body: { ids } }),
   templates: () => request("/templates"),
   imageTemplates: () => request("/image-templates"),
   localImages: () => request("/image-templates/local-images"),

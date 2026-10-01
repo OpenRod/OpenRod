@@ -1,3 +1,6 @@
+import { createTemplateStore } from './policy-template-store.js'
+import { BUILTIN_TEMPLATES, normalizeAccessTemplates } from '../shared/policy-templates.js'
+export { BUILTIN_TEMPLATES } from '../shared/policy-templates.js'
 import { validateSecretCredentials } from '../shared/secret-fields.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -436,12 +439,8 @@ const TEMPLATE_ID = /^[a-z0-9][a-z0-9-]{0,47}$/
 const ABS = /^\/[\w.@+-][\w./@+-]{0,255}$/
 const SYSTEM_RO = ['/bin', '/usr', '/lib', '/proc', '/dev/urandom', '/etc', '/var/log']
 
-export const BUILTIN_TEMPLATES = [
-  {
-    id: 'locked-down', builtin: true, name: 'Locked down',
-    description: 'The gateway default. Work folder and /tmp are writable, system folders read-only, and network limited to attached secrets and included agent connections.',
-    filesystem: { workdir: true, readOnly: SYSTEM_RO, readWrite: ['/tmp', '/dev/null'] }, landlock: 'best_effort', rules: [],
-  },
+// Hidden compatibility presets for existing saved references and imported images.
+const LEGACY_TEMPLATES = [
   {
     id: 'claude-subscription', builtin: true, name: 'Claude Code subscription',
     description: 'Sign in with your Claude subscription. Allows Claude Code to reach Anthropic API and sign-in endpoints without an API-key provider. Run claude and choose your subscription account after connecting.',
@@ -473,24 +472,12 @@ export const BUILTIN_TEMPLATES = [
         ] },
     ],
   },
-  {
-    id: 'python-packages', builtin: true, name: 'Python packages',
-    description: 'pip can download from PyPI (read-only). Nothing else leaves the sandbox.',
-    filesystem: { workdir: true, readOnly: SYSTEM_RO, readWrite: ['/tmp', '/dev/null'] }, landlock: 'best_effort',
-    rules: [
-      { name: 'pypi', binaries: ['/usr/bin/python3*', '/usr/local/bin/pip*', '/usr/bin/pip*'],
-        endpoints: [
-          { host: 'pypi.org', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
-          { host: 'files.pythonhosted.org', ports: [443], protocol: 'rest', access: 'read-only', enforcement: 'enforce' },
-        ] },
-    ],
-  },
 ]
 
-function validateTemplate(input) {
+export function validateTemplate(input) {
   const id = String(input.id ?? '').trim()
   if (!TEMPLATE_ID.test(id)) throw fail('Template ids use lowercase letters, digits and dashes.')
-  if (BUILTIN_TEMPLATES.some((t) => t.id === id)) throw fail('That id belongs to a built-in template.')
+  const builtin = [...BUILTIN_TEMPLATES, ...LEGACY_TEMPLATES].find((t) => t.id === id)
   const list = (v) => (Array.isArray(v) ? v.map(String).map((s) => s.trim()).filter(Boolean) : [])
   const readOnly = list(input.filesystem?.readOnly)
   const readWrite = list(input.filesystem?.readWrite)
@@ -498,7 +485,10 @@ function validateTemplate(input) {
   for (const p of [...readOnly, ...readWrite]) if (p !== '/' && (!ABS.test(p) || p.includes('..'))) throw fail(`"${p}" must be an absolute path without "..".`)
   if (readOnly.length + readWrite.length > 256) throw fail('Too many paths.')
   const landlock = input.landlock === 'hard_requirement' ? 'hard_requirement' : 'best_effort'
+  let accessTemplates
+  try { accessTemplates = normalizeAccessTemplates(input.accessTemplates) } catch (error) { throw fail(error.message) }
   const rules = (input.rules ?? []).map((r) => { ruleToProto(r); return r })
+  if (builtin?.kind === 'access' && accessTemplates.length) throw fail('An access policy cannot include other access policies.')
   if (new Set(rules.map((r) => r.name)).size !== rules.length) throw fail('Rule names must be unique.')
   // Services to open when the sandbox starts, each with an optional auto-close.
   const ingress = (input.ingress ?? []).map((d) => {
@@ -513,10 +503,13 @@ function validateTemplate(input) {
   if (new Set(ingress.map((d) => d.name)).size !== ingress.length) throw fail('Each opened service needs its own name.')
   return {
     id,
+    builtin: Boolean(builtin),
+    ...(builtin?.kind ? { kind: builtin.kind } : {}),
     name: String(input.name ?? id).slice(0, 80),
     description: String(input.description ?? '').slice(0, 400),
     filesystem: { workdir: input.filesystem?.workdir !== false, readOnly, readWrite },
     landlock,
+    accessTemplates,
     rules,
     ingress,
   }
@@ -531,33 +524,11 @@ export function templateToPolicy(template) {
   }
 }
 
-export async function listTemplates() {
-  let custom = []
-  try {
-    const files = (await fs.readdir(TEMPLATE_DIR)).filter((f) => f.endsWith('.json'))
-    custom = (await Promise.all(files.map(async (f) => {
-      try { return { ...validateTemplate(JSON.parse(await fs.readFile(path.join(TEMPLATE_DIR, f), 'utf8'))), builtin: false } } catch { return null }
-    }))).filter(Boolean)
-  } catch (error) { if (error.code !== 'ENOENT') throw error }
-  return [...BUILTIN_TEMPLATES, ...custom.sort((a, b) => a.name.localeCompare(b.name))]
-}
-
-export async function findTemplate(id) {
-  return (await listTemplates()).find((t) => t.id === id) ?? null
-}
-
-async function saveTemplate(input) {
-  const template = validateTemplate(input)
-  await fs.mkdir(TEMPLATE_DIR, { recursive: true })
-  await fs.writeFile(path.join(TEMPLATE_DIR, `${template.id}.json`), `${JSON.stringify(template, null, 2)}\n`)
-  return template
-}
-
-async function deleteTemplate(id) {
-  if (!TEMPLATE_ID.test(id) || BUILTIN_TEMPLATES.some((t) => t.id === id)) throw fail('Built-in templates cannot be deleted.')
-  await fs.rm(path.join(TEMPLATE_DIR, `${id}.json`), { force: true })
-  return { ok: true }
-}
+const templateStore = createTemplateStore({ directory: TEMPLATE_DIR, builtins: BUILTIN_TEMPLATES, legacy: LEGACY_TEMPLATES, validate: validateTemplate })
+export const listTemplates = () => templateStore.list()
+export const findTemplate = (id) => templateStore.find(id)
+const saveTemplate = (input) => templateStore.save(input)
+const deleteTemplate = (id) => templateStore.deleteMany([id])
 
 // ---- routes -----------------------------------------------------------------
 
@@ -591,6 +562,7 @@ export async function policyRoute(method, parts, input) {
   }
   if (area === 'profiles' && a === 'import') return importProfile(String(input.id ?? ''))
   if (area === 'templates' && !a) return saveTemplate(input)
+  if (area === 'templates' && a === 'delete' && !b) return templateStore.deleteMany(input.ids)
   if (area === 'templates' && a && b === 'delete') return deleteTemplate(a)
   return undefined
 }

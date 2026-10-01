@@ -1,11 +1,12 @@
 import { groupIds, groupsOf, labelsForGroups, changeGroups } from '../shared/group-membership.js'
 export { GROUP_LABEL, groupsOf } from '../shared/group-membership.js'
 import { assertPolicyGroup, assertSandboxGroup, assertPolicyCoverage } from '../shared/group-network.js'
+import { BUILTIN_TEMPLATES, composeTemplate } from '../shared/policy-templates.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WORKSPACE, gateway, sandboxView } from './gateway.js'
-import { findTemplate, ruleToProto, templateToPolicy } from './policy.js'
+import { findTemplate, listTemplates, ruleToProto, templateToPolicy } from './policy.js'
 import { appliesTo, blockHosts, blockedByPolicy, compileFor, listPolicies, removePolicy, validatePolicy, writePolicy } from './egress.js'
 import { hostMatches } from '../src/lib/egress.js'
 
@@ -193,7 +194,7 @@ export function addAgentAccess(policy, agentRules, org) {
 }
 
 // Everything a new sandbox needs from its group, resolved before it exists.
-export async function planSandbox({ name, group: legacyGroup, groups: selectedGroups, template: templateId, agentRules = [], requireGroup = false }) {
+export async function planSandbox({ name, group: legacyGroup, groups: selectedGroups, template: templateId, accessTemplates = [], agentRules = [], systemBaseline = false, requireGroup = false }) {
   const [org, policies] = await Promise.all([readOrg(), listPolicies()])
   let ids
   try { ids = groupIds(selectedGroups ?? legacyGroup) } catch (error) { throw fail(error.message) }
@@ -204,8 +205,10 @@ export async function planSandbox({ name, group: legacyGroup, groups: selectedGr
   if (selected.some((g) => !g)) throw fail('Unknown group.')
   const pinned = [...new Set(selected.map((g) => g.template).filter(Boolean))]
   if (pinned.length > 1) throw fail('These groups pin different base policies. Use groups with the same base policy.')
-  const template = await findTemplate(pinned[0] || templateId || 'locked-down')
-  if (!template) throw fail('Unknown policy template.')
+  const base = systemBaseline ? BUILTIN_TEMPLATES[0] : await findTemplate(pinned[0] || templateId || 'locked-down')
+  if (!base) throw fail('Unknown policy template.')
+  let template
+  try { template = composeTemplate(base, accessTemplates, systemBaseline ? BUILTIN_TEMPLATES : await listTemplates()) } catch (error) { throw fail(error.message) }
   assertNotBlocked(org, template.rules, 'Template')
   const policy = templateToPolicy(template)
   addAgentAccess(policy, agentRules, org)
