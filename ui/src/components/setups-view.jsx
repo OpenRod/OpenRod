@@ -165,6 +165,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
   const [preparation, setPreparation] = React.useState(initialJob?.preparation ?? null)
   const [preparedReview, setPreparedReview] = React.useState(initialJob?.prepared ?? false)
   const [finalImport, setFinalImport] = React.useState(false)
+  const [importAttempted, setImportAttempted] = React.useState(Boolean(initialJob))
   const jobId = React.useRef(initialJob?.id)
   const mounted = React.useRef(true)
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -179,6 +180,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
     if (jobId.current) setupImports.updateReview(jobId.current, next, preparedReview)
   }
   async function importSelection(saveOnly = false) {
+    setImportAttempted(true)
     setFinalImport(true)
     const task = setupImports.start({ id: jobId.current, review, name, choices, saveOnly,
       resumeJob: preparation?.status === 'running' ? preparation : undefined,
@@ -191,7 +193,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
       const result = await task.promise
       if (!mounted.current) return
       if (result.status === 'saved') onSaved()
-      else if (result.status === 'needs-attention') setError('Some items need attention. Remove them, update them and retry, or import this setup with those items inactive.')
+      else if (result.status === 'needs-attention') setError('Some items need attention. Remove them or update them, then retry the import.')
       else { setPreparedReview(false); setError('Import cancelled. Completed preparation is kept here for retry.') }
     } finally { if (mounted.current) setFinalImport(false) }
   }
@@ -286,10 +288,8 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
       <div className="shrink-0 space-y-4 border-t bg-muted/20 px-6 py-4">
         {review && <p className="text-[11px] leading-relaxed text-muted-foreground">Import downloads dependencies and checks MCP connections in an isolated sandbox using the listed destinations and credentials you select. Skill scripts are not run.</p>}
       <div className="flex items-center justify-end gap-2">{scan && <Button variant="ghost" disabled={busy || preparing} onClick={() => { if (review) { setReview(null); setPreparedReview(false); setPreparation(null); setChoices({}) } else { setScan(null); setIds([]) } setError('') }}>Back</Button>}<Button variant="ghost" disabled={!jobId.current && !finalImport && (busy || preparing)} onClick={onClose}>{finalImport ? 'Continue in background' : jobId.current ? 'Close' : 'Cancel'}</Button>
-        {review ? <>
-          {preparedReview && <Button variant="outline" disabled={busy || !name.trim() || !review.items.length} onClick={() => run(importSelection)}>Retry import</Button>}
-          <Button disabled={busy || !name.trim() || !review.items.length} onClick={() => run(() => importSelection(preparedReview))}>{busy && <Spinner />}{busy ? 'Importing…' : preparedReview && importNeedsAttention(review) ? 'Import with inactive items' : preparing ? 'Resume import' : 'Import'}</Button>
-        </> : scan ? <Button disabled={busy || !ids.length} onClick={() => run(async () => setReview(await api.reviewSetup(scan.token, ids)))}>{busy && <Spinner />}Review selection</Button> : <Button disabled={busy || !sources.length} onClick={() => run(async () => setScan(await api.discoverSetups(sources)))}>{busy && <Spinner />}Discover tools</Button>}
+        {review ? <Button disabled={busy || !name.trim() || !review.items.length} onClick={() => run(() => importSelection(preparedReview && !importNeedsAttention(review)))}>{busy && <Spinner />}{busy ? 'Importing…' : preparing ? 'Resume import' : importAttempted ? 'Retry import' : 'Import'}</Button>
+        : scan ? <Button disabled={busy || !ids.length} onClick={() => run(async () => { setReview(await api.reviewSetup(scan.token, ids)); setImportAttempted(false) })}>{busy && <Spinner />}Review selection</Button> : <Button disabled={busy || !sources.length} onClick={() => run(async () => setScan(await api.discoverSetups(sources)))}>{busy && <Spinner />}Discover tools</Button>}
       </div>
       </div>
     </DialogContent>
