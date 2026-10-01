@@ -270,7 +270,7 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, onEdit, onE
   )
 }
 
-function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
+function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
   const [selected, setSelected] = React.useState(() => new Set())
   const [deleteTargets, setDeleteTargets] = React.useState(null)
   const [deleting, setDeleting] = React.useState(false)
@@ -438,6 +438,10 @@ function FleetSummary({ fleet, org, events, onOpen, onDecide, onNavigate, onRefr
         <span role="status" className="mr-auto text-xs"><strong>{selectedPolicies.length}</strong> selected{selectedPolicies.length > matchingSelected && <span className="text-muted-foreground"> · {selectedPolicies.length - matchingSelected} outside current filters</span>}</span>
         <Button variant="ghost" size="sm" disabled={deleting} onClick={() => setSelected(new Set())}>Clear selection</Button>
         <Button variant="destructive" size="sm" disabled={deleting} onClick={() => setDeleteTargets([...selectedPolicies])}><Trash2 className="size-3.5" />{deleting ? "Deleting…" : "Delete selected"}</Button>
+      </div>}
+      {sandboxes.some((s) => s.source === "global") && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-50/60 px-6 py-2 text-xs text-amber-800">
+        <AlertTriangle className="size-3.5" /><span className="mr-auto">A global policy overrides every sandbox's network rules.</span>
+        <Button variant="outline" size="sm" onClick={onOpenGlobal}>Review</Button>
       </div>}
       {deleteErrors.length > 0 && <div role="alert" className="border-b border-border px-6 py-2 text-xs text-destructive">
         <div className="flex items-center justify-between gap-2"><p>Some rules could not be deleted. Failed rules remain selected for retry.</p><Button variant="ghost" size="icon-sm" aria-label="Dismiss deletion errors" onClick={() => setDeleteErrors([])}><X className="size-3.5" /></Button></div>
@@ -674,9 +678,57 @@ function BackLink({ onClick }) {
   )
 }
 
+function GlobalPanel({ onBack }) {
+  const [data, setData] = React.useState(null)
+  const [confirm, setConfirm] = React.useState(false)
+  const load = React.useCallback(() => api.globalPolicy().then(setData).catch((e) => setData({ error: e.message })), [])
+  React.useEffect(() => { load() }, [load])
+  return (
+    <div className="space-y-6 px-4 py-5 sm:px-6">
+      <BackLink onClick={onBack} />
+      {!data ? <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p> : data.error ? <p className="py-16 text-center text-sm text-muted-foreground">{data.error}</p> : (
+        <>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">{data.active ? `Global policy · v${data.current?.revision.version}` : "No global policy"}</h2>
+            <p className="mt-3 text-[13px] text-muted-foreground">{data.active ? "Overrides every sandbox's own rules." : "Each sandbox follows its own rules."}</p>
+            {data.active && <Button variant="outline" className="mt-5 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5" onClick={() => setConfirm(true)}><ShieldOff />Remove</Button>}
+          </div>
+          {data.current?.policy?.rules.length > 0 && <Card className="divide-y divide-border/70 overflow-hidden">{data.current.policy.rules.map((rule) => <RuleRow key={rule.key} rule={rule} locked onOp={() => {}} />)}</Card>}
+          {data.revisions.length > 0 && (
+            <Section title="History">
+              <Card className="divide-y divide-border/60">
+                {data.revisions.map((r) => (
+                  <div key={r.version} className="flex h-11 items-center gap-3 px-5 text-[12.5px]">
+                    <span className={cn("size-1.5 rounded-full", REVISION[r.status]?.dot)} aria-hidden="true" />
+                    <span className="font-mono">v{r.version}</span><span className="text-muted-foreground">{REVISION[r.status]?.label}</span><span className="ml-auto text-muted-foreground">{relativeTime(r.createdAt)}</span>
+                  </div>
+                ))}
+              </Card>
+            </Section>
+          )}
+        </>
+      )}
+      <AlertDialog open={confirm} onOpenChange={setConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove the global policy?</AlertDialogTitle>
+            <AlertDialogDescription>Every sandbox reverts to its own rules.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={async () => {
+              try { await api.removeGlobal(); toast.success("Global policy removed"); load() } catch (e) { toast.error(e.message) } finally { setConfirm(false) }
+            }}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
 const FILTERS = [{ id: "all", label: "All" }, ...SOURCE_ORDER.map((s) => ({ id: s, label: SOURCE[s].label }))]
 
-function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, reloadSignal }) {
+function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, onOpenGlobal, reloadSignal }) {
   const [policy, setPolicy] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [deleting, setDeleting] = React.useState(null)
@@ -774,7 +826,7 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onE
 
       {policy && !policy.error && (
         <>
-          {globalActive && <p className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-[12.5px] text-amber-800"><AlertTriangle className="size-3.5" />Global policy in force · editing disabled</p>}
+          {globalActive && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-50/60 px-4 py-2 text-[12.5px] text-amber-800"><AlertTriangle className="size-3.5" /><span className="mr-auto">Global policy in force · editing disabled</span><Button variant="outline" size="sm" onClick={onOpenGlobal}>Review</Button></div>}
           {policy.configurationError && <p className="rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 font-mono text-[11.5px] text-red-700">{policy.configurationError}</p>}
 
           {denied.length > 0 && !globalActive && (
@@ -860,6 +912,7 @@ export const POLICY_HANDOFF = "egress-policy"
 export function EgressView({ onNavigate }) {
   const live = useLive()
   const [scope, setScope] = React.useState(null)
+  const [showGlobal, setShowGlobal] = React.useState(false)
   // Other pages hand over one sandbox to show the rules that reach it.
   const [forSandbox, setForSandbox] = React.useState(() => {
     try { const s = sessionStorage.getItem(SANDBOX_HANDOFF); sessionStorage.removeItem(SANDBOX_HANDOFF); return s } catch { return null }
@@ -910,7 +963,8 @@ export function EgressView({ onNavigate }) {
   }, [live.events])
 
   const open = (name) => { setScope(name); scroller.current?.scrollTo({ top: 0 }) }
-  const back = () => { setScope(null); loadFleet(); scroller.current?.scrollTo({ top: 0 }) }
+  const openGlobal = () => { setShowGlobal(true); scroller.current?.scrollTo({ top: 0 }) }
+  const back = () => { setScope(null); setShowGlobal(false); loadFleet(); scroller.current?.scrollTo({ top: 0 }) }
 
   // Allowing a blocked host is a new rule, pre-filled for where it was seen.
   function decide(kind, b) {
@@ -946,13 +1000,14 @@ export function EgressView({ onNavigate }) {
 
   return (
     <div ref={scroller} className="h-full overflow-y-auto">
-      {scope ? (
+      {showGlobal ? <GlobalPanel onBack={back} />
+        : scope ? (
           <SandboxDetail key={scope} name={scope} sandbox={fleet?.sandboxes?.find((s) => s.name === scope) ?? live.sandboxes?.find((s) => s.name === scope)}
-            events={live.events} onBack={back} onNavigate={onNavigate} reloadSignal={signal}
+            events={live.events} onBack={back} onNavigate={onNavigate} onOpenGlobal={openGlobal} reloadSignal={signal}
             onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} onEditPolicy={editPolicy} />
         ) : !fleet ? <p role="status" className="py-24 text-center text-sm text-muted-foreground">Loading…</p>
         : fleet.error ? <p role="alert" className="py-24 text-center text-sm text-muted-foreground">{fleet.error}</p>
-        : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
+        : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onOpenGlobal={openGlobal} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
             onEditPolicy={(p) => setPolicyEditor({ initial: p })} onEditBlocked={() => setEditingBlocked(true)}
             onAddPolicy={() => setPolicyEditor({ initial: newPolicy(forSandbox ? { appliesTo: { everyone: false, groups: groupFor(org, forSandbox), sandboxes: [] } } : {}) })}
             forSandbox={forSandbox} onClearSandbox={() => setForSandbox(null)} />}
