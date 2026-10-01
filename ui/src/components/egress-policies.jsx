@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle, Users, X } from "lucide-react"
+import { AlertTriangle, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -8,8 +8,9 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { RequestList, Segmented } from "@/components/rule-editor"
+import { groupFor } from "@/lib/groups"
 import { GroupPicker } from "@/components/group-picker"
-import { useApi } from "@/lib/compute"
+import { useApi } from "@/lib/location-context"
 import { appliesTo as reaches } from "@/lib/egress"
 import { cn } from "@/lib/utils"
 
@@ -48,7 +49,7 @@ const isDefault = (a) => JSON.stringify({ ...DEFAULT_ADVANCED, ...a }) === JSON.
 function toForm(p) {
   const a = { ...DEFAULT_ADVANCED, ...(p?.advanced ?? {}) }
   return {
-    id: p?.id ?? "", name: p?.name ?? "", action: p?.action ?? "allow",
+    id: p?.id ?? "", name: p?.name ?? "", action: p?.action ?? "allow", setup: p?.setup ?? null,
     destinations: (p?.destinations ?? []).join("\n"),
     appliesTo: { everyone: false, groups: [], sandboxes: [], ...(p?.appliesTo ?? {}) },
     ports: a.ports.join(", "), programs: [...a.programs], requests: a.requests, allow: [...a.allow], deny: [...a.deny], enforcement: a.enforcement, privateIps: a.privateIps.join(", "),
@@ -58,6 +59,8 @@ function toForm(p) {
 function toPolicy(f, isNew) {
   return {
     id: isNew ? slug(f.name) : f.id, name: f.name.trim(), action: f.action, destinations: lines(f.destinations), appliesTo: f.appliesTo,
+    // An MCPs & Skills setup's own policy keeps its marker, so the setup still finds it.
+    ...(f.setup ? { setup: f.setup } : {}),
     ...(f.action === "allow" ? { advanced: {
       ports: split(f.ports).map(Number), programs: f.programs, requests: f.requests,
       allow: f.requests === "custom" ? f.allow.filter((r) => r.path) : [], deny: f.deny.filter((r) => r.path),
@@ -66,10 +69,12 @@ function toPolicy(f, isNew) {
   }
 }
 
+const setupName = (p) => p.setup?.name ?? "an MCPs & Skills setup"
+
 export function appliesToText(p, groups) {
   const to = p.appliesTo
   if (to.everyone) return "every sandbox"
-  const names = [...to.groups.map((id) => groups.find((g) => g.id === id)?.name ?? id), ...to.sandboxes]
+  const names = [...to.groups.map((id) => groups.find((g) => g.id === id)?.name ?? id), ...to.sandboxes, ...(to.setups?.length ? [`sandboxes using “${setupName(p)}”`] : [])]
   return names.length ? joinAnd(names) : null
 }
 
@@ -87,18 +92,10 @@ export function describePolicy(p, groups = []) {
   return `Allows ${requests}${except} to ${hosts || "…"} on port${a.ports.length === 1 ? "" : "s"} ${joinAnd(a.ports.map(String))}, ${programs}.${audit} ${scope}`
 }
 
-const SCOPES = [
-  { id: "groups", label: "Groups", hint: "Sandboxes in the groups you pick, now and later" },
-  { id: "sandboxes", label: "Specific sandboxes", hint: "Only the sandboxes you name" },
-  { id: "everyone", label: "Every sandbox", hint: "Every sandbox on this gateway" },
-]
-const scopeOf = (to) => (to?.everyone ? "everyone" : to?.groups?.length ? "groups" : to?.sandboxes?.length ? "sandboxes" : "groups")
-
-export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, knownPrograms = [], onSaved, onGroupCreated }) {
+export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, setupMembers = {}, knownPrograms = [], onSaved, onGroupCreated }) {
   const api = useApi()
   const isNew = !initial?.id
   const [form, setForm] = React.useState(() => toForm(initial))
-  const [scope, setScope] = React.useState(() => scopeOf(initial?.appliesTo))
   // Groups made from this form, until the page reloads its list.
   const [created, setCreated] = React.useState([])
   const groups = [...savedGroups, ...created.filter((g) => !savedGroups.some((s) => s.id === g.id))].sort((a, b) => a.name.localeCompare(b.name))
@@ -106,26 +103,25 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
-  React.useEffect(() => { if (open) { setForm(toForm(initial)); setScope(scopeOf(initial?.appliesTo)); setError(null); setProgram(""); setConfirmDelete(false) } }, [open, initial])
+  React.useEffect(() => { if (open) { setForm(toForm(initial)); setError(null); setProgram(""); setConfirmDelete(false) } }, [open, initial])
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
   const setTo = (patch) => setForm((f) => ({ ...f, appliesTo: { ...f.appliesTo, ...patch } }))
+  // A setup's own policy reaches the sandboxes that use the setup; groups are optional there.
+  const forSetup = form.appliesTo.setups?.length > 0
+  const validGroup = !form.appliesTo.everyone && !form.appliesTo.sandboxes.length && (forSetup || form.appliesTo.groups.length > 0) && form.appliesTo.groups.every((id) => groups.some((g) => g.id === id))
   const policy = toPolicy(form, isNew)
   const addProgram = (path) => {
     const value = path.trim()
     if (value && !form.programs.includes(value)) set({ programs: [...form.programs, value] })
     setProgram("")
   }
-  const otherSandboxes = sandboxes.filter((s) => !form.appliesTo.sandboxes.includes(s))
-  const chooseScope = (next) => {
-    setScope(next)
-    setTo(next === "everyone" ? { everyone: true, groups: [], sandboxes: [] } : next === "groups" ? { everyone: false, sandboxes: [] } : { everyone: false, groups: [] })
-  }
-  const counts = Object.fromEntries(groups.map((g) => [g.id, sandboxes.filter((n) => assignments[n] === g.id).length]))
-  const reached = sandboxes.filter((n) => reaches(policy, { name: n, group: assignments[n] ?? null }))
+  const counts = Object.fromEntries(groups.map((g) => [g.id, sandboxes.filter((n) => groupFor({ assignments }, n).includes(g.id)).length]))
+  const reached = sandboxes.filter((n) => reaches(policy, { name: n, groups: groupFor({ assignments }, n), setups: setupMembers[n] ?? [] }))
 
   async function submit(event) {
     event.preventDefault()
+    if (!validGroup) { setError("Choose at least one group for this network rule."); return }
     setBusy(true); setError(null)
     try { onSaved(await api.savePolicy({ ...policy, isNew }), policy); onOpenChange(false) } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
@@ -160,6 +156,17 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
             <Input id="policy-name" value={form.name} onChange={(e) => set({ name: e.target.value })} className="text-xs" placeholder="GitHub read" required autoFocus={isNew} />
           </div>
 
+          <fieldset className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3">
+            <legend className="px-1 text-xs font-medium">Groups <span className="text-muted-foreground">· {forSetup ? "Optional" : "Required"}</span></legend>
+            {forSetup && <p className="text-[11px] leading-relaxed text-muted-foreground">Applies to sandboxes that use the MCPs &amp; Skills setup{form.setup?.name ? <> “<span className="text-foreground">{form.setup.name}</span>”</> : ""}. Groups you pick here also get it.</p>}
+            <GroupPicker multiple required={!forSetup} groups={groups} counts={counts} value={form.appliesTo.groups}
+              onChange={(ids) => setTo({ everyone: false, groups: ids, sandboxes: [] })}
+              onCreated={(g) => { setCreated((c) => [...c, g]); onGroupCreated?.(g) }} />
+            {!forSetup && <p className="text-[11px] leading-relaxed text-muted-foreground">Choose one or more groups. Every sandbox in the selected groups inherits this rule, including sandboxes created later.</p>}
+            {reached.length > 0 && <p className="text-[11px] text-muted-foreground">{reached.length} {reached.length === 1 ? "sandbox" : "sandboxes"} currently in scope.</p>}
+            {(!isNew && !forSetup && (initial.appliesTo.everyone || initial.appliesTo.sandboxes.length || !initial.appliesTo.groups.length)) && <p className="text-[11px] text-amber-700">This rule uses a legacy scope. Choose its groups before saving; saving replaces the previous scope.</p>}
+          </fieldset>
+
           <div className="grid gap-1.5">
             <span className="text-xs font-medium">Action</span>
             <div className="w-48"><Segmented label="Action" options={[{ id: "allow", label: "Allow" }, { id: "block", label: "Block" }]} value={form.action} onChange={(action) => set({ action })} /></div>
@@ -172,52 +179,8 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
             <p className="text-[11px] text-muted-foreground">
               {form.action === "block" ? "One host per line. Blocking a host also blocks its subdomains." : "One host per line. *.example.com matches one level, **.example.com any depth."}
             </p>
-            {form.action === "allow" && (
-              <label className="flex w-fit items-center gap-2 text-[11px] text-muted-foreground" title="OpenShell 0.1.2 can't allow every host yet. We've asked for it upstream.">
-                <input type="checkbox" disabled className="size-3.5" />All destinations (Open)<span className="text-faint">· needs OpenShell support</span>
-              </label>
-            )}
           </div>
 
-          <div className="grid gap-2">
-            <span className="text-xs font-medium">Applies to</span>
-            <Segmented label="Applies to" options={SCOPES} value={scope} onChange={chooseScope} />
-            {scope === "groups" && (
-              <GroupPicker multiple groups={groups} counts={counts} value={form.appliesTo.groups} onChange={(ids) => setTo({ groups: ids })}
-                onCreated={(g) => { setCreated((c) => [...c, g]); onGroupCreated?.(g) }} />
-            )}
-            {scope === "groups" && !groups.length && (
-              <p className="text-[11px] text-muted-foreground">No groups yet. Create one here, then add sandboxes to it on the Groups page or when you create a sandbox.</p>
-            )}
-            {(scope === "sandboxes" || (scope === "groups" && form.appliesTo.sandboxes.length > 0)) && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {scope === "groups" && <span className="text-[11px] text-muted-foreground">Also</span>}
-                {form.appliesTo.sandboxes.map((s) => (
-                  <span key={s} className="flex items-center gap-1 rounded-md border border-foreground/25 bg-accent py-0.5 pr-0.5 pl-2 font-mono text-[11px]">
-                    {s}
-                    <button type="button" aria-label={`Remove ${s}`} onClick={() => setTo({ sandboxes: form.appliesTo.sandboxes.filter((x) => x !== s) })}
-                      className="rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3" /></button>
-                  </span>
-                ))}
-                {scope === "sandboxes" && otherSandboxes.length > 0 && (
-                  <select value="" aria-label="Add a sandbox" onChange={(e) => e.target.value && setTo({ sandboxes: [...form.appliesTo.sandboxes, e.target.value] })}
-                    className="h-7 rounded-md border border-dashed border-border bg-transparent px-2 text-[11px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <option value="">+ Add sandbox</option>
-                    {otherSandboxes.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                )}
-              </div>
-            )}
-            <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
-              <Users className="mt-px size-3 shrink-0" aria-hidden="true" />
-              <span>
-                {scope === "everyone" ? `Every sandbox on this gateway, including new ones${sandboxes.length ? ` (${sandboxes.length} today)` : ""}.`
-                  : reached.length ? <>Reaches {reached.length === 1 ? "1 sandbox" : `${reached.length} sandboxes`} today: <span className="font-mono text-foreground">{reached.slice(0, 6).join(", ")}</span>{reached.length > 6 ? ` and ${reached.length - 6} more` : ""}.{scope === "groups" ? " Sandboxes added to these groups later get it too." : ""}</>
-                  : scope === "groups" && form.appliesTo.groups.length ? "No sandboxes in these groups yet. Add some on the Groups page or when you create a sandbox; they get this rule automatically."
-                  : scope === "groups" ? "Pick one or more groups." : "Pick the sandboxes it applies to."}
-              </span>
-            </p>
-          </div>
 
           {form.action === "allow" && (
             <details className="group rounded-lg border border-border" open={!isDefault(initial?.advanced) || undefined}>
@@ -279,12 +242,12 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
           <DialogFooter className="sm:justify-between">
             {!isNew ? (
               confirmDelete
-                ? <Button type="button" variant="destructive" disabled={busy} onClick={remove}>Delete rule</Button>
+                ? <span className="grid gap-1.5">{form.setup && <span className="max-w-64 text-[11px] text-muted-foreground">Sandboxes that use “{form.setup.name}” lose access to these websites. Enabling the setup again asks you to approve them for each sandbox.</span>}<Button type="button" variant="destructive" disabled={busy} onClick={remove}>Delete rule</Button></span>
                 : <Button type="button" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(true)}>Delete</Button>
             ) : <span />}
             <span className="flex gap-2">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" disabled={busy || !form.name.trim() || !lines(form.destinations).length} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
+              <Button type="submit" disabled={busy || !validGroup || !form.name.trim() || !lines(form.destinations).length} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
                 {busy && <Spinner aria-hidden="true" />}{isNew ? "Add rule" : "Save rule"}
               </Button>
             </span>

@@ -4,34 +4,54 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { createApi } from '@/lib/api'
-import { useApi, useCompute } from '@/lib/compute'
+import { useCompute } from '@/lib/compute'
+import { useApi, useLocation } from '@/lib/location-context'
+import { useInventory } from '@/lib/inventory'
 import { copyLocalSandbox, copyCloudSandboxToLocal, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
+import { useTransferGroups } from '@/components/transfer-groups'
 import { LOCAL_ORIGIN, localHandoffUrl, isLocalHandoffMessage } from '@/lib/cloud-transfer'
 
 export function ContinueInCloud({ name, sandbox }) {
   const api = useApi()
   const compute = useCompute()
+  const location = useLocation()
+  const { refresh } = useInventory()
+  const { chooseGroups, dialog } = useTransferGroups()
+  const transfer = React.useRef(null)
+  React.useEffect(() => () => transfer.current?.abort(), [])
   const [stage, setStage] = React.useState(null)
   async function copy() {
+    if (stage || location?.connected === false) return
+    const controller = new AbortController()
+    transfer.current = controller
+    const signal = api.signal ? AbortSignal.any([api.signal, controller.signal]) : controller.signal
     setStage('signin')
     try {
       await compute.connect()
       setStage('prepare')
-      await waitForCloudReady(() => localCloudRequest('machine'), { signal: api.signal })
+      signal.throwIfAborted()
+      await waitForCloudReady(() => localCloudRequest('machine', undefined, { signal }), { signal })
+      const destination = createApi('cloud', signal)
+      setStage('groups')
+      const groups = await chooseGroups(destination, 'cloud', signal)
       setStage('transfer')
-      const result = await copyLocalSandbox(api, createApi('cloud', api.signal), name)
-      if (api.signal?.aborted) return
+      const result = await copyLocalSandbox(createApi(api.target, signal, location?.context), destination, name, groups)
+      signal.throwIfAborted()
       toast.success('Workspace ready in cloud', { description: result.warning || 'Reconnect your agent credentials to continue.' })
-      try { sessionStorage.setItem('gateway-box', result.name) } catch {}
+      const context = await destination.contextKey()
+      try { sessionStorage.setItem('gateway-box', JSON.stringify({ name: result.name, context, target: 'cloud' })) } catch {}
+      refresh()
       compute.selectTarget('cloud')
+      window.dispatchEvent(new CustomEvent('openrod-sandbox-handoff', { detail: { name: result.name, context, target: 'cloud' } }))
     } catch (error) { if (error.name !== 'AbortError') toast.error('Couldn’t continue in cloud', { description: error.message }) }
-    finally { setStage(null) }
+    finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
   if (sandbox?.phase !== 'ready') return null
   return <div className="space-y-1.5">
-    <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage)} onClick={copy}>
+    {dialog}
+    <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={copy}>
       {stage ? <Spinner className="size-3.5" /> : <Cloud className="size-3.5" aria-hidden="true" />}
-      {stage === 'signin' ? 'Sign in to cloud…' : stage === 'prepare' ? 'Preparing cloud machine…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue in cloud'}
+      {stage === 'signin' ? 'Sign in to cloud…' : stage === 'prepare' ? 'Preparing cloud machine…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Continue in cloud'}
     </Button>
     <p className="text-[11px] leading-relaxed text-muted-foreground">Copies workspace files and rebuilds saved templates. Your local source stays available. Credential files are excluded; reconnect agents in cloud.</p>
   </div>
@@ -40,6 +60,11 @@ export function ContinueInCloud({ name, sandbox }) {
 export function ContinueLocally({ name, sandbox }) {
   const api = useApi()
   const compute = useCompute()
+  const location = useLocation()
+  const { locations, refresh } = useInventory()
+  const { chooseGroups, dialog } = useTransferGroups()
+  const transfer = React.useRef(null)
+  React.useEffect(() => () => transfer.current?.abort(), [])
   const [stage, setStage] = React.useState(null)
   const handoff = React.useRef(null)
   React.useEffect(() => {
@@ -80,24 +105,37 @@ export function ContinueLocally({ name, sandbox }) {
       }
     }, 1000)
     return () => { active = false; window.removeEventListener('message', receive); clearInterval(timer); handoff.current = null }
-  }, [name])
+  }, [name, api])
 
   if (sandbox?.phase !== 'ready') return null
   async function importLocally() {
+    if (stage || location?.connected === false) return
+    const destinationLocation = locations.find(item => item.target !== 'cloud' && !item.remote && item.connected)
+    if (!destinationLocation) { toast.error('Connect a local gateway before importing this workspace.'); return }
+    const controller = new AbortController()
+    transfer.current = controller
+    const signal = api.signal ? AbortSignal.any([api.signal, controller.signal]) : controller.signal
     setStage('transfer')
     try {
-      const result = await copyCloudSandboxToLocal(api, createApi('local', api.signal), name)
-      if (api.signal?.aborted) return
+      const destination = createApi('local', signal, destinationLocation.context)
+      setStage('groups')
+      const groups = await chooseGroups(destination, 'local OpenRod', signal)
+      setStage('transfer')
+      const result = await copyCloudSandboxToLocal(createApi(api.target, signal, location?.context), destination, name, groups)
+      signal.throwIfAborted()
       toast.success('Workspace running locally', { description: result.warning || 'Your cloud source is unchanged. Reconnect agent credentials locally.' })
-      try { sessionStorage.setItem('gateway-box', result.name) } catch {}
+      try { sessionStorage.setItem('gateway-box', JSON.stringify({ name: result.name, context: destinationLocation.context, target: 'local' })) } catch {}
+      refresh()
       compute.selectTarget('local')
+      window.dispatchEvent(new CustomEvent('openrod-sandbox-handoff', { detail: { name: result.name, context: destinationLocation.context, target: 'local' } }))
     } catch(error) {
       if(error.name !== 'AbortError') toast.error('Couldn’t import locally', {description:error.message})
-    } finally { setStage(null) }
+    } finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
   return (
     <div className="space-y-1.5">
-      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage)} onClick={() => {
+      {dialog}
+      <Button variant="outline" size="sm" className="w-full justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={() => {
         if (compute?.localViewer) { importLocally(); return }
         const nonce = crypto.randomUUID()
         const popup = window.open(localHandoffUrl(nonce), '_blank')
@@ -106,7 +144,7 @@ export function ContinueLocally({ name, sandbox }) {
         setStage('connect')
       }}>
         {stage ? <Spinner className="size-3.5" /> : <Laptop className="size-3.5" aria-hidden="true" />}
-        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Import and run locally'}
+        {stage === 'connect' ? 'Connecting to local OpenRod…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Import and run locally'}
       </Button>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{compute?.localViewer ? 'Creates a separate local sandbox, copies files and rebuilds the image for this computer. Your cloud source stays available.' : 'Open OpenRod on this computer first. Creates a local sandbox, copies files and rebuilds saved templates.'} Reconnect agents locally.</p>
     </div>

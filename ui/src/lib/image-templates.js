@@ -1,4 +1,5 @@
 import { AGENTS as AGENT_CATALOG } from './agents.js'
+import { ANTIGRAVITY_NETWORK_GUIDANCE } from '../../shared/antigravity-network-guidance.js'
 
 // Shared recipe model. Image recipes declare installed agents; their reviewed
 // network access is composed at launch. Recipes never carry policy themselves.
@@ -48,10 +49,10 @@ export function newRecipe(values = {}) {
   return recipe
 }
 export const splitPackages = (text) => text.split(/[\s,]+/).filter(Boolean)
-export const PENDING_RECIPE_KEY = 'openshell-image-recipe-v2'
-export function pendingRecipe() {
+export const pendingRecipeKey = (context) => `openshell-image-recipe-v3:${context}`
+export function pendingRecipe(key) {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(PENDING_RECIPE_KEY))
+    const saved = JSON.parse(sessionStorage.getItem(key))
     return saved?.recipe && typeof saved.recipe.name === 'string' ? saved : null
   } catch { return null }
 }
@@ -110,6 +111,7 @@ export function dockerfileFor(recipe) {
   for (const agent of recipe.customAgents ?? []) lines.push(`RUN ${JSON.stringify(['/bin/bash', '-euo', 'pipefail', '-c', agent.install])}`)
   if (recipe.repository) lines.push(`RUN git clone -- ${quote(recipe.repository)} /sandbox/project`, 'WORKDIR /sandbox/project')
   if (recipe.setup.trim()) lines.push('COPY --chown=1000:1000 setup.sh /tmp/template-setup.sh', 'RUN bash -eu /tmp/template-setup.sh')
+  if (recipe.agents.includes('antigravity')) lines.push(`RUN printf '%s\\n' ${ANTIGRAVITY_NETWORK_GUIDANCE.split('\n').map(quote).join(' ')} >> ${recipe.repository ? '/sandbox/project' : '/sandbox'}/GEMINI.md`)
   if (recipe.setups?.length) lines.push('COPY --chown=1000:1000 setup-bundles/ /sandbox/.openshell/bundles/')
   // Environment and the start command live in the OpenShell template, not in image layers.
   lines.push('', 'CMD ["/bin/bash"]', '')

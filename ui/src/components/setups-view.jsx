@@ -13,15 +13,35 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/
 import { BlurFade } from '@/components/ui/blur-fade'
 import { Spinner } from '@/components/ui/spinner'
 import { terminalHref } from '@/lib/sandbox-session'
-import { useApi } from "@/lib/compute"
-import { importNeedsAttention } from '@/lib/import-setup'
-import { importsForApi } from '@/lib/setup-imports'
-import { canPrepareAtLaunch, launchableItem, launchRequirements } from '../../shared/setup-launch.js'
+import { LocationProvider, useApi, useLocation } from '@/lib/location-context'
+import { LocationBadge } from '@/components/location-badge'
+import { importNeedsAttention, inactiveItems, providedCredentials } from '@/lib/import-setup'
+import { POLICY_HANDOFF } from '@/components/egress-view'
+import { setupImports } from '@/lib/setup-imports'
+import { inSetupPolicy, policyRows, setupAccess } from '@/lib/setup-network'
+import { canPrepareAtLaunch, cannotRun, isPackagePending, launchableItem, launchRequirements } from '../../shared/setup-launch.js'
 
 const SOURCES = [{ id: 'codex', name: 'Codex', logo: 'codex' }, { id: 'claude', name: 'Claude Code', logo: 'claudecode' }, { id: 'cursor', name: 'Cursor', logo: 'cursor' }]
 const count = (setup, kind) => setup.items.filter((item) => item.kind === kind).length
-const readyCount = (setup) => setup.items.filter(item => !item.disabled && !item.issues.length).length
-const issueCount = (setup) => setup.items.filter((item) => item.issues.length).length
+// A package that only still needs downloading is ready: Import (or launch) installs it.
+const openIssues = (item) => item.issues.filter(issue => !isPackagePending(issue))
+const readyCount = (setup) => setup.items.filter(item => !item.disabled && !openIssues(item).length).length
+const issueCount = (setup) => setup.items.filter((item) => openIssues(item).length).length
+const sourceNames = (item) => item.sources.map(id => SOURCES.find(source => source.id === id)?.name || id).join(', ')
+const hostLabel = (r) => `${r.host}${r.port && Number(r.port) !== 443 ? `:${r.port}` : ''}${r.path || ''}`
+const REQUIREMENT_LABELS = { build: 'Downloads from', runtime: 'Connects to', auth: 'Sign-in' }
+const CHECK_LABELS = { connected: 'Connected', 'needs-sign-in': 'Needs sign-in', 'needs-credentials': 'Needs credentials', unverified: 'Couldn’t check' }
+const STATE_LABELS = { prepared: 'Ready', 'sign-in-in-sandbox': 'Sign in after install', 'needs-attention': 'Needs attention', disabled: 'Inactive' }
+const itemStatus = (item) => item.disabled ? 'Inactive' : cannotRun(item) ? 'Can’t run in a sandbox' : openIssues(item).length ? 'Needs attention' : item.issues.length ? 'Installs on import' : item.kind === 'skill' ? `${item.files?.length ?? 0} files` : item.auth?.mode === 'agent-session' ? 'Sign in after install' : item.verification?.status === 'connected' ? 'Connected' : item.artifact ? 'Package ready' : 'Not checked yet'
+// Same rule as the server's runtimeRequirements, so mistakes show before Import.
+const validHost = (host) => /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}$/i.test(host) && !host.includes('..') && !host.includes('*') && !host.endsWith('.local')
+const hostsError = (hosts = []) => hosts.some(host => !validHost(host)) ? 'Enter domain names like api.github.com (no wildcards, IP addresses or local names).' : hosts.length > 20 ? 'Add up to 20 websites.' : ''
+// A local MCP with credentials but no known server must name where they may go; Import would otherwise stop after the download.
+const needsHost = (item) => item.credentialFields?.length > 0 && !item.requirements.some(r => r.phase === 'runtime')
+const hostsMissing = (item, choice) => needsHost(item) && providedCredentials(choice) && !choice?.hosts?.length
+// What a save tells the egress policy popup: the policy, or why it wasn't saved.
+const networkOutcome = (saved) => saved?.egressPolicy ?? (saved?.egressPolicyError ? { error: saved.egressPolicyError } : null)
+const elapsed = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 function ErrorMessage({ children }) { return children ? <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">{children}</p> : null }
 function Note({ children }) { return <div className="flex gap-2 rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" /><span>{children}</span></div> }
 
@@ -48,9 +68,14 @@ function SetupItemTabs({ items, children }) {
   </Tabs>
 }
 
-export function SetupsView({ sandbox = null, setupIds = [] }) {
+export function SetupsView(props) {
+  const location = useLocation()
+  return <ScopedSetupsView key={location?.id ?? location?.context ?? 'default'} {...props} />
+}
+
+function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
   const api = useApi()
-  const setupImports = importsForApi(api)
+  const location = useLocation()
   const [setups, setSetups] = React.useState(null)
   const [error, setError] = React.useState('')
   const [importing, setImporting] = React.useState(false)
@@ -62,13 +87,14 @@ export function SetupsView({ sandbox = null, setupIds = [] }) {
   const [status, setStatus] = React.useState('all')
   const [descending, setDescending] = React.useState(false)
   const [refreshing, setRefreshing] = React.useState(false)
+  const [network, setNetwork] = React.useState(null)
   const refresh = React.useCallback(async () => {
     setRefreshing(true)
     try { setSetups(await api.setups()); setError('') } catch (e) { setError(e.message) }
     finally { setRefreshing(false) }
-  }, [])
+  }, [api])
   const importJobs = React.useSyncExternalStore(setupImports.subscribe, setupImports.getSnapshot)
-  const completedImports = importJobs.filter(job => job.status === 'saved').map(job => job.id).join(',')
+  const completedImports = importJobs.filter(job => job.status === 'saved' && job.location?.context === location?.context).map(job => job.id).join(',')
   React.useEffect(() => { refresh() }, [refresh, completedImports])
   const shown = React.useMemo(() => (setups || []).filter((setup) => {
     const matches = [setup.name, ...setup.items.flatMap(item => [item.name, ...(item.sources || [])])].join(' ').toLowerCase().includes(query.trim().toLowerCase())
@@ -122,7 +148,7 @@ export function SetupsView({ sandbox = null, setupIds = [] }) {
         </BlurFade>}
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-8"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Saved locally · Available in templates and sandboxes</span></div>
-    {deleting && <Dialog open onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null) }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Delete “{deleting.name}”?</DialogTitle><DialogDescription>This deletes the saved setup and its imported rows. Tools already installed in sandboxes or built images stay in place. Templates using this setup will need a different setup selected before reuse.</DialogDescription></DialogHeader><ErrorMessage>{deleteError}</ErrorMessage><div className="flex justify-end gap-2"><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={deleteBusy} onClick={async () => {
+    {deleting && <Dialog open onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null) }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Delete “{deleting.name}”?</DialogTitle><DialogDescription>This deletes the setup and its egress policy. MCPs already installed in sandboxes stay, but lose access to the websites that policy allowed. Templates that use this setup need another setup before reuse.</DialogDescription></DialogHeader><ErrorMessage>{deleteError}</ErrorMessage><div className="flex justify-end gap-2"><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={deleteBusy} onClick={async () => {
       setDeleteBusy(true); setDeleteError('')
       try {
         await api.deleteSetup(deleting.id, deleting.revision)
@@ -131,32 +157,119 @@ export function SetupsView({ sandbox = null, setupIds = [] }) {
         setDeleting(null)
       } catch (e) { setDeleteError(e.message) } finally { setDeleteBusy(false) }
     }}>{deleteBusy && <Spinner />}Delete setup</Button></div></DialogContent></Dialog>}
-    {importing && <ImportSetup initialReview={importing.review} initialName={importing.name} onClose={() => setImporting(false)} onSaved={() => { setImporting(false); refresh() }} />}
+    {importing && <ImportSetup initialReview={importing.review} initialName={importing.name} onClose={() => setImporting(false)} onSaved={(saved) => { setImporting(false); refresh(); setNetwork(networkOutcome(saved)) }} />}
+    {network && <SetupNetworkDialog policy={network} onClose={() => setNetwork(null)} />}
     {selected && <SetupDetail setup={selected} sandbox={sandbox} onPrepare={async () => { try { const review = await api.prepareSavedSetup(selected.id); setImporting({ review, name: selected.name + " (updated)" }); setSelected(null) } catch (e) { setError(e.message) } }} onUpdated={(updated) => { setSelected(updated); setSetups((current) => current.map((entry) => entry.id === updated.id ? updated : entry)) }} onClose={() => setSelected(null)} />}
   </div>
 }
 
 export function SetupImportNotifications() {
-  const api = useApi()
-  const setupImports = importsForApi(api)
   const jobs = React.useSyncExternalStore(setupImports.subscribe, setupImports.getSnapshot)
   const [reviewing, setReviewing] = React.useState(null)
+  const [network, setNetwork] = React.useState(null)
   return <>
     {jobs.length > 0 && <div aria-label="Import notifications" className="shrink-0 divide-y border-b bg-muted/30">
       {jobs.map(job => <div key={job.id} role={job.status === 'failed' || job.status === 'needs-attention' ? 'alert' : 'status'} className="flex items-center gap-3 px-4 py-3 text-xs sm:px-8">
         {job.status === 'importing' ? <Spinner /> : job.status === 'saved' ? <Check className="size-4 shrink-0 text-emerald-600" /> : <ShieldCheck className="size-4 shrink-0 text-amber-600" />}
-        <div className="min-w-0 flex-1"><p className="font-medium">{job.name} · {job.status === 'importing' ? 'Importing' : job.status === 'saved' ? 'Imported' : job.status === 'cancelled' ? 'Import cancelled' : 'Import needs attention'}</p><p className="mt-0.5 break-words text-muted-foreground">{job.message}</p></div>
+        <div className="min-w-0 flex-1"><p className="font-medium">{job.name} · {job.status === 'importing' ? 'Importing' : job.status === 'saved' ? 'Imported' : job.status === 'cancelled' ? 'Import cancelled' : job.status === 'failed' ? 'Import failed' : 'Import needs attention'}</p><p className="mt-0.5 break-words text-muted-foreground">{job.message}</p></div>
+        <LocationBadge location={job.location} />
         {!['importing', 'saved'].includes(job.status) && <Button size="sm" variant="outline" onClick={() => setReviewing(job)}>Review import</Button>}
+        {job.status === 'saved' && networkOutcome(job.setup) && <Button size="sm" variant="outline" onClick={() => setNetwork({ policy: networkOutcome(job.setup), location: job.location })}>View egress policy</Button>}
         {job.status !== 'importing' && <Button size="sm" variant="ghost" aria-label={`Dismiss import notification for ${job.name}`} onClick={() => setupImports.dismiss(job.id)}>Dismiss</Button>}
       </div>)}
     </div>}
-    {reviewing && <ImportSetup key={reviewing.id} initialJob={reviewing} initialReview={reviewing.review} initialName={reviewing.name} onClose={() => setReviewing(null)} onSaved={() => setReviewing(null)} />}
+    {reviewing && <LocationProvider location={reviewing.location}><ImportSetup key={reviewing.id} initialJob={reviewing} initialReview={reviewing.review} initialName={reviewing.name} onClose={() => setReviewing(null)} onSaved={(saved) => { setNetwork({ policy: networkOutcome(saved), location: reviewing.location }); setReviewing(null) }} /></LocationProvider>}
+    {network?.policy && <LocationProvider location={network.location}><SetupNetworkDialog policy={network.policy} onClose={() => setNetwork(null)} /></LocationProvider>}
   </>
+}
+
+// Saving a setup creates or updates its egress policy; this says what it allows.
+function SetupNetworkDialog({ policy, onClose }) {
+  const location = useLocation()
+  const rows = policyRows(policy)
+  const openInEgress = () => {
+    try { sessionStorage.setItem(POLICY_HANDOFF, JSON.stringify({ edit: policy.id })) } catch { /* optional */ }
+    onClose()
+    window.dispatchEvent(new CustomEvent('openrod-navigate', { detail: { view: 'egress', location } }))
+    // Egress may already be open; it then takes the handoff from this event.
+    window.dispatchEvent(new Event(POLICY_HANDOFF))
+  }
+  if (policy.error) return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogContent className="sm:max-w-md">
+    <DialogHeader><DialogTitle>Egress policy not saved</DialogTitle><DialogDescription>The setup was saved, but its egress policy wasn’t. When you enable the setup on a sandbox, you approve its websites there instead.</DialogDescription></DialogHeader>
+    <p className="text-xs text-muted-foreground">{policy.error}</p>
+    <div className="flex justify-end"><Button onClick={onClose}>Done</Button></div>
+  </DialogContent></Dialog>
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-md">
+    <DialogHeader><DialogTitle>{policy.created ? 'Egress policy created' : 'Egress policy updated'}</DialogTitle><DialogDescription>We {policy.created ? 'created' : 'updated'} the egress policy “{policy.name}”. Sandboxes that use this setup can now reach the websites below. This policy doesn’t open anything else.</DialogDescription></DialogHeader>
+    {rows.length > 0 && <ul aria-label="Allowed websites" className="max-h-64 divide-y overflow-y-auto rounded-lg border text-xs">{rows.map(row => <li key={row.host} className="flex items-baseline justify-between gap-3 px-3 py-2"><span className="min-w-0 break-all font-mono">{row.host}</span>{row.items.length > 0 && <span className="max-w-[50%] text-right text-muted-foreground">{row.items.join(', ')}</span>}</li>)}</ul>}
+    {policy.blocked?.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400">Not allowed because your organization blocks them: {policy.blocked.join(', ')}.</p>}
+    {policy.approval?.length > 0 && <p className="text-xs text-muted-foreground">Not in this policy, because an MCP sends credentials there or names it as its sign-in service: {policy.approval.map(a => `${a.host} (${a.items.join(', ')})`).join(', ')}. You approve these for each sandbox when you enable the setup there.</p>}
+    {(policy.sync?.error || policy.sync?.failed?.length > 0) && <p className="text-xs text-muted-foreground">The policy is saved, but some sandboxes that use this setup weren’t updated yet. The console keeps retrying in the background.</p>}
+    <p className="text-[11px] text-muted-foreground">To let an MCP reach another website, add it to this policy in Network › Egress.</p>
+    <div className="flex justify-end gap-2"><Button variant="outline" onClick={openInEgress}>Edit policy</Button><Button onClick={onClose}>Done</Button></div>
+  </DialogContent></Dialog>
+}
+
+// Which of an MCP's websites its setup's egress policy opens, and which each sandbox approves.
+function PolicyNote({ item }) {
+  const hosts = (keep) => [...new Set(item.requirements.filter(r => ['runtime', 'auth'].includes(r.phase) && keep(r)).map(r => r.host.toLowerCase()))]
+  const policy = hosts(r => inSetupPolicy(item, r)), approval = hosts(r => !inSetupPolicy(item, r))
+  return <>
+    {policy.length > 0 && <p className="text-muted-foreground">Import adds {policy.join(', ')} to this setup’s egress policy.</p>}
+    {approval.length > 0 && <p className="text-muted-foreground">You approve {approval.join(', ')} for each sandbox when you enable the setup there{item.credentialRef || item.credentialFields?.length ? ', because this MCP sends credentials' : ''}.</p>}
+  </>
+}
+
+function PreparationProgress({ preparation, onCancel }) {
+  const running = preparation.status === 'running'
+  const [now, setNow] = React.useState(Date.now)
+  React.useEffect(() => { if (!running) return; setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [running])
+  const started = Date.parse(preparation.createdAt)
+  const current = running ? preparation.current : null
+  const mcps = preparation.items?.filter(item => item.kind === 'mcp') ?? []
+  const skills = preparation.items?.filter(item => item.kind === 'skill') ?? []
+  const skillsDone = skills.every(item => item.state)
+  const dot = <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+  return <>
+    <div className="flex items-center gap-3">
+      <Spinner />
+      <span className="min-w-0 flex-1">{current && mcps.length ? 'Preparing your tools…' : preparation.message}</span>
+      {running && !Number.isNaN(started) && <span aria-hidden="true" className="tabular-nums text-muted-foreground">{elapsed(Math.max(0, Math.floor((now - started) / 1000)))}</span>}
+      {running && <Button size="sm" variant="outline" onClick={onCancel}>Cancel import</Button>}
+    </div>
+    {(mcps.length > 0 || skills.length > 0) && <ul aria-label="Import progress" className="space-y-1.5 border-t pt-2">
+      {mcps.map(item => {
+        const active = current?.id === item.id, skipped = !active && cannotRun(item)
+        return <li key={item.id} className="flex items-center gap-2">
+          <span className="flex size-3.5 shrink-0 items-center justify-center">{active ? <Spinner className="size-3.5" /> : skipped || !item.state || item.state === 'disabled' ? dot : item.state === 'needs-attention' ? <ShieldCheck className="size-3.5 text-amber-600" /> : <Check className="size-3.5 text-emerald-600" />}</span>
+          <span className="min-w-0 flex-1 truncate">{item.name}</span>
+          <span className="min-w-0 max-w-[60%] truncate text-right text-muted-foreground">{active ? current.message : skipped ? 'Skipped' : STATE_LABELS[item.state] || 'Waiting'}</span>
+        </li>
+      })}
+      {skills.length > 0 && <li className="flex items-center gap-2">
+        <span className="flex size-3.5 shrink-0 items-center justify-center">{skillsDone ? <Check className="size-3.5 text-emerald-600" /> : dot}</span>
+        <span className="min-w-0 flex-1 truncate">{skills.length} {skills.length === 1 ? 'skill' : 'skills'}</span>
+        <span className="text-muted-foreground">{skillsDone ? 'Done' : 'Waiting'}</span>
+      </li>}
+    </ul>}
+  </>
+}
+
+function ExtraHosts({ item, choice, disabled, onChange }) {
+  const error = hostsError(choice?.hosts) || (hostsMissing(item, choice) ? 'Enter at least one website, for example api.github.com.' : '')
+  if (!needsHost(item)) return null
+  return <div className="grid gap-1.5">
+    <p className="font-medium">Where should this MCP send its credentials?</p>
+    <p className="text-muted-foreground">{item.name} needs at least one website it may send {item.credentialFields.join(', ')} to, for example api.github.com.</p>
+    <Input aria-label={`Websites for ${item.name}`} aria-invalid={error ? true : undefined} disabled={disabled} placeholder="e.g. api.github.com" value={choice?.hostsText ?? ''} onChange={e => onChange(e.target.value)} />
+    <span className="text-muted-foreground">Domain names only, separated by commas or spaces. HTTPS only.</span>
+    {error && <p className="text-amber-700 dark:text-amber-400">{error}</p>}
+  </div>
 }
 
 function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My setup", initialJob = null }) {
   const api = useApi()
-  const setupImports = importsForApi(api)
+  const location = useLocation()
   const [sources, setSources] = React.useState([])
   const [scan, setScan] = React.useState(null)
   const [ids, setIds] = React.useState([])
@@ -171,14 +284,24 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
   const [preparation, setPreparation] = React.useState(initialJob?.preparation ?? null)
   const [preparedReview, setPreparedReview] = React.useState(initialJob?.prepared ?? false)
   const [finalImport, setFinalImport] = React.useState(false)
+  const [importAttempted, setImportAttempted] = React.useState(Boolean(initialJob))
   const jobId = React.useRef(initialJob?.id)
   const mounted = React.useRef(true)
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const preparing = preparation?.status === 'running' || (busy && Boolean(preparation))
   const choose = (id, update) => { setPreparedReview(false); setChoices(old => ({ ...old, [id]: { ...old[id], ...update } })) }
+  async function removeItem(id) {
+    const next = await api.removeSetupReviewItem(review.token, id)
+    setReview(next)
+    setIds(current => current.filter(itemId => itemId !== id))
+    setChoices(current => Object.fromEntries(Object.entries(current).filter(([itemId]) => itemId !== id)))
+    setPreparation(null)
+    if (jobId.current) setupImports.updateReview(jobId.current, next, preparedReview)
+  }
   async function importSelection(saveOnly = false) {
+    setImportAttempted(true)
     setFinalImport(true)
-    const task = setupImports.start({ id: jobId.current, review, name, choices, saveOnly,
+    const task = setupImports.start({ id: jobId.current, review, name, choices, saveOnly, api, location,
       resumeJob: preparation?.status === 'running' ? preparation : undefined,
     }, {
       onProgress: next => { if (mounted.current) setPreparation(next) },
@@ -188,8 +311,8 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
     try {
       const result = await task.promise
       if (!mounted.current) return
-      if (result.status === 'saved') onSaved()
-      else if (result.status === 'needs-attention') setError('Some items need attention. Update them and retry, or import this setup with those items inactive.')
+      if (result.status === 'saved') onSaved(result.setup)
+      else if (result.status === 'needs-attention') setError('Some items couldn’t be prepared. Remove them or fix them, then retry the import.')
       else { setPreparedReview(false); setError('Import cancelled. Completed preparation is kept here for retry.') }
     } finally { if (mounted.current) setFinalImport(false) }
   }
@@ -201,13 +324,14 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
     return [...next]
   })
   const allVisibleSelected = items.length > 0 && items.every((item) => selectedIds.has(item.id))
+  const inactive = review ? inactiveItems(review, choices) : []
+  const hostsInvalid = Object.values(choices).some(choice => hostsError(choice.hosts)) || Boolean(review?.items.some(item => !item.disabled && hostsMissing(item, choices[item.id])))
   return <Dialog open onOpenChange={(open) => { if (!open && (jobId.current || finalImport || (!busy && !preparing))) onClose() }}>
     <DialogContent className="flex max-h-[90svh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-      <DialogHeader className="shrink-0 px-6 pb-4 pt-6 pr-12"><DialogTitle>{review ? 'Import setup' : scan ? 'Choose what to bring' : 'Bring my setup'}</DialogTitle><DialogDescription>{review ? 'Import prepares your tools, checks MCP connections, and saves your setup.' : scan ? 'Identical MCPs and skill copies are merged across sources. Different configurations or skill versions stay separate.' : 'Read selected harness configurations on the computer running this console. Your local setup stays unchanged.'}</DialogDescription></DialogHeader>
+      <DialogHeader className="shrink-0 px-6 pb-4 pt-6 pr-12"><DialogTitle>{review ? 'Import setup' : scan ? 'Choose what to bring' : 'Bring my setup'}</DialogTitle><DialogDescription>{review ? 'Import downloads and checks your MCPs, then saves the setup.' : scan ? 'Select the MCPs and skills to import. Items found in more than one agent are listed once.' : 'Choose the agents to import MCPs and skills from.'}</DialogDescription></DialogHeader>
       <div className="min-h-0 space-y-5 overflow-y-auto px-6 pb-5">
       {!scan && !review && <>
         <div className="grid gap-2 sm:grid-cols-3">{SOURCES.map((s) => <button key={s.id} type="button" aria-pressed={sources.includes(s.id)} onClick={() => setSources((v) => v.includes(s.id) ? v.filter((x) => x !== s.id) : [...v, s.id])} className={`flex items-center gap-2 rounded-xl border px-3 py-4 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring ${sources.includes(s.id) ? 'border-ring bg-muted' : 'bg-card'}`}><span className="flex size-7 items-center justify-center rounded-lg border bg-muted/30"><img src={`/logos/agents/${s.logo}.svg`} alt="" className="size-4" /></span>{s.name}{sources.includes(s.id) && <Check className="ml-auto size-3.5" />}</button>)}</div>
-        <Note>No credential stores, project folders or plugin code are scanned. No background sync. This scan runs here, not on another computer viewing the page.</Note>
       </>}
       {scan && !review && <>
         <div className="relative"><Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" /><Input aria-label="Search discovered tools" className="pl-9 text-xs" placeholder="Search MCPs and Skills…" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
@@ -225,41 +349,40 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
                 <h3 className="text-xs font-medium">{label}<span className="ml-2 font-normal text-muted-foreground">{selected}/{group.length}</span></h3>
                 <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy || !group.length} aria-label={`${allSelected ? 'Clear' : 'Select all'} ${label}${query.trim() ? ' in search results' : ''}`} onClick={() => selectItems(group, !allSelected)}>{allSelected ? 'Clear' : 'Select all'}</Button>
               </div>
-              <div className="max-h-64 divide-y overflow-y-auto">{group.map((item) => <label key={item.id} className="flex cursor-pointer items-start gap-3 p-3"><Checkbox disabled={busy} aria-label={`Import ${item.name} from ${item.sources.join(', ')}`} checked={selectedIds.has(item.id)} onCheckedChange={(checked) => selectItems([item], checked)} /><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{item.name}</span><span className="mt-1 block text-[11px] text-muted-foreground">{item.sources.join(', ')}{item.issues.length ? ' · Needs review' : ''}</span></span></label>)}{!group.length && <p className="p-4 text-xs text-muted-foreground">{query.trim() ? `No matching ${label}` : `No ${label} found`}</p>}</div>
+              <div className="max-h-64 divide-y overflow-y-auto">{group.map((item) => <label key={item.id} className="flex cursor-pointer items-start gap-3 p-3"><Checkbox disabled={busy} aria-label={`Import ${item.name} from ${sourceNames(item)}`} checked={selectedIds.has(item.id)} onCheckedChange={(checked) => selectItems([item], checked)} /><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{item.name}</span><span className="mt-1 block text-[11px] text-muted-foreground">{sourceNames(item)}{cannotRun(item) ? ' · Can’t run in a sandbox' : openIssues(item).length ? ' · Needs attention' : ''}</span></span></label>)}{!group.length && <p className="p-4 text-xs text-muted-foreground">{query.trim() ? `No matching ${label}` : `No ${label} found`}</p>}</div>
             </section>
           })}
         </div>
-        <p className="text-[11px] text-muted-foreground">{query.trim() ? 'Bulk selection applies to search results. Other selections are kept. ' : ''}Up to 8 MB per Setup; each Skill is checked during review.</p>
+        {query.trim() && <p className="text-[11px] text-muted-foreground">Select all only affects the search results. Other selections are kept.</p>}
         {scan.warnings.map((warning) => <p key={warning} className="text-[11px] text-muted-foreground">{warning}</p>)}
       </>}
       {review && <>
         <label className="grid gap-1.5 text-xs">Setup name<Input disabled={busy} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>{readyCount(review)} compatible · {issueCount(review)} need attention</span>
+          <span>{readyCount(review)} ready · {issueCount(review)} need attention</span>
         </div>
         <SetupItemTabs items={review.items}>{(items) => <Accordion className="overflow-hidden rounded-lg border">{items.map((item) => <AccordionItem key={item.id} value={item.id}>
+          <div className="flex items-center [&>h3]:min-w-0 [&>h3]:flex-1">
           <AccordionTrigger className="items-center gap-3 rounded-none px-3 py-3 text-xs hover:bg-muted/30 hover:no-underline">
             <span className="min-w-0 flex-1 break-words">{item.name}</span>
-            <span className={`shrink-0 text-[11px] font-normal ${item.issues.length ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
-              {item.disabled ? 'Inactive' : item.issues.length ? 'Needs attention' : item.kind === 'skill' ? `${item.files?.length ?? 0} files` : item.auth?.mode === 'agent-session' ? 'Sign-in needed' : item.verification?.status === 'connected' ? 'Connection checked' : item.artifact ? 'Prepared' : 'Not checked'}
-            </span>
+            <span className={`shrink-0 text-[11px] font-normal ${['Needs attention', 'Can’t run in a sandbox'].includes(itemStatus(item)) ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>{itemStatus(item)}</span>
           </AccordionTrigger>
+          <Button variant="ghost" size="icon" className="mr-2 size-7 shrink-0 text-muted-foreground hover:text-destructive" disabled={busy || preparing} aria-label={`Remove ${item.name} from import`} title="Remove from this import" onClick={() => run(() => removeItem(item.id))}><Trash2 className="size-3.5" /></Button>
+          </div>
           <AccordionContent className="space-y-3 border-t bg-muted/10 px-4 py-4 text-xs leading-relaxed [&_p:not(:last-child)]:mb-0">
-            {item.issues.length > 0 && <div className="space-y-1 text-amber-700 dark:text-amber-400">{item.issues.map(issue => <p key={issue}>{issue}</p>)}</div>}
-            {item.requirements.map((r, i) => <p key={i}><span className="font-medium">{r.phase === 'build' ? 'Build' : r.phase === 'auth' ? 'Sign-in' : 'Runtime'}:</span> {r.host}:{r.port} · {r.reason}</p>)}
-            {item.kind === 'skill' && <p className="text-muted-foreground">Scripts are copied, never run during import. Runtime destinations are unknown and remain subject to sandbox policy.</p>}
-            {item.package && <p>Package: {item.package.name}@{item.artifact?.version || item.package.requested}{item.artifact ? ' · Pinned' : ' · Preparation required'}</p>}
-            {item.verification && <p>Connection: {item.verification.status}{item.verification.reason ? ` · ${item.verification.reason}` : ''}.</p>}
-            {item.artifact?.verification && <p>Initialization: {item.artifact.verification.status}{item.artifact.verification.toolCount !== undefined ? ` · ${item.artifact.verification.toolCount} tools discovered` : ''}.</p>}
-            {(item.verification || item.artifact?.verification) && <p className="text-muted-foreground">Connection checks only; tool calls have not been tested.</p>}
+            {openIssues(item).length > 0 && <div className="space-y-1 text-amber-700 dark:text-amber-400">{openIssues(item).map(issue => <p key={issue}>{issue}</p>)}</div>}
+            {item.requirements.length > 0 && <div className="space-y-1"><p className="text-[11px] font-medium text-muted-foreground">Network access</p>{item.requirements.map((r, i) => <p key={i}><span className="font-medium">{REQUIREMENT_LABELS[r.phase] || r.phase}:</span> {hostLabel(r)}<span className="text-muted-foreground"> · {r.reason}</span></p>)}{item.kind === 'mcp' && !item.disabled && !openIssues(item).some(issue => !issue.startsWith('Connect credentials')) && <PolicyNote item={item} />}</div>}
+            {item.package && <p>npm package {item.package.name}@{item.artifact?.version || item.package.requested}{item.artifact ? ' · downloaded and version-locked' : ' · downloads when you press Import'}</p>}
+            {item.verification && <p>Connection: {CHECK_LABELS[item.verification.status] || item.verification.status}{item.verification.reason ? ` · ${item.verification.reason}` : ''}</p>}
+            {item.artifact?.verification && <p>Startup check: {CHECK_LABELS[item.artifact.verification.status] || item.artifact.verification.status}{item.artifact.verification.toolCount !== undefined ? ` · ${item.artifact.verification.toolCount} tools found` : ''}</p>}
             {item.credentialRef && <p>Credentials connected · {item.credentialRef.provider}. Values are held by the gateway.</p>}
-            {item.configuration?.endpoint && !item.credentialRef && <Note>Sign in through the sandbox’s agent after installation. Desktop OAuth sessions stay on this computer.</Note>}
-            {item.kind === 'mcp' && !item.disabled && <label className="grid gap-1.5">Additional runtime hosts<Input aria-label={`Runtime hosts for ${item.name}`} disabled={busy || preparing} placeholder="api.example.com, files.example.com" value={(choices[item.id]?.hosts || []).join(', ')} onChange={e => choose(item.id, { hosts: e.target.value.split(',').map(h => h.trim()) })} /><span className="text-muted-foreground">Exact HTTPS destinations only. These are reviewed again against each sandbox’s policy.</span></label>}
+            {item.configuration?.endpoint && !item.credentialRef && <Note>If this MCP needs an account, sign in from the agent inside the sandbox. Your desktop sign-in isn’t copied.</Note>}
+            {item.kind === 'mcp' && !item.disabled && (item.configuration || item.package) && !item.configuration?.endpoint && <ExtraHosts item={item} choice={choices[item.id]} disabled={busy || preparing} onChange={hostsText => choose(item.id, { hostsText, hosts: hostsText.split(/[\s,]+/).map(h => h.replace(/^https?:\/\//i, '').split('/')[0].toLowerCase()).filter(Boolean) })} />}
             {item.credentialFields?.length > 0 && <div className="space-y-2 rounded border p-3">
               <p className="font-medium">Connect credentials</p>
-              {item.sourceCredentialFields?.length > 0 && <label className="flex items-start gap-2"><Checkbox disabled={busy || preparing} checked={choices[item.id]?.useSourceSecrets || false} onCheckedChange={v => choose(item.id, { useSourceSecrets: Boolean(v) })} />Use credentials detected in the selected configuration ({item.sourceCredentialFields.join(', ')}). Store them in the gateway for this MCP.</label>}
+              {item.sourceCredentialFields?.length > 0 && <label className="flex items-start gap-2"><Checkbox disabled={busy || preparing} checked={choices[item.id]?.useSourceSecrets || false} onCheckedChange={v => choose(item.id, { useSourceSecrets: Boolean(v) })} />Use the credentials from your config file ({item.sourceCredentialFields.join(', ')}).</label>}
               {item.credentialFields.filter(key => !choices[item.id]?.useSourceSecrets || !item.sourceCredentialFields?.includes(key)).map(key => <label key={key} className="grid gap-1">{key}<Input type="password" autoComplete="new-password" aria-label={`${item.name} ${key}`} disabled={busy || preparing} value={choices[item.id]?.secrets?.[key] || ''} onChange={e => choose(item.id, { secrets: { ...choices[item.id]?.secrets, [key]: e.target.value } })} /></label>)}
-              <p className="text-muted-foreground">Credentials are destination-bound references. They are never saved in Setup files or images. Desktop OAuth sessions are not transferred.</p>
+              <p className="text-muted-foreground">Stored in the gateway and sent only to this MCP’s server. Never saved in the setup or in images.</p>
             </div>}
             {item.configuration && <details className="group/config">
               <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3 transition-transform group-open/config:rotate-90" />Configuration</summary>
@@ -268,10 +391,8 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
             {item.files?.map((f) => <button key={f.path} disabled={busy} onClick={() => run(async () => setFile({ path: f.path, ...(await api.setupFile(review.token, item.id, f.path)) }))} className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-muted"><FileText className="size-3" /><span className="min-w-0 flex-1 truncate">{f.path}</span><span className="text-muted-foreground">{f.bytes} B</span></button>)}
           </AccordionContent>
         </AccordionItem>)}</Accordion>}</SetupItemTabs>
-        {preparation && <div role="status" aria-live="polite" className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3 text-xs">
-          {preparing && <Spinner />}
-          <span className="flex-1">{preparing ? preparation.message : preparedReview ? (importNeedsAttention(review) ? 'Checks finished. Some items need attention.' : 'Checks finished. Ready to save.') : 'Import paused.'}</span>
-          {preparing && preparation.status === 'running' && <Button size="sm" variant="outline" onClick={() => { setupImports.cancel(jobId.current).catch(e => setError(e.message)) }}>Cancel import</Button>}
+        {preparation && <div role="status" aria-live="polite" className="space-y-2 rounded-lg border bg-muted/30 p-3 text-xs">
+          {preparing ? <PreparationProgress preparation={preparation} onCancel={() => { setupImports.cancel(jobId.current).catch(e => setError(e.message)) }} /> : <p>{preparedReview ? (importNeedsAttention(review) ? 'Checks finished. Some items need attention.' : 'Checks finished. Ready to save.') : 'Not finished. Press Import to continue.'}</p>}
         </div>}
         {initialReview && <Button variant="ghost" disabled={preparing || busy} onClick={() => { setReview(null); setSources([...new Set(initialReview.items.flatMap(i => i.sources))]); setPreparation(null); setPreparedReview(false); setChoices({}) }}>Re-scan sources</Button>}
 
@@ -279,12 +400,10 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
       <ErrorMessage>{error}</ErrorMessage>
       </div>
       <div className="shrink-0 space-y-4 border-t bg-muted/20 px-6 py-4">
-        {review && <p className="text-[11px] leading-relaxed text-muted-foreground">Import downloads dependencies and checks MCP connections in an isolated sandbox using the listed destinations and credentials you select. Skill scripts are not run.</p>}
+        {review && !preparing && !preparedReview && inactive.length > 0 && <p className="text-xs text-muted-foreground">{inactive.map(item => item.name).join(', ')} will be saved as inactive. You can fix {inactive.length === 1 ? 'it' : 'them'} later.</p>}
       <div className="flex items-center justify-end gap-2">{scan && <Button variant="ghost" disabled={busy || preparing} onClick={() => { if (review) { setReview(null); setPreparedReview(false); setPreparation(null); setChoices({}) } else { setScan(null); setIds([]) } setError('') }}>Back</Button>}<Button variant="ghost" disabled={!jobId.current && !finalImport && (busy || preparing)} onClick={onClose}>{finalImport ? 'Continue in background' : jobId.current ? 'Close' : 'Cancel'}</Button>
-        {review ? <>
-          {preparedReview && <Button variant="outline" disabled={busy || !name.trim()} onClick={() => run(importSelection)}>Retry import</Button>}
-          <Button disabled={busy || !name.trim()} onClick={() => run(() => importSelection(preparedReview))}>{busy && <Spinner />}{busy ? 'Importing…' : preparedReview && importNeedsAttention(review) ? 'Import with inactive items' : preparing ? 'Resume import' : 'Import'}</Button>
-        </> : scan ? <Button disabled={busy || !ids.length} onClick={() => run(async () => setReview(await api.reviewSetup(scan.token, ids)))}>{busy && <Spinner />}Review selection</Button> : <Button disabled={busy || !sources.length} onClick={() => run(async () => setScan(await api.discoverSetups(sources)))}>{busy && <Spinner />}Discover tools</Button>}
+        {review ? <Button disabled={busy || !name.trim() || !review.items.length || hostsInvalid} onClick={() => run(() => importSelection(preparedReview && !importNeedsAttention(review)))}>{busy && <Spinner />}{busy ? 'Importing…' : preparing ? 'Resume import' : importAttempted ? 'Retry import' : 'Import'}</Button>
+        : scan ? <Button disabled={busy || !ids.length} onClick={() => run(async () => { setReview(await api.reviewSetup(scan.token, ids)); setImportAttempted(false) })}>{busy && <Spinner />}Review selection</Button> : <Button disabled={busy || !sources.length} onClick={() => run(async () => setScan(await api.discoverSetups(sources)))}>{busy && <Spinner />}Discover tools</Button>}
       </div>
       </div>
     </DialogContent>
@@ -294,7 +413,9 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
 
 function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   const api = useApi()
+  const location = useLocation()
   const [sandboxes, setSandboxes] = React.useState([])
+  const [context, setContext] = React.useState(null)
   const [destination, setDestination] = React.useState(sandbox || '')
   const [targets, setTargets] = React.useState([])
   const [plan, setPlan] = React.useState(null)
@@ -302,7 +423,11 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   const [jobs, setJobs] = React.useState([])
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState('')
-  React.useEffect(() => { api.overview().then((r) => setSandboxes(r.sandboxes)).catch((e) => setError(e.message)) }, [])
+  React.useEffect(() => {
+    let current = true
+    api.overview().then((r) => { if (current) { setSandboxes(r.sandboxes); setContext({ ...r.gateway, target: location?.target }) } }).catch((e) => { if (current) setError(e.message) })
+    return () => { current = false }
+  }, [api])
   React.useEffect(() => {
     let stopped = false, timer
     const refresh = async () => {
@@ -315,7 +440,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
     }
     refresh()
     return () => { stopped = true; clearTimeout(timer) }
-  }, [setup.id, result])
+  }, [setup.id, result, api])
   async function run(task) { setBusy(true); setError(''); try { await task() } catch (e) { setError(e.message); setPlan(null) } finally { setBusy(false) } }
   const signInItems = setup.items.filter(item => !item.disabled && !item.issues.length && !item.credentialRef && item.auth?.mode === 'agent-session')
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}><DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
@@ -326,7 +451,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
           <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform group-open/item:rotate-90" />
             <span className="min-w-0 flex-1 break-words font-medium">{item.name}</span>
-            <span className={`shrink-0 text-[10px] ${item.issues.length ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>{item.issues.length ? 'Needs review' : 'Sign-in needed'}</span>
+            <span className={`shrink-0 text-[10px] ${openIssues(item).length ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>{openIssues(item).length ? 'Needs review' : item.issues.length ? 'Installs automatically' : 'Sign-in needed'}</span>
           </summary>
           <div className="space-y-1.5 pb-1 pl-5 pt-2 text-[11px] leading-relaxed text-muted-foreground">
             {item.issues.map(issue => <p key={issue}>{issue}</p>)}
@@ -334,7 +459,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
           </div>
         </details> : <p className="break-words pl-5 text-xs font-medium">{item.name}</p>}
       </div>
-      <Button variant="ghost" size="icon" className="size-6 shrink-0 text-muted-foreground hover:text-destructive" disabled={busy} aria-label={`Delete ${item.name} from setup`} title="Remove from saved setup only; installed copies stay in place" onClick={() => run(async () => { const updated = await api.deleteSetupItem(setup.id, item.id, setup.revision); setPlan(null); setResult(null); onUpdated(updated) })}><Trash2 className="size-3.5" /></Button>
+      <Button variant="ghost" size="icon" className="size-6 shrink-0 text-muted-foreground hover:text-destructive" disabled={busy} aria-label={`Delete ${item.name} from setup`} title={item.kind === 'mcp' ? 'Remove from this setup. Copies already installed in sandboxes stay, but lose the website access only this MCP needed.' : 'Remove from this setup. Copies already installed in sandboxes stay.'} onClick={() => run(async () => { const { egressPolicyError, ...updated } = await api.deleteSetupItem(setup.id, item.id, setup.revision); setPlan(null); setResult(null); onUpdated(updated); if (egressPolicyError) setError(`Removed. The setup’s egress policy wasn’t updated: ${egressPolicyError}`) })}><Trash2 className="size-3.5" /></Button>
     </div>)}</div>}</SetupItemTabs>
     <div className="flex items-center justify-between gap-3">
       <Button variant="outline" size="sm" onClick={onPrepare} disabled={busy}>{issueCount(setup) ? 'Resolve issues' : 'Prepare setup'}<ChevronRight className="size-3.5" /></Button>
@@ -349,14 +474,14 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
     </fieldset>
     {plan && <div className="space-y-3">
       {plan.problems.map((p) => <p key={p} className="text-xs text-amber-700">{p}</p>)}
-      {plan.network.map((r, i) => <div key={i} className="rounded-lg border p-3 text-xs"><p className="flex justify-between gap-2 font-medium"><span>{r.item} · {r.host}:{r.port}{r.path || ''}</span><span>{r.status === 'allowed' ? 'Existing access' : r.status === 'blocked' ? 'Blocked' : r.status === 'proposed' ? 'Requested access' : 'Needs review'}</span></p><p className="mt-1 text-muted-foreground">{r.reason}</p>{r.binaries?.length > 0 && <p className="mt-1 break-all font-mono text-muted-foreground">{r.binaries.join(', ')}</p>}{r.credentialProvider && <p>Credential binding: {r.credentialProvider}</p>}</div>)}
-      {plan.inactive?.map(item => <p key={item.name} className="text-xs text-muted-foreground">{item.name}: inactive · {item.issues.join(' ')}</p>)}<Note>{plan.notes.join(' ')}</Note>
-      {!plan.canEnable && <a href="#egress" onClick={onClose} className="inline-block text-xs underline underline-offset-4">Review access in Egress</a>}
-      <div className="flex justify-end gap-2">{plan.installed && <Button variant="outline" disabled={busy} onClick={() => run(async () => { setResult(await api.removeSetup(setup.id, destination, plan.token)); setPlan(null) })}>Remove managed files</Button>}<Button disabled={busy || !plan.canEnable} onClick={() => run(async () => { setResult(await api.enableSetup(setup.id, destination, plan.token, plan.requiresApproval)); setPlan(null) })}>{busy && <Spinner />}{plan.requiresApproval ? 'Approve access & enable' : plan.installed ? 'Check & reapply' : 'Enable & check'}</Button></div>
+      {plan.network.map((r, i) => <div key={i} className="rounded-lg border p-3 text-xs"><p className="flex justify-between gap-2 font-medium"><span>{r.item} · {r.host}:{r.port}{r.path || ''}</span><span>{r.status === 'allowed' ? 'Existing access' : r.status === 'policy' ? 'Allowed by setup policy' : r.status === 'blocked' ? 'Blocked' : r.status === 'proposed' ? 'Requested access' : 'Needs review'}</span></p><p className="mt-1 text-muted-foreground">{r.reason}</p>{r.binaries?.length > 0 && <p className="mt-1 break-all font-mono text-muted-foreground">{r.binaries.join(', ')}</p>}{r.credentialProvider && <p>Credential binding: {r.credentialProvider}</p>}</div>)}
+      {plan.inactive?.map(item => <p key={item.name} className="text-xs text-muted-foreground">{item.name}: inactive · {item.issues.join(' ')}</p>)}{plan.notes.length > 0 && <Note>{plan.notes.join(' ')}</Note>}
+      {!plan.canEnable && <button type="button" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('openrod-navigate', { detail: { view: 'egress', location } })) }} className="inline-block text-xs underline underline-offset-4">Review access in Network › Egress</button>}
+      <div className="flex justify-end gap-2">{plan.installed && <Button variant="outline" disabled={busy} onClick={() => run(async () => { setResult(await api.removeSetup(setup.id, destination, plan.token)); setPlan(null) })}>Remove from sandbox</Button>}<Button disabled={busy || !plan.canEnable} onClick={() => run(async () => { setResult(await api.enableSetup(setup.id, destination, plan.token, plan.requiresApproval)); setPlan(null) })}>{busy && <Spinner />}{plan.requiresApproval ? 'Approve access & enable' : plan.installed ? 'Check & reapply' : 'Enable & check'}</Button></div>
     </div>}
-    {result && <p role="status" className="rounded-lg border bg-muted/30 p-3 text-xs">{result.status === 'removed' ? 'Managed configuration removed. Restart the agent to unload it. Existing Egress rules were preserved.' : 'Prepared configuration installed. Restart the agent to load it. Connection checks below apply to this sandbox; they do not execute tools.'}</p>}
+    {result && <p role="status" className="rounded-lg border bg-muted/30 p-3 text-xs">{result.status === 'removed' ? 'Removed from this sandbox. Restart the agent to unload it. The sandbox no longer gets this setup’s egress policy; access you approved for it separately stays.' : 'Prepared configuration installed. Restart the agent to load it. Connection checks below apply to this sandbox; they do not execute tools.'}</p>}
     {result?.checks?.map((check, i) => <p key={i} className="text-xs text-muted-foreground">{check.item}: {check.status}{check.toolCount !== undefined ? ` · ${check.toolCount} tools discovered` : ''}{check.reason ? ` · ${check.reason}` : ''}</p>)}
-    {(result?.status === 'installed' || plan?.installed || jobs.some(j => j.sandbox === destination && j.status === 'installed')) && destination && signInItems.length > 0 && <div className="space-y-2 text-xs"><p className="font-medium">Sign in to {signInItems.map(item => item.name).join(', ')}</p><div className="flex flex-wrap gap-2">{targets.map(target => <a key={target} className="rounded-md border px-3 py-2 hover:bg-muted" href={terminalHref(destination, setupTarget(target)?.command || target)} target="_blank" rel="noreferrer">Open {setupTarget(target)?.name}</a>)}</div>{targets.includes('codex') && signInItems.filter(i => i.configuration?.endpoint).map(item => <a key={item.id} className="block underline underline-offset-4" href={`${terminalHref(destination, 'codex')}&setupLogin=${setup.id}&mcp=${encodeURIComponent(item.id)}`} target="_blank" rel="noreferrer">Sign in to {item.name} with Codex</a>)}<details className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">About sign-in</summary><p className="mt-2">Use the agent’s MCP menu to authenticate and confirm tool availability. Sessions stay in this sandbox and are not baked into images. Console connection checks do not use these sessions.</p></details></div>}
+    {(result?.status === 'installed' || plan?.installed || jobs.some(j => j.sandbox === destination && j.status === 'installed')) && destination && context?.name && context?.workspace && signInItems.length > 0 && <div className="space-y-2 text-xs"><p className="font-medium">Sign in to {signInItems.map(item => item.name).join(', ')}</p><div className="flex flex-wrap gap-2">{targets.map(target => <a key={target} className="rounded-md border px-3 py-2 hover:bg-muted" href={terminalHref(destination, setupTarget(target)?.command || target, context)} target="_blank" rel="noreferrer">Open {setupTarget(target)?.name}</a>)}</div>{targets.includes('codex') && signInItems.filter(i => i.configuration?.endpoint).map(item => <a key={item.id} className="block underline underline-offset-4" href={`${terminalHref(destination, 'codex', context)}&setupLogin=${setup.id}&mcp=${encodeURIComponent(item.id)}`} target="_blank" rel="noreferrer">Sign in to {item.name} with Codex</a>)}<details className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">About sign-in</summary><p className="mt-2">Use the agent’s MCP menu to authenticate and confirm tool availability. Sessions stay in this sandbox and are not baked into images. Console connection checks do not use these sessions.</p></details></div>}
     {jobs.filter((j) => !destination || j.sandbox === destination).map((job, i) => <p key={i} className="text-[11px] text-muted-foreground">{job.sandbox}: {job.status}{job.error ? ` · ${job.error}` : ''}</p>)}
       </div>
     </details>
@@ -364,16 +489,34 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   </DialogContent></Dialog>
 }
 
-export function SetupPicker({ value = [], onChange, inherited = [], accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox' }) {
+export function SetupPicker(props) {
+  const location = useLocation()
+  return <ScopedSetupPicker key={location?.id ?? location?.context ?? 'default'} {...props} />
+}
+
+function ScopedSetupPicker({ value = [], onChange, inherited = [], accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox' }) {
   const api = useApi()
   const [items, setItems] = React.useState([])
   const [error, setError] = React.useState('')
-  React.useEffect(() => { api.setups().then(setItems).catch((e) => setError(e.message)) }, [])
+  // Hosts a setup's egress policy allows need no approval. Without policies, all do.
+  const [policies, setPolicies] = React.useState(null)
+  const reviewsAccess = Boolean(onAccessReview)
+  React.useEffect(() => {
+    let current = true
+    api.setups().then((value) => { if (current) setItems(value) }).catch((e) => { if (current) setError(e.message) })
+    return () => { current = false }
+  }, [api])
+  React.useEffect(() => {
+    if (!reviewsAccess) return
+    let current = true
+    api.org().then(org => { if (current) setPolicies(org.policies ?? null) }).catch(() => { if (current) setPolicies(null) })
+    return () => { current = false }
+  }, [reviewsAccess, api])
   const selected = items.filter(s => value.includes(s.id) || inherited.includes(s.id))
   const eligible = (item) => autoPrepare ? launchableItem(item) : !item.disabled && !item.issues.length
   const pending = (setup) => autoPrepare ? setup.items.filter(canPrepareAtLaunch) : []
   const inactive = (setup) => setup.items.filter(item => !eligible(item))
-  const networkHosts = [...new Set(selected.flatMap(setup => setup.items.filter(eligible).flatMap(item => (autoPrepare ? launchRequirements(item) : item.requirements).filter(r => ['runtime', 'auth'].includes(r.phase)).map(r => `${r.host}${Number(r.port) === 443 ? '' : `:${r.port}`}${r.path || ''}`))))]
+  const access = setupAccess(selected, policies, setup => setup.items.filter(eligible), item => autoPrepare ? launchRequirements(item) : item.requirements)
   const needsSignIn = selected.some(setup => setup.items.some(item => eligible(item) && !item.credentialRef && item.auth?.mode === 'agent-session'))
   const selectionRevision = JSON.stringify(selected.map(setup => [setup.id, setup.revision]))
   React.useEffect(() => {
@@ -384,13 +527,17 @@ export function SetupPicker({ value = [], onChange, inherited = [], accessReview
       <label className="flex items-start gap-2"><Checkbox aria-label={`Use ${setup.name}`} disabled={inherited.includes(setup.id) || !setup.items.some(eligible)} checked={value.includes(setup.id) || inherited.includes(setup.id)} onCheckedChange={(v) => onChange(v ? [...value, setup.id] : value.filter((id) => id !== setup.id))} /><span className="min-w-0 flex-1"><span className="block truncate">{setup.name}{inherited.includes(setup.id) ? ' · From image template' : ''}</span><span className="mt-1 block text-[11px] text-muted-foreground">{count(setup, 'mcp')} MCPs · {count(setup, 'skill')} Skills{pending(setup).length ? ` · ${pending(setup).length} install automatically` : ''}{inactive(setup).length ? ` · ${inactive(setup).length} inactive` : ''}</span></span></label>
       {inactive(setup).length > 0 && <details className="mt-2 pl-6 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Items that will stay inactive</summary><div className="mt-2 space-y-2">{inactive(setup).map((item) => <p key={item.id}><span className="font-medium text-foreground">{item.name}:</span> {item.issues.join(' ')}</p>)}<p>Resolve these items in MCPs &amp; Skills.</p></div></details>}
     </div>)}
-    {onAccessReview && networkHosts.length > 0 && <div className="space-y-2 pt-1 text-xs">
+    {onAccessReview && access.uncovered.length > 0 && <div className="space-y-2 pt-1 text-xs">
       <p className="font-medium">{automaticAccess ? 'Required access' : 'Network access'}</p>
-      <ul className="divide-y text-[11px] text-muted-foreground">{networkHosts.map(host => <li key={host} className="break-all py-1">{host}</li>)}</ul>
+      <ul className="divide-y text-[11px] text-muted-foreground">{access.uncovered.map(host => <li key={host} className="break-all py-1">{host}</li>)}</ul>
       {!automaticAccess && <>
         <label className="flex items-start gap-2"><Checkbox checked={Boolean(accessReview)} onCheckedChange={v => onAccessReview(v ? Object.fromEntries(selected.map(s => [s.id, s.revision])) : null)} />Allow these destinations for tools and connection checks.</label>
         {!accessReview && <p className="text-[11px] text-muted-foreground">Otherwise, review access in MCPs &amp; Skills before installation.</p>}
       </>}
+    </div>}
+    {onAccessReview && access.covered.length > 0 && <div className="space-y-2 pt-1 text-xs">
+      <p className="font-medium">{selected.length > 1 ? 'Allowed by the setups’ egress policies' : 'Allowed by the setup’s egress policy'}</p>
+      <ul className="divide-y text-[11px] text-muted-foreground">{access.covered.map(host => <li key={host} className="break-all py-1">{host}</li>)}</ul>
     </div>}
     {!items.length && <p className="text-[11px] text-muted-foreground">Import tools from the MCPs &amp; Skills page to reuse them here.</p>}
     <ErrorMessage>{error}</ErrorMessage>

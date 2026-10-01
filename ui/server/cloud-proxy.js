@@ -18,7 +18,7 @@ export function createHandoffs(db,now=()=>Date.now()) {
 }
 export function proxyWorker(req,res,record,identity,config,{target=req.url,maxBytes=36*1024*1024}={}) {
  const headers={host:config.host,origin:config.origin,'x-openshell-console':'1','x-openrod-worker-auth':signWorkerRequest(record.key,identity,{method:req.method,url:target})}
- for(const key of ['content-type','content-length','accept','range'])if(req.headers[key])headers[key]=req.headers[key]
+ for(const key of ['content-type','content-length','accept','range','x-openshell-context','x-openshell-location'])if(req.headers[key])headers[key]=req.headers[key]
  return new Promise(resolve=>{
   const upstream=http.request({hostname:record.address,port:record.port??4600,path:target,method:req.method,headers},response=>{
    const safe={...response.headers};delete safe['set-cookie'];delete safe['connection'];delete safe['transfer-encoding']
@@ -64,9 +64,9 @@ export function cloudRouter(security,machines,handoffs,auth,{artifact=process.en
     if(pathname==='/api/cloud/local-connect/inventory'&&req.method==='GET'){
      const record=await machines.store.get(identity.uid)
      if(record&&record.uid!==identity.uid)throw fail('Machine ownership mismatch',403)
-     if(!record||record.state!=='ready'||!record.address)return json(res,200,{sandboxes:[],machine:{status:record?.state??'none',error:record?.error??null}})
+     if(!record||record.state!=='ready'||!record.address)return json(res,200,{sandboxes:[],templates:[],locations:[],machine:{status:record?.state??'none',error:record?.error??null}})
      watchConnection(token,res,identity)
-     return await proxyWorker(req,res,record,identity,security.config,{target:'/api/os/overview'})
+     return await proxyWorker(req,res,record,identity,security.config,{target:'/api/os/inventory'})
     }
     if(pathname==='/api/cloud/local-connect/machine'&&req.method==='GET')return json(res,200,await machines.status(identity))
     if(pathname.startsWith('/api/cloud/local-connect/os/')&&['GET','POST'].includes(req.method)){

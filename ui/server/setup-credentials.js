@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { gateway, WORKSPACE } from './gateway.js'
+import { gateway } from './gateway.js'
 import { fail } from './setup-discovery.js'
 
 export async function connectCredentials(item, input = {}, source = {}) {
   if (!item.credentialFields?.length) return item
-  const { client } = await gateway()
+  const { client, workspace, workspaceScope } = await gateway()
   const hosts = item.requirements.filter((r) => r.phase === 'runtime')
-  if (!hosts.length) throw fail('Add the exact runtime destinations before connecting credentials.')
+  if (!hosts.length) throw fail('Enter where this MCP sends its credentials (for example api.github.com), then try the import again.')
   let provider, aliases = {}
   if (input.provider) {
     if (!/^[a-z0-9][a-z0-9-]{0,61}$/.test(input.provider)) throw fail('Choose an existing OpenShell secret.')
-    const found = (await client.raw.getProvider({name:input.provider,workspaceScope:WORKSPACE})).provider
-    const profile = (await client.raw.getProviderProfile({id:found.type,workspaceScope:WORKSPACE})).profile
+    const found = (await client.raw.getProvider({name:input.provider,workspaceScope})).provider
+    const profile = (await client.raw.getProviderProfile({id:found.type,workspaceScope})).profile
     // Existing providers must be endpointless: otherwise attachment grants
     // profile rules before the target-specific approval has been checked.
     if (profile.endpoints?.length) throw fail('Use a dedicated MCP secret. This provider carries unrelated endpoint grants.')
@@ -34,12 +34,12 @@ export async function connectCredentials(item, input = {}, source = {}) {
     }
     provider='mcp-'+suffix
     const profile={id:provider,displayName:`MCP: ${item.name}`,credentials:definitions,endpoints:[],binaries:[],annotations:{'openshell.console/managed':'setup-import'}}
-    const imported=await client.raw.importProviderProfiles({workspaceScope:WORKSPACE,profiles:[{profile}],requestId:randomUUID()})
+    const imported=await client.raw.importProviderProfiles({workspaceScope,profiles:[{profile}],requestId:randomUUID()})
     if(!imported.imported)throw fail('The gateway does not support the required credential profile. No credentials were stored.')
-    try{await client.raw.createProvider({workspaceScope:WORKSPACE,requestId:randomUUID(),provider:{metadata:{name:provider},type:provider,profileWorkspace:'default',credentials,config:{}}});
+    try{await client.raw.createProvider({workspaceScope,requestId:randomUUID(),provider:{metadata:{name:provider},type:provider,profileWorkspace:workspace,credentials,config:{}}});
 
     }
-    catch{await client.raw.deleteProvider({name:provider,workspaceScope:WORKSPACE}).catch(()=>{});await client.raw.deleteProviderProfile({id:provider,workspaceScope:WORKSPACE,allowMissing:true}).catch(()=>{});throw fail('The gateway could not store this MCP credential.')}
+    catch{await client.raw.deleteProvider({name:provider,workspaceScope}).catch(()=>{});await client.raw.deleteProviderProfile({id:provider,workspaceScope,allowMissing:true}).catch(()=>{});throw fail('The gateway could not store this MCP credential.')}
   }
   const config={...item.config}, env={...(config.env||{})}, headers={...(config.headers||{})}
   for(const [key,alias] of Object.entries(aliases)){

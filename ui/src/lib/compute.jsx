@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createApi } from './api.js'
-import { COMPUTE_KEY, initialComputeTarget, setComputeTarget } from './compute-target.js'
+import { COMPUTE_KEY, initialComputeTarget, setComputeTarget, advanceComputeOwner, setCloudOwner } from './compute-target.js'
 import { CLOUD_ORIGIN, localCloudRequest, waitForCloudReady, createLocalSignInAttempt } from './local-cloud.js'
 
 const ComputeContext = React.createContext(null)
@@ -11,11 +11,16 @@ export function useApi() {
   if (!value) throw new Error('useApi outside ComputeSession')
   return value
 }
-export function ComputeSession({ target, children }) {
+export function ScopedComputeProvider({ target, children }) {
+  const parent = useCompute()
+  const value = React.useMemo(() => target && parent?.localViewer ? { ...parent, target, nativeActions: target === 'local' || Boolean(parent.connected) } : parent, [parent, target])
+  return <ComputeContext.Provider value={value}>{children}</ComputeContext.Provider>
+}
+export function ComputeSession({ target, ownerScope, children }) {
   const session = React.useMemo(() => {
     const controller = new AbortController()
     return { controller, generation: 0, api: createApi(target, controller.signal) }
-  }, [target])
+  }, [target, ownerScope])
   React.useEffect(() => {
     const generation = ++session.generation
     return () => queueMicrotask(() => { if (generation === session.generation) session.controller.abort() })
@@ -58,7 +63,9 @@ export function LocalComputeProvider({ children }) {
   const [connecting, setConnecting] = React.useState(false)
   const [createRequested, requestCreate] = React.useState(false)
   const pending = React.useRef(null)
+  const sessionOwner = React.useRef({uid:null,revision:0})
   setComputeTarget(target)
+  setCloudOwner(status?.connected ? status.owner : null)
   React.useEffect(() => {
     let alive = true
     localCloudRequest('status').then(value => { if (alive) setStatus(value) }).catch(e => { if (alive) { setError(e.message); setStatus({ connected: false }) } })
@@ -95,6 +102,7 @@ export function LocalComputeProvider({ children }) {
     try {
       const value = await attempt.promise
       if (pending.current !== attempt) throw new Error('Cloud sign-in was cancelled.')
+      setCloudOwner(value.owner)
       setStatus(value)
       return value
     } catch (error) {
@@ -115,8 +123,11 @@ export function LocalComputeProvider({ children }) {
 
   async function disconnect() {
     try { await localCloudRequest('disconnect', {}); setStatus({ connected: false }); selectTarget('local') }
-    catch (e) { setError(e.message) }
+    catch (e) { if ([401,403].includes(e.status)) { setStatus({connected:false}); selectTarget('local') }; setError(e.message) }
   }
+  sessionOwner.current = advanceComputeOwner(sessionOwner.current, status?.connected ? status.user?.uid : null)
+  const ownerScope = sessionOwner.current.revision
+  const sessionKey = `${target}:${ownerScope}`
   const value = { target, localViewer: true, nativeActions: target === 'local' || Boolean(status?.connected), user: status?.user, connected: Boolean(status?.connected), connecting, error, connect, disconnect, selectTarget, createRequested, requestCreate, cancelConnect: () => cancelConnect() }
   return <ComputeContext.Provider value={value}>
     {target === 'cloud' && !status?.connected ? <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
@@ -126,6 +137,6 @@ export function LocalComputeProvider({ children }) {
       {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
       <button disabled={status === null || connecting} className="mt-6 rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground disabled:opacity-50" onClick={() => connect().catch(() => {})}>{status === null ? 'Checking connection…' : connecting ? 'Connecting…' : 'Continue with Google'}</button>
       <button className="mt-4 block w-full text-xs underline" onClick={() => { cancelConnect(); selectTarget('local') }}>Use local compute</button>
-    </section></main> : target === 'cloud' ? <CloudReadyGate key="cloud" status={status} onStatus={setStatus} onCancel={() => selectTarget('local')}><ComputeSession key={target} target={target}>{children}</ComputeSession></CloudReadyGate> : <ComputeSession key={target} target={target}>{children}</ComputeSession>}
+    </section></main> : target === 'cloud' ? <CloudReadyGate key="cloud" status={status} onStatus={setStatus} onCancel={() => selectTarget('local')}><ComputeSession key={sessionKey} target={target} ownerScope={ownerScope}>{children}</ComputeSession></CloudReadyGate> : <ComputeSession key={sessionKey} target={target} ownerScope={ownerScope}>{children}</ComputeSession>}
   </ComputeContext.Provider>
 }

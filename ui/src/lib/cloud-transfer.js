@@ -12,7 +12,7 @@ export function isCloudReadyMessage(event, popup, nonce) {
 }
 
 export const LOCAL_ORIGIN = 'http://127.0.0.1:4600'
-export const localHandoffUrl = (nonce) => `${LOCAL_ORIGIN}/?handoff=cloud#cloud-return=${encodeURIComponent(nonce)}`
+export const localHandoffUrl = (nonce) => `${LOCAL_ORIGIN}/?handoff=cloud&target=local#cloud-return=${encodeURIComponent(nonce)}`
 
 export function isLocalHandoffMessage(event, popup, nonce, type) {
   return Boolean(popup && event.source === popup && event.origin === LOCAL_ORIGIN

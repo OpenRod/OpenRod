@@ -2,7 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Readable } from 'node:stream'
 import fs from 'node:fs/promises'
-import { transferPathAllowed, validateTransfer, localTransfer, importTransfer, CLOUD_TRANSFER_LIMIT } from './cloud-transfer.js'
+import { transferPathAllowed, validateTransfer, localTransfer, importTransfer as runImportTransfer, CLOUD_TRANSFER_LIMIT } from './cloud-transfer.js'
+
+const importTransfer = (req, options) => runImportTransfer(req, { resolveGroups: async () => ['destination'], ...options })
 
 const launch = { name: 'my-work', image: 'ubuntu:24.04', session: 'shell' }
 const bundle = (files = [{ path: 'src/main.js', data: Buffer.from('hello').toString('base64'), executable: false }]) => ({ version: 1, launch, files })
@@ -36,10 +38,11 @@ function localClient() {
 
 test('local export sends sanitized data only to the fixed cloud endpoint with one-use ticket', async () => {
   let sent
-  const result = await localTransfer({ name: 'my-work', ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { connect: async () => ({ client: localClient() }), fetch: async (url, options) => { sent = { url, ...options }; return Response.json({ name: 'my-work' }) } })
+  const result = await localTransfer({ name: 'my-work', destinationGroups: ['destination'], ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { connect: async () => ({ client: localClient() }), fetch: async (url, options) => { sent = { url, ...options }; return Response.json({ name: 'my-work' }) } })
   assert.equal(sent.url, 'https://cloud.example.com/api/cloud/import')
   assert.equal(sent.headers.authorization, 'Bearer ' + ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)))
   assert.deepEqual(JSON.parse(sent.body).files.map((f) => f.path), ['src/main.js'])
+  assert.deepEqual(JSON.parse(sent.body).destinationGroups, ['destination'])
   assert.equal(result.name, 'my-work')
 })
 
@@ -53,7 +56,7 @@ test('invalid transfer and cloud rejection do not create or upload a sandbox', a
 test('import stages regular files with safe permissions and uploads to a new sandbox', async () => {
   let uploaded = false, staged
   const result = await importTransfer(request(bundle()), {
-    createSandbox: async (spec) => { assert.deepEqual(spec, { ...launch, name: spec.name }); return { name: 'my-work' } },
+    createSandbox: async (spec) => { assert.deepEqual(spec, { ...launch, name: spec.name, groups: ['destination'] }); return { name: 'my-work' } },
     waitReady: async () => {},
     upload: async (name, root) => { staged = root; assert.equal(name, 'my-work'); assert.equal(await fs.readFile(root + '/src/main.js', 'utf8'), 'hello'); assert.equal((await fs.stat(root + '/src/main.js')).mode & 0o777, 0o644); uploaded = true },
   })

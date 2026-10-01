@@ -154,7 +154,7 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
                   const unsupported = inventory?.status === "unsupported"
                   const items = checked ? inventory.items : []
                   const key = `${agent.name}:${kind}`
-                  return <Group key={kind} title={title} aria-label={`${agent.name} ${title}`} count={checked ? items.length : "—"} icon={icon}
+                  return <Group key={kind} title={title} aria-label={`${agent.name} ${title}`} count={checked ? items.length : "-"} icon={icon}
                     summary={unsupported ? "Setup integration unavailable" : checked ? "In agent user configuration" : "Inventory unavailable"} open={!!expanded[key]} onToggle={() => toggle(key)}
                     className={cn("border-0 shadow-none", kind === "skills" && "border-t border-border/60")}>
                     <div data-resource-list className="max-h-48 touch-pan-y select-text space-y-0.5 overflow-y-auto overscroll-contain">
@@ -184,7 +184,7 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
 
         </div></Draggable>
         <Draggable key={`${name}-${layoutVersion}-gateway`} canvas={container} label="Gateway"><div className="relative z-10 flex justify-center @2xl:col-start-2 @2xl:row-start-3">
-          <Tooltip><TooltipTrigger data-graph-drag-handle render={<button type="button" />} className="relative z-10 flex min-h-10 max-w-full items-center gap-1.5 bg-card px-2 text-[10px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"><Server className="size-3 shrink-0" strokeWidth={1.5} /><span>{gateway ? `${gateway.remote ? "Remote" : "Local"} gateway` : "Host not reported"}</span></TooltipTrigger><TooltipContent className="max-w-64 font-sans">{gateway ? `Connected through ${gateway.name}. ` : ""}The sandbox’s host machine or cloud placement is not reported.</TooltipContent></Tooltip>
+          <Tooltip><TooltipTrigger data-graph-drag-handle render={<button type="button" />} className="relative z-10 flex min-h-10 max-w-full items-center gap-1.5 bg-card px-2 text-[10px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"><Server className="size-3 shrink-0" strokeWidth={1.5} /><span>{gateway ? (gateway.remote ? "Remote endpoint" : "Local/tunnel endpoint") : "Gateway not reported"}</span></TooltipTrigger><TooltipContent className="max-w-64 font-sans">{gateway ? `Connected through ${gateway.name}. ` : ""}The sandbox’s host machine or cloud placement is not reported.</TooltipContent></Tooltip>
         </div></Draggable>
         <Draggable key={`${name}-${layoutVersion}-network`} canvas={container} label="Network access"><section aria-label="Network access" className="relative z-10 order-4 overflow-hidden rounded-xl border border-border/80 bg-card shadow-[0_2px_8px_#1c191705] @2xl:order-none @2xl:col-start-3 @2xl:row-start-1 @2xl:row-span-4">
           <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">

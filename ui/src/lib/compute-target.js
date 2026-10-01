@@ -31,3 +31,16 @@ export function clearComputeRecipe(key, storage, selected = currentComputeTarget
   storage.removeItem(computeStorageKey(key, selected))
   if (selected === 'local') storage.removeItem(key)
 }
+
+// First sign-in can complete an already-open cloud copy dialog. Retire its
+// session only when an existing authenticated owner leaves or is replaced.
+export function advanceComputeOwner(previous, uid) {
+  const next = uid ?? null
+  return { uid: next, revision: previous.revision + (previous.uid && previous.uid !== next ? 1 : 0) }
+}
+
+let cloudOwner = null
+export const currentCloudOwner = () => cloudOwner
+export function setCloudOwner(value) {
+  cloudOwner = typeof value === 'string' && /^[a-f0-9]{16}$/.test(value) ? value : null
+}

@@ -1,0 +1,3 @@
+# OpenShell enforces file and network access around this sandbox.
+sandbox_mode = "danger-full-access"
+approval_policy = "on-request"

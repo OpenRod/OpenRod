@@ -21,10 +21,12 @@ export function createLocalCloud({origin=CLOUD,allowTestHttp=false,native}={}) {
   })
  }
  const call=(path,options={})=>upstream(path,{...options,token:connection().token})
- const status=()=>grant?{connected:true,user:grant.user,expires:grant.expires}:{connected:false}
+ const ownerId=uid=>createHash('sha256').update(uid).digest('hex').slice(0,16)
+ const assertOwner=req=>{const current=connection(),supplied=req.headers['x-openrod-local-owner']??new URL(req.url,'http://local').searchParams.get('owner');if(supplied!==ownerId(current.user.uid))throw Object.assign(remoteFail('This cloud connection belongs to a different account. Sign in again in this tab.',403),{code:'CLOUD_OWNER_CHANGED'});return current}
+ const status=()=>grant?{connected:true,user:grant.user,owner:ownerId(grant.user.uid),expires:grant.expires}:{connected:false}
  function relay(req,res,target){
   const current=connection(),headers={host:url.host,origin,'x-openshell-console':'1',authorization:`Bearer ${current.token}`}
-  for(const k of ['content-type','content-length','accept','range'])if(req.headers[k])headers[k]=req.headers[k]
+  for(const k of ['content-type','content-length','accept','range','x-openshell-context','x-openshell-location'])if(req.headers[k])headers[k]=req.headers[k]
   const proxy=transport.request(new URL(PREFIX+'/os'+target.slice('/api/os'.length),origin),{method:req.method,headers},remote=>{
    if(remote.statusCode===401&&grant===current){active.delete(res);clear()}
    const headers={...remote.headers};for(const key of ['set-cookie','connection','transfer-encoding','location'])delete headers[key]
@@ -57,8 +59,8 @@ export function createLocalCloud({origin=CLOUD,allowTestHttp=false,native}={}) {
      if(grant){const current=grant;try{const result=await call('/identity');if(grant===current&&result.user?.uid===current.user.uid)current.user=result.user;return responseJson(res,200,status())}catch(error){if(grant!==current)return responseJson(res,200,status());if([401,403].includes(error.status))clear();else return responseJson(res,200,{...status(),error:error.message})}}
      return responseJson(res,200,status())
     }
-    if(path==='/api/local-cloud/machine'&&req.method==='GET'){const current=connection(),machine=await call('/machine');if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,{...status(),machine})}
-    if(path==='/api/local-cloud/inventory'&&req.method==='GET'){const current=connection(),inventory=await call('/inventory',{maxBytes:4*1024*1024});if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,inventory)}
+    if(path==='/api/local-cloud/machine'&&req.method==='GET'){const current=assertOwner(req),machine=await call('/machine');if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,{...status(),machine})}
+    if(path==='/api/local-cloud/inventory'&&req.method==='GET'){const current=assertOwner(req),inventory=await call('/inventory',{maxBytes:4*1024*1024});if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,inventory)}
     if(path==='/api/local-cloud/start'&&req.method==='POST'){
      const body=await readJson(req),verifier=randomBytes(32).toString('hex'),nonce=randomUUID(),challenge=createHash('sha256').update(verifier).digest('hex')
      const bound=validateLocalConnection({origin:body.origin,nonce,challenge})
@@ -86,22 +88,25 @@ export function createLocalCloud({origin=CLOUD,allowTestHttp=false,native}={}) {
      return responseJson(res,200,status())
     }
     if(path==='/api/local-cloud/disconnect'&&req.method==='POST'){
-     await readJson(req);const old=grant;generation++;pending=null;clear()
+     await readJson(req);if(grant)assertOwner(req);const old=grant;generation++;pending=null;clear()
      if(old)await upstream('/revoke',{method:'POST',token:old.token,body:{}}).catch(()=>{})
      return responseJson(res,200,status())
     }
     if(path.startsWith('/api/remote/os/')){
-     const target=safeWorkspaceTarget(req.url,'/api/remote/os');connection()
-     if(native&&await native(req,res,target,{call,connection}))return
+     const target=safeWorkspaceTarget(req.url,'/api/remote/os'),current=assertOwner(req)
+     const boundConnection=()=>{if(connection()!==current)throw Object.assign(remoteFail('Cloud connection changed. Open this sandbox again.',403),{code:'CLOUD_OWNER_CHANGED'});return current}
+     const boundCall=async(path,options={})=>{boundConnection();const result=await upstream(path,{...options,token:current.token});boundConnection();return result}
+     if(native&&await native(req,res,target,{call:boundCall,connection:boundConnection}))return
+     boundConnection()
      return relay(req,res,target)
     }
     throw remoteFail('Not found',404)
-   }catch(error){if(!res.headersSent)responseJson(res,error.status??503,{error:error.status?error.message:'Cloud connection unavailable'});else res.destroy()}
+   }catch(error){if(!res.headersSent)responseJson(res,error.status??503,{error:error.status?error.message:'Cloud connection unavailable',...(error.code?{code:error.code}:{})});else res.destroy()}
   },
   upgrade(req,socket,head){
    try{if(!requestPath(req).startsWith('/api/remote/'))return false
     if(!isLocalApiRequest(req))throw remoteFail('Request rejected',403)
-    const target=safeWorkspaceTarget(req.url,'/api/remote/os')
+    const target=safeWorkspaceTarget(req.url,'/api/remote/os');assertOwner(req)
     if(!['/api/os/terminal','/api/os/ssh'].includes(target.split('?')[0]))throw remoteFail('Not found',404)
     socket.on('error',()=>{});relaySocket(req,socket,head,target);return true
    }catch{socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return true}

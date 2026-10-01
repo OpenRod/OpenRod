@@ -1,3 +1,4 @@
+import { currentCloudOwner } from './compute-target.js'
 export const CLOUD_ORIGIN = 'https://cloud.example.com'
 export function isLoopbackOrigin(value) {
   try {
@@ -21,11 +22,12 @@ export async function localCloudRequest(path, body, {signal} = {}) {
   const response = await fetch(`/api/local-cloud/${path}`, {
     signal,
     method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? undefined : { 'content-type': 'application/json', 'x-openshell-console': '1' },
+    headers: { ...(currentCloudOwner() ? { 'x-openrod-local-owner': currentCloudOwner() } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json', 'x-openshell-console': '1' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const value = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(value.error ?? 'Cloud connection unavailable')
+  if (value.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
+  if (!response.ok) throw Object.assign(new Error(value.error ?? 'Cloud connection unavailable'), {status:response.status})
   return value
 }
 
@@ -49,14 +51,14 @@ export async function waitForCloudReady(statusRequest, { signal, onProgress = ()
   }
   throw new Error('Your private machine is still preparing. Check its status before trying again.')
 }
-export async function copyLocalSandbox(local, cloud, name) {
+export async function copyLocalSandbox(local, cloud, name, destinationGroups) {
   const exported = await local.cloudExport(name)
-  const result = await cloud.importCloud(exported.bundle)
+  const result = await cloud.importCloud(destinationGroups ? { ...exported.bundle, destinationGroups } : exported.bundle)
   return { ...result, warning: result.warning || exported.warning }
 }
-export async function copyCloudSandboxToLocal(cloud, local, name) {
+export async function copyCloudSandboxToLocal(cloud, local, name, destinationGroups) {
   if (local.target !== 'local') throw Error('Choose a local destination for this workspace.')
-  return copyLocalSandbox(cloud, local, name)
+  return copyLocalSandbox(cloud, local, name, destinationGroups)
 }
 
 export async function authorizeLocalConnection(handoff, request = fetch) {

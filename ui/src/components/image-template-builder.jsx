@@ -1,4 +1,3 @@
-import { saveComputeRecipe } from '@/lib/compute-target'
 import * as React from 'react'
 import { Check, ChevronDown, Download, FileCode2, Info, Package, Plus, ShieldCheck, Terminal, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -12,9 +11,10 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { Spinner } from '@/components/ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { SetupPicker } from '@/components/setups-view'
-import { useApi } from "@/lib/compute"
+import { useApi, useLocation } from '@/lib/location-context'
+import { LocationBadge } from '@/components/location-badge'
 import { buildTemplateWithSetups } from '@/lib/setup-template-build'
-import { AGENTS, BASES, PENDING_RECIPE_KEY, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
+import { AGENTS, BASES, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
 
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
 
@@ -27,8 +27,14 @@ function Toggle({ selected, onClick, children, disabled = false }) {
 
 // One page: the few choices a team needs to start an agent on its repo, with
 // everything else behind Advanced. `replace` edits an existing template.
-export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
+export function ImageTemplateBuilder(props) {
+  const location = useLocation()
+  return <ScopedImageTemplateBuilder key={location?.id ?? location?.context ?? 'default'} {...props} />
+}
+
+function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted }) {
   const api = useApi()
+  const location = useLocation()
   const [recipe, setRecipe] = React.useState(() => newRecipe(initial?.recipe))
   const replace = Boolean(initial?.replace)
   const [baseline] = React.useState(() => initial?.baseline ?? JSON.stringify(newRecipe(initial?.recipe)))
@@ -52,9 +58,13 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
   const dirty = JSON.stringify(recipe) !== baseline
   const errors = recipeErrors(recipe)
   React.useEffect(() => {
-    try { saveComputeRecipe(PENDING_RECIPE_KEY, { recipe, replace, baseline, advanced }, sessionStorage) } catch { /* recovery is best effort */ }
-  }, [recipe, replace, baseline, advanced])
-  React.useEffect(() => { api.localImages().then(setLocal).catch((e) => setLocal({ images: [], error: e.message })) }, [])
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ recipe, replace, baseline, advanced })) } catch { /* recovery is best effort */ }
+  }, [draftKey, recipe, replace, baseline, advanced])
+  React.useEffect(() => {
+    let current = true
+    api.localImages().then((value) => { if (current) setLocal(value) }).catch((e) => { if (current) setLocal({ images: [], error: e.message }) })
+    return () => { current = false }
+  }, [api])
   React.useEffect(() => {
     const prevent = (event) => { if (dirty) { event.preventDefault(); event.returnValue = '' } }
     window.addEventListener('beforeunload', prevent)
@@ -81,7 +91,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
       if (first[0] === 'customAgents') setMoreAgents(true)
       setError(first[1]); return
     }
-    if (busy) return
+    if (busy || location?.connected === false) return
     setBusy(true); setPreparing(true); setError(''); setProgress('')
     const controller = new AbortController()
     preparation.current = controller
@@ -110,14 +120,16 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
       <div className="min-w-0">
         <div className="flex items-center gap-2"><DialogTitle className="truncate text-sm">{replace ? `Edit ${recipe.name}` : 'New image template'}</DialogTitle><Tooltip><TooltipTrigger type="button" aria-label="About template access" className="rounded-sm text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"><Info className="size-3.5" /></TooltipTrigger><TooltipContent>Software only. Network, file and credential access come from the security preset you pick at launch, plus the selected agents' own sign-in and model destinations.</TooltipContent></Tooltip></div>
         <DialogDescription className="sr-only">Choose the software and start command for your sandbox image.</DialogDescription>
+        <LocationBadge location={location} />
       </div>
       <Button type="button" variant="ghost" size="icon-sm" aria-label="Close template creation" disabled={busy} onClick={requestClose}><X /></Button>
     </DialogHeader>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <fieldset disabled={busy} className="mx-auto w-full max-w-2xl min-w-0 space-y-5 px-5 py-5 disabled:opacity-65 sm:px-6">
+      <fieldset disabled={busy || location?.connected === false} className="mx-auto w-full max-w-2xl min-w-0 space-y-5 px-5 py-5 disabled:opacity-65 sm:px-6">
         <Tabs value={recipe.source} onValueChange={(source) => { patch({ source }); if (source === 'build' && recipe.agents.length > 1) setCustom(false); setError('') }}>
           <TabsList className="w-full"><TabsTrigger value="build" className="text-xs">Build an image</TabsTrigger><TabsTrigger value="image" className="text-xs">Use an existing image</TabsTrigger></TabsList>
         </Tabs>
+        {build && <p className="text-[11px] leading-relaxed text-muted-foreground">Images build on the console’s local Docker engine. For an SSH host, the image is built for its architecture and transferred automatically before the template is saved.</p>}
         <Field label="Name" htmlFor="template-name" hint={recipe.name && errors.name ? errors.name : undefined}>
           <Input id="template-name" value={recipe.name} disabled={replace} maxLength={19} onChange={(e) => patch({ name: e.target.value.toLowerCase() })} placeholder="frontend-app" className="font-mono text-xs" autoFocus={!replace} />
         </Field>
@@ -139,10 +151,10 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
           <Field label="Runtime" hint={bundled.length ? `${bundled.join(' and ')} ${bundled.length > 1 ? 'are' : 'is'} included for the selected agents.` : undefined}>
             <div className="grid gap-2 sm:grid-cols-2">{RUNTIMES.map((r) => <Toggle key={r.id} selected={recipe.runtimes.includes(r.id)} onClick={() => toggleRuntime(r.id)}><img src={r.logo} alt="" className="size-5 object-contain" /><span className="font-medium text-foreground">{r.name}</span></Toggle>)}</div>
           </Field>
-        </> : <Field label="Image" htmlFor="template-image" hint={local?.error ? local.error : 'An image in local Docker, or a registry reference Docker is signed in to. OpenShell boots it as is.'}>
+        </> : <Field label="Image" htmlFor="template-image" hint={local?.error ? local.error : 'An image on the selected Docker engine, or a registry reference Docker is signed in to. OpenShell boots it as is.'}>
           <Input id="template-image" value={recipe.image} onChange={(e) => patch({ image: e.target.value.trim() })} placeholder="ghcr.io/your-team/workspace:latest" className="font-mono text-xs" />
-          {local?.images?.length > 0 && <SelectField aria-label="Choose a local image" value={local.images.some((i) => i.reference === recipe.image) ? recipe.image : ''} onChange={(e) => patch({ image: e.target.value })} className="w-full text-xs">
-            <option value="" disabled>Choose a local image</option>
+          {local?.images?.length > 0 && <SelectField aria-label="Choose an available image" value={local.images.some((i) => i.reference === recipe.image) ? recipe.image : ''} onChange={(e) => patch({ image: e.target.value })} className="w-full text-xs">
+            <option value="" disabled>Choose an available image</option>
             {local.images.map((i) => <option key={i.reference} value={i.reference}>{i.reference}</option>)}
           </SelectField>}
         </Field>}
@@ -182,7 +194,7 @@ export function ImageTemplateBuilder({ initial, onClose, onStarted }) {
     <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-card px-5 py-3 sm:px-6">
       {replace && <p className="mr-auto flex items-center gap-1.5 text-[11px] text-muted-foreground"><Info className="size-3.5 shrink-0" />{build ? 'Rebuilding replaces this template.' : 'Saving replaces this template.'} Sandboxes already running from it keep their current image.</p>}
       <Button type="button" variant="ghost" disabled={busy && !preparing} onClick={() => preparing ? preparation.current?.abort() : requestClose()}>{preparing ? "Cancel preparation" : "Cancel"}</Button>
-      <Button type="submit" className={action} disabled={busy}>{busy ? <Spinner /> : <Package />}{preparing ? 'Preparing MCPs…' : build ? (replace ? 'Rebuild template' : 'Build template') : 'Save template'}</Button>
+      <Button type="submit" className={action} disabled={busy || location?.connected === false}>{busy ? <Spinner /> : <Package />}{preparing ? 'Preparing MCPs…' : build ? (replace ? 'Rebuild template' : 'Build template') : 'Save template'}</Button>
     </footer>
     <Dialog open={codeOpen} onOpenChange={setCodeOpen}><DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>Generated Dockerfile</DialogTitle><DialogDescription>Setup commands are added as a separate build-context file.</DialogDescription></DialogHeader><pre className="overflow-x-auto rounded-md border bg-muted/30 p-4 font-mono text-[11px] leading-relaxed">{build ? dockerfileFor(recipe) : ''}</pre><Button type="button" variant="outline" onClick={exportDockerfile}><Download />Download Dockerfile</Button></DialogContent></Dialog>
     <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}><DialogContent><DialogHeader><DialogTitle>Discard this template?</DialogTitle><DialogDescription>Your changes haven’t been built yet.</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setLeaveOpen(false)}>Keep editing</Button><Button type="button" variant="destructive" onClick={onClose}>Discard</Button></div></DialogContent></Dialog>

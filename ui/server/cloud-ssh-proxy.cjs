@@ -7,13 +7,18 @@ const { WebSocket, createWebSocketStream } = require('ws')
 function validate(options) {
   const url = new URL(options.origin)
   if (url.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.origin !== options.origin || url.username || url.password || !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(options.sandbox ?? '') || !/^[a-f0-9]{16}$/.test(options.owner ?? '')) throw Error('Invalid local OpenRod SSH target')
+  if (options.context !== undefined) {
+    let context
+    try { context = JSON.parse(options.context) } catch { throw Error('Invalid OpenRod SSH workspace') }
+    if (!Array.isArray(context) || context.length !== 2 || !context.every(value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(value))) throw Error('Invalid OpenRod SSH workspace')
+  }
   return options
 }
 function parseProxyArgs(args) {
   const options = {}
   for (let i = 0; i < args.length; i += 2) {
     const flag = args[i]
-    if (!['--origin', '--sandbox', '--owner'].includes(flag) || !args[i + 1] || Object.hasOwn(options, flag.slice(2))) throw Error('Invalid OpenRod SSH proxy arguments')
+    if (!['--origin', '--sandbox', '--owner', '--context'].includes(flag) || !args[i + 1] || Object.hasOwn(options, flag.slice(2))) throw Error('Invalid OpenRod SSH proxy arguments')
     options[flag.slice(2)] = args[i + 1]
   }
   return validate(options)
@@ -21,13 +26,14 @@ function parseProxyArgs(args) {
 async function runProxy(options, { input = process.stdin, output = process.stdout, fetchRequest = fetch, signal } = {}) {
   validate(options)
   const response = await fetchRequest(`${options.origin}/api/remote/os/sandboxes/${options.sandbox}/ssh-ticket`, {
-    method: 'POST', headers: { Origin: options.origin, 'content-type': 'application/json', 'x-openshell-console': '1' },
-    body: JSON.stringify({ owner: options.owner }), redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
+    method: 'POST', headers: { 'x-openrod-local-owner': options.owner, Origin: options.origin, 'content-type': 'application/json', 'x-openshell-console': '1' },
+    body: JSON.stringify({ owner: options.owner, ...(options.context ? { context: options.context } : {}) }), redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
   })
   if (!response.ok) throw Error(`Local OpenRod SSH authorization failed (${response.status}). Reconnect to OpenRod Cloud.`)
   const body = await response.json()
   if (typeof body.ticket !== 'string' || !/^[A-Za-z0-9-]{1,100}$/.test(body.ticket)) throw Error('Invalid SSH ticket from local OpenRod')
-  const url = new URL('/api/remote/os/ssh', options.origin); url.protocol = 'ws:'; url.searchParams.set('ticket', body.ticket)
+  const url = new URL('/api/remote/os/ssh', options.origin); url.protocol = 'ws:'; url.searchParams.set('ticket', body.ticket); url.searchParams.set('owner', options.owner)
+  if (options.context) url.searchParams.set('context', options.context)
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url, { origin: options.origin, handshakeTimeout: 30000, maxPayload: 1024 * 1024 })
     let stream, settled = false

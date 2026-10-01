@@ -28,12 +28,18 @@ export function createMachineStore(db,{maxMachines=10,now=()=>Date.now()}={}) {
   async update(uid,values){return db.runTransaction(async tx=>{const r=ref(uid);await tx.get(r);tx.update(r,values)})},
  }
 }
-export function workerReady(record,address,{port=4600,host=process.env.OPENROD_PUBLIC_ORIGIN?new URL(process.env.OPENROD_PUBLIC_ORIGIN).host:'cloud.example.com'}={}) {
+export function workerReady(record,address,{port=4600,host=process.env.OPENROD_PUBLIC_ORIGIN?new URL(process.env.OPENROD_PUBLIC_ORIGIN).host:'cloud.example.com',timeoutMs=5000,requestProbe=http.request}={}) {
  const request={method:'GET',url:'/api/os/overview'}
  return new Promise(resolve=>{
-  const probe=http.request({hostname:address,port,path:request.url,method:request.method,headers:{host,'x-openrod-worker-auth':signWorkerRequest(record.key,{uid:record.uid,expires:Date.now()+60000},request)}},response=>{response.resume();resolve(response.statusCode===200)})
-  probe.setTimeout(5000,()=>probe.destroy())
-  probe.on('error',()=>resolve(false))
+  let settled=false,deadline
+  const finish=ready=>{if(settled)return;settled=true;clearTimeout(deadline);resolve(ready)}
+  const probe=requestProbe({hostname:address,port,path:request.url,method:request.method,headers:{host,'x-openrod-worker-auth':signWorkerRequest(record.key,{uid:record.uid,expires:Date.now()+60000},request)}},response=>{response.resume();finish(response.statusCode===200)})
+  // Socket inactivity does not include DNS or a pending connection. Bound the
+  // entire probe so an unreachable worker cannot hold a provisioning lease.
+  deadline=setTimeout(()=>{finish(false);probe.destroy()},timeoutMs)
+  probe.setTimeout(timeoutMs,()=>{finish(false);probe.destroy()})
+  probe.on('error',()=>finish(false))
+  probe.on('close',()=>finish(false))
   probe.end()
  })
 }

@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { agentProbe, createAgentInventory } from './agent-inventory.js'
 import { agentsOf, agentInventoryLabel } from '../src/lib/agents.js'
+import { runWithContext } from './gateway.js'
 
 const exec = promisify(execFile)
 const sandbox = { id: 'one', name: 'test', workspace: 'default', phase: 'ready' }
@@ -151,4 +152,23 @@ test('setup completion refreshes a cached empty resource scan immediately', asyn
   assert.deepEqual(completed.installedSetupIds, ['selected-setup'])
   await inventory(client, sandbox, 'gateway', 'installed')
   assert.equal(calls, 2)
+})
+
+test('same-name inventory results never cross gateway or workspace contexts', async () => {
+  const inventory = createAgentInventory()
+  const origin = { gateway: 'inventory-origin', workspace: 'alpha' }
+  const contexts = [origin, { ...origin, workspace: 'beta' }, { ...origin, gateway: 'inventory-other' }]
+  const agents = ['claude', 'codex', 'opencode']
+  const expected = ['Claude Code', 'Codex', 'OpenCode']
+  const clients = agents.map((agent, index) => ({ sandbox: { exec: async (_name, _command, { workspace }) => {
+    if (workspace !== contexts[index].workspace) throw new Error('Sandbox not found in workspace')
+    return output(agent)
+  } } }))
+  const view = { ...sandbox, workspace: undefined }
+  for (const [index, context] of contexts.entries()) {
+    const result = await runWithContext(context, () => inventory(clients[index], view, 'shared-endpoint'))
+    assert.deepEqual(result.agents, [expected[index]])
+  }
+  const cached = await runWithContext(origin, () => inventory(clients[0], view, 'shared-endpoint'))
+  assert.deepEqual(cached.agents, ['Claude Code'])
 })

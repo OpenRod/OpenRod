@@ -1,7 +1,12 @@
 import * as React from "react"
-import { ArrowUpRight, ArrowUp, ArrowDown, Box, Cloud, Laptop, Check, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowUpRight, ArrowUp, ArrowDown, Box, Cloud, Laptop, Check, Monitor, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
-import { useApi, useCompute } from "@/lib/compute"
+import { createApi } from "@/lib/api"
+import { useCompute } from "@/lib/compute"
+import { useInventory } from "@/lib/inventory"
+import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
+import { locationLabel, resourceKey } from "@/lib/locations"
+import { LocationBadge } from "@/components/location-badge"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -14,30 +19,53 @@ import { CreateSandboxDialog } from "@/components/create-sandbox-dialog"
 import { useVirtualRows } from "@/hooks/use-virtual-rows"
 import { useDemoFleet } from "@/hooks/use-demo-fleet"
 import { useLive } from "@/lib/live"
-import { useSandboxInventory } from "@/hooks/use-sandbox-inventory"
-import { sandboxInventoryKey, sandboxInventoryApi } from "@/lib/sandbox-inventory"
 import { PHASE_LABEL, STATUS, elapsedSince, imageName, ownerOf, statusOf, styleOf, summarize, uptimeOf } from "@/lib/sandboxes"
 
 export const BOX_HANDOFF = "gateway-box"
+const EMPTY = []
+const PREVIEW_LOCATION = { context: '["preview","default"]', gateway: "preview", workspace: "default", label: "Local", remote: false, connected: true }
 const ROW_HEIGHT = 40
 const FILTERS = ["all", "running", "sleeping", "provisioning", "error", "unknown"]
-const keyOf = sandboxInventoryKey
-const nameKey = (sandbox) => `${sandbox.computeTarget}:${sandbox.name}`
+const locationKey = (location) => location?.id ?? location?.context
+const keyOf = resourceKey
+const nameKey = (sandbox) => JSON.stringify([locationKey(sandbox.location), sandbox.name])
 const number = (value) => value.toLocaleString("en-US")
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 const COLUMNS = [{ id: "name", label: "Sandbox", width: "28%" }, { id: "phase", label: "Status", width: "12%" }, { id: "owner", label: "Owner", width: "13%" }, { id: "image", label: "Image", width: "26%" }, { id: "startedAt", label: "Uptime", width: "10%" }, { id: "createdAt", label: "Created", width: "11%" }]
 
-export function SandboxesView({ onNavigate }) {
+export function SandboxesView({ onNavigate, onConnect }) {
   const api = useApi()
-  const live = useDemoFleet(useLive())
   const compute = useCompute()
-  const inventory = useSandboxInventory(live, compute)
+  const live = useDemoFleet(useLive())
+  const inventory = useInventory()
+  const { locations } = inventory
+  const inheritedLocation = useLocation()
+  const [selectedContext, setSelectedContext] = React.useState(null)
+  const defaultContext = locationKey(inheritedLocation) ?? selectedContext
+  const [locationFilter, setLocationFilter] = React.useState(locationKey(inheritedLocation) ?? "")
+  const [creationLocation, setCreationLocation] = React.useState(null)
+  const [handoff, setHandoff] = React.useState(null)
+  const canConnect = Boolean(onConnect)
+  React.useEffect(() => {
+    let alive = true
+    api.contextKey().then((context) => { if (alive) setSelectedContext(JSON.stringify([api.target, context])) }).catch(() => {})
+    return () => { alive = false }
+  }, [api])
+  React.useEffect(() => { setLocationFilter(locationKey(inheritedLocation) ?? "") }, [locationKey(inheritedLocation)])
+  const defaultLocation = locations.find((location) => locationKey(location) === defaultContext)
+  const availableLocation = locations.find((location) => locationKey(location) === locationFilter && location.connected)
+    ?? (defaultLocation?.connected ? defaultLocation : null)
+    ?? locations.find((location) => location.target === api.target && !location.remote && location.connected)
+    ?? locations.find((location) => location.target === api.target && location.connected)
+  const chosenLocation = locations.find((location) => locationKey(location) === locationKey(creationLocation)) ?? creationLocation ?? availableLocation
   const [creations, setCreations] = React.useState([])
-  const reportedSandboxes = inventory.sandboxes
+  const reportedSandboxes = React.useMemo(() => live.demo
+    ? (live.sandboxes ?? EMPTY).map((sandbox) => ({ ...sandbox, location: defaultLocation ?? availableLocation ?? PREVIEW_LOCATION }))
+    : inventory.sandboxes, [live.demo, live.sandboxes, defaultLocation, availableLocation, inventory.sandboxes])
   const sandboxes = React.useMemo(() => {
     const reported = new Set(reportedSandboxes.map(nameKey))
-    return [...creations.filter((sandbox) => !sandbox.reported && !reported.has(nameKey(sandbox))), ...reportedSandboxes]
-  }, [reportedSandboxes, creations])
+    return [...creations.filter((sandbox) => !sandbox.reported && !reported.has(nameKey(sandbox))).map((sandbox) => ({ ...sandbox, location: locations.find((location) => locationKey(location) === locationKey(sandbox.location)) ?? sandbox.location })), ...reportedSandboxes]
+  }, [reportedSandboxes, creations, locations])
   const [query, setQuery] = React.useState("")
   const [status, setStatus] = React.useState("all")
   const [imageFilter, setImageFilter] = React.useState("")
@@ -50,7 +78,9 @@ export function SandboxesView({ onNavigate }) {
   const deletionInFlight = React.useRef(false)
   const [deleteErrors, setDeleteErrors] = React.useState([])
   const [creating, setCreating] = React.useState(Boolean(compute?.createRequested))
-  React.useEffect(() => { if (compute?.createRequested) { setCreating(true); compute.requestCreate(false) } }, [compute?.createRequested])
+  React.useEffect(() => {
+    if (compute?.createRequested) { setCreating(true); compute.requestCreate(false) }
+  }, [compute?.createRequested])
   const [now, setNow] = React.useState(Date.now)
   const search = React.useRef(null)
   React.useEffect(() => {
@@ -59,32 +89,56 @@ export function SandboxesView({ onNavigate }) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); search.current?.focus() }
     }
     window.addEventListener("keydown", onKey)
-    try { const name = sessionStorage.getItem(BOX_HANDOFF); sessionStorage.removeItem(BOX_HANDOFF); if (name) setOpened(name) } catch { /* optional storage */ }
-    return () => { clearInterval(timer); window.removeEventListener("keydown", onKey) }
+    const receiveHandoff = (event) => {
+      const value = event.detail
+      if (typeof value?.name !== "string") return
+      setHandoff({ name: value.name, context: value.location?.id ?? (value.context ? JSON.stringify([value.target ?? api.target, value.context]) : undefined) })
+      inventory.refresh()
+    }
+    window.addEventListener("openrod-sandbox-handoff", receiveHandoff)
+    try {
+      const stored = sessionStorage.getItem(BOX_HANDOFF)
+      sessionStorage.removeItem(BOX_HANDOFF)
+      if (stored) {
+        let value
+        try { value = JSON.parse(stored) } catch { /* Legacy handoffs contain a plain name. */ }
+        setHandoff(value && typeof value.name === "string" ? { name: value.name, context: locationKey(value.location) ?? (value.context && value.target ? JSON.stringify([value.target, value.context]) : value.context) } : { name: stored })
+      }
+    } catch { /* optional storage */ }
+    return () => { clearInterval(timer); window.removeEventListener("keydown", onKey); window.removeEventListener("openrod-sandbox-handoff", receiveHandoff) }
   }, [])
   React.useEffect(() => {
-    if (live.sandboxes === null) return
+    const context = handoff?.context ?? defaultContext
+    if (!handoff || !context || inventory.loading) return
+    const sandbox = sandboxes.find((sandbox) => sandbox.name === handoff.name && locationKey(sandbox.location) === context)
+    if (!sandbox?.location.connected) return
+    setOpened(sandbox)
+    setHandoff(null)
+    try { sessionStorage.removeItem(BOX_HANDOFF) } catch {}
+  }, [handoff, defaultContext, inventory.loading, sandboxes])
+  React.useEffect(() => {
     const names = new Set(reportedSandboxes.map(nameKey))
     setCreations((current) => {
       const next = current.filter((sandbox) => !sandbox.reported || names.has(nameKey(sandbox)))
         .map((sandbox) => !sandbox.reported && names.has(nameKey(sandbox)) ? { ...sandbox, reported: true } : sandbox)
       return next.length === current.length && next.every((sandbox, index) => sandbox === current[index]) ? current : next
     })
-  }, [reportedSandboxes, live.sandboxes])
+  }, [reportedSandboxes])
   function sandboxCreated(name, sandbox) {
-    if (api.signal?.aborted) return
-    setOpened(compute?.target === "cloud" ? name : null)
-    setCreations((current) => [...current.filter((item) => item.name !== name || item.computeTarget !== compute.target), { ...sandbox, name, computeTarget: compute.target, phase: sandbox?.phase || "provisioning" }])
+    const created = { ...sandbox, name, location: sandbox?.location ?? chosenLocation, phase: sandbox?.phase || "provisioning" }
+    setOpened(null)
+    setCreations((current) => [...current.filter((item) => nameKey(item) !== nameKey(created)), created])
     setQuery(""); setStatus("all"); setImageFilter("")
+    setLocationFilter(locationKey(created.location))
     setSort({ key: "createdAt", direction: "desc" })
     inventory.refresh()
   }
   const all = React.useMemo(() => summarize(sandboxes), [sandboxes])
-  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, sandbox.computeTarget, ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
+  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, locationLabel(sandbox.location), ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
   const images = React.useMemo(() => [...new Set(indexed.map((row) => row.image))].sort(collator.compare), [indexed])
   const ordered = React.useMemo(() => {
     const q = deferredQuery.trim().toLowerCase()
-    const matched = indexed.filter((row) => (status === "all" || statusOf(row.sandbox.phase) === status) && (!imageFilter || row.image === imageFilter) && (!q || row.search.includes(q)))
+    const matched = indexed.filter((row) => (!locationFilter || locationKey(row.sandbox.location) === locationFilter) && (status === "all" || statusOf(row.sandbox.phase) === status) && (!imageFilter || row.image === imageFilter) && (!q || row.search.includes(q)))
     const value = (row) => sort.key === "owner" || sort.key === "image" ? row[sort.key] : sort.key === "startedAt" ? row.sandbox.phase === "ready" ? row.sandbox.startedAt : null : row.sandbox[sort.key]
     return matched.sort((a, b) => {
       const av = value(a), bv = value(b)
@@ -93,20 +147,21 @@ export function SandboxesView({ onNavigate }) {
       const delta = collator.compare(av ?? "", bv ?? "")
       return (sort.direction === "asc" ? delta : -delta) || collator.compare(a.sandbox.name, b.sandbox.name)
     })
-  }, [indexed, status, imageFilter, deferredQuery, sort])
+  }, [indexed, status, imageFilter, locationFilter, deferredQuery, sort])
   // Keep selection tied to identity across sorting, filters, and live updates.
   React.useEffect(() => {
-    if (live.sandboxes === null) return
-    const available = new Set(sandboxes.map(keyOf))
+    const available = new Set(sandboxes.filter((sandbox) => sandbox.location?.connected && !live.demo).map(keyOf))
     setSelected((current) => {
       const next = new Set([...current].filter((key) => available.has(key)))
       return next.size === current.size ? current : next
     })
-  }, [sandboxes, live.sandboxes])
-  const selectedBoxes = React.useMemo(() => sandboxes.filter((sandbox) => selected.has(keyOf(sandbox))), [sandboxes, selected])
-  const matchingSelected = ordered.reduce((count, row) => count + Number(selected.has(keyOf(row.sandbox))), 0)
-  const allMatchingSelected = ordered.length > 0 && matchingSelected === ordered.length
+  }, [sandboxes, live.demo])
+  const selectedBoxes = React.useMemo(() => sandboxes.filter((sandbox) => sandbox.location?.connected && selected.has(keyOf(sandbox))), [sandboxes, selected])
+  const selectable = ordered.filter((row) => row.sandbox.location?.connected && !live.demo)
+  const matchingSelected = selectable.reduce((count, row) => count + Number(selected.has(keyOf(row.sandbox))), 0)
+  const allMatchingSelected = selectable.length > 0 && matchingSelected === selectable.length
   const toggleSelected = React.useCallback((sandbox) => {
+    if (!sandbox.location?.connected) return
     setSelected((current) => {
       const next = new Set(current), key = keyOf(sandbox)
       if (next.has(key)) next.delete(key)
@@ -116,7 +171,7 @@ export function SandboxesView({ onNavigate }) {
   }, [])
   const toggleMatching = () => setSelected((current) => {
     const next = new Set(current)
-    for (const { sandbox } of ordered) {
+    for (const { sandbox } of selectable) {
       if (allMatchingSelected) next.delete(keyOf(sandbox))
       else next.add(keyOf(sandbox))
     }
@@ -134,10 +189,12 @@ export function SandboxesView({ onNavigate }) {
       while (cursor < deleteTargets.length) {
         const sandbox = deleteTargets[cursor++]
         try {
-          await sandboxInventoryApi(sandbox, compute.localViewer, api.signal).lifecycle(sandbox.name, "delete")
+          const location = locations.find((location) => locationKey(location) === locationKey(sandbox.location))
+          if (!location?.connected) throw new Error("Location is disconnected. Reconnect before deleting.")
+          await createApi(compute?.localViewer ? location.target ?? "local" : api.target, api.signal, location.context).lifecycle(sandbox.name, "delete")
           succeeded.add(keyOf(sandbox))
         } catch (error) {
-          failures.push({ name: `${sandbox.name} (${sandbox.computeTarget})`, message: error.message })
+          failures.push({ key: keyOf(sandbox), name: sandbox.name, location: sandbox.location, message: error.message })
         }
       }
     }
@@ -154,20 +211,25 @@ export function SandboxesView({ onNavigate }) {
       setDeleteTargets(null)
     }
   }
-  const openSandbox = React.useCallback((sandbox) => {
-    if (typeof sandbox === "string") { setOpened(sandbox); return }
-    if (compute.localViewer && sandbox.computeTarget !== compute.target) {
-      try { sessionStorage.setItem(BOX_HANDOFF, sandbox.name) } catch {}
-      compute.selectTarget(sandbox.computeTarget)
-    } else setOpened(sandbox.name)
-  }, [compute.target, compute.localViewer, compute.selectTarget])
   const virtual = useVirtualRows({ count: ordered.length, rowHeight: ROW_HEIGHT })
-  React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, status, imageFilter, sort])
+  React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, status, imageFilter, locationFilter, sort])
   const points = React.useMemo(() => bucketEgress(live.events, 15, now), [live.events, now])
-  const clearFilters = () => { setQuery(""); setStatus("all"); setImageFilter("") }
-  const filtering = query || status !== "all" || imageFilter
-  const loading = sandboxes.length === 0 && live.sandboxes === null && !live.overview?.error
-  const unreachable = sandboxes.length === 0 && live.sandboxes === null && live.overview?.error
+  const clearFilters = () => { setQuery(""); setStatus("all"); setImageFilter(""); setLocationFilter("") }
+  const filtering = query || status !== "all" || imageFilter || locationFilter
+  const loading = sandboxes.length === 0 && inventory.loading && !live.demo
+  const unreachable = sandboxes.length === 0 && inventory.error
+  const openedSandbox = opened && (sandboxes.find((sandbox) => keyOf(sandbox) === keyOf(opened))
+    ?? (opened.id == null ? sandboxes.find((sandbox) => nameKey(sandbox) === nameKey(opened)) : null)
+    ?? opened)
+  const openedLocation = openedSandbox && (locations.find((location) => locationKey(location) === locationKey(openedSandbox.location)) ?? openedSandbox.location)
+  const openedLive = openedSandbox ? {
+    ...live,
+    sandboxes: [openedSandbox],
+    events: locationKey(openedLocation) === defaultContext ? live.events : EMPTY,
+    overview: locationKey(openedLocation) === defaultContext ? live.overview : { gateway: { name: openedLocation?.gateway, workspace: openedLocation?.workspace, remote: openedLocation?.remote } },
+    refresh: inventory.refresh,
+  } : null
+  const beginCreation = () => { setCreationLocation(availableLocation ?? null); setCreating(true) }
 
   return (
     <>
@@ -185,16 +247,17 @@ export function SandboxesView({ onNavigate }) {
         <div className="flex h-[3px] shrink-0 overflow-hidden" role="img" aria-label={Object.entries(all.status).map(([key, value]) => `${value} ${STATUS[key].label}`).join(", ")}>
           {Object.entries(all.status).map(([key, value]) => value > 0 && <span key={key} className={STATUS[key].strip} style={{ width: `${value / all.total * 100}%` }} />)}
         </div>
-        {live.connection === "gateway-down" && sandboxes.length > 0 && <p role="alert" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">Gateway unreachable. Showing the last reading.</p>}
-        {inventory.error && <p role="alert" className="border-b border-border px-6 py-2 text-xs text-destructive">{inventory.error} <button className="underline" onClick={inventory.refresh}>Retry</button></p>}
+        {inventory.error && sandboxes.length > 0 && <p role="alert" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">Inventory refresh failed. Showing the last reading. {inventory.error}</p>}
+        {locations.filter((location) => !location.connected).map((location) => <p key={locationKey(location)} role="status" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">{locationLabel(location)} disconnected. Its last inventory is retained; reconnect to use these resources.{location.error ? ` ${location.error}` : ""}</p>)}
         {creations.map((created) => {
-          const sandbox = reportedSandboxes.find((item) => nameKey(item) === nameKey(created)) ?? created
+          const sandbox = sandboxes.find((item) => nameKey(item) === nameKey(created)) ?? created
           const ready = sandbox.phase === "ready"
           const ended = ["error", "stopped", "completed", "deleting"].includes(sandbox.phase)
           return <div key={nameKey(created)} role="status" aria-live="polite" className={`flex shrink-0 items-center gap-3 border-b border-border px-6 py-3 text-xs ${ended ? "bg-red-50 text-red-800" : ready ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
             {ready ? <Check aria-hidden="true" className="size-4 shrink-0" /> : ended ? <Box aria-hidden="true" className="size-4 shrink-0" /> : <Spinner aria-hidden="true" className="size-4 shrink-0" />}
             <div className="min-w-0 flex-1"><p className="break-words font-medium">{ready ? `${created.name} is ready` : ended ? `${created.name} needs attention` : `Preparing ${created.name}…`}</p><p className="mt-0.5 opacity-80">{ready ? "Your sandbox is ready to use." : ended ? `Status: ${PHASE_LABEL[sandbox.phase]}. Open the sandbox to inspect it.` : "Your new sandbox is starting. You can keep browsing while it gets ready."}</p></div>
-            {(ready || ended) && <><Button variant="ghost" size="sm" onClick={() => openSandbox(created)}>Open sandbox<ArrowUpRight className="size-3" /></Button><Button variant="ghost" size="icon-sm" aria-label={`Dismiss status for ${created.name}`} onClick={() => setCreations((current) => current.filter((item) => nameKey(item) !== nameKey(created)))}><X className="size-3.5" /></Button></>}
+            <LocationBadge location={sandbox.location} />
+            {(ready || ended) && <><Button variant="ghost" size="sm" disabled={!sandbox.location?.connected} onClick={() => setOpened(sandbox)}>Open sandbox<ArrowUpRight className="size-3" /></Button><Button variant="ghost" size="icon-sm" aria-label={`Dismiss status for ${created.name}`} onClick={() => setCreations((current) => current.filter((item) => nameKey(item) !== nameKey(created)))}><X className="size-3.5" /></Button></>}
           </div>
         })}
         {live.demo && <p className="border-b border-border px-6 py-2 text-xs text-amber-700">Preview · synthetic sandbox data</p>}
@@ -203,6 +266,15 @@ export function SandboxesView({ onNavigate }) {
             <Input ref={search} value={query} onChange={(e) => { setQuery(e.target.value) }} placeholder="Search name, owner, image…" aria-label="Search sandboxes" className="h-9 pl-9 pr-8 text-xs" />
             {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
           </div>
+          <Select value={locationFilter} onValueChange={(value) => setLocationFilter(value ?? "")} items={[{ value: "", label: "All locations" }, ...locations.map((location) => ({ value: locationKey(location), label: locationLabel(location) }))]}>
+            <SelectTrigger aria-label="Filter by location" className="h-8 w-44 bg-card text-xs"><SelectValue className="min-w-0 truncate" /></SelectTrigger>
+            <SelectContent align="end" alignItemWithTrigger={false}>
+              <SelectGroup>
+                <SelectItem value="" className="text-xs">All locations</SelectItem>
+                {locations.map((location) => <SelectItem key={locationKey(location)} value={locationKey(location)} className="text-xs">{locationLabel(location)}{!location.connected ? " · Disconnected" : ""}</SelectItem>)}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <Select value={imageFilter} onValueChange={(value) => setImageFilter(value ?? "")} items={[{ value: "", label: "All images" }, ...images.map((image) => ({ value: image, label: image }))]}>
             <SelectTrigger aria-label="Filter by image" className="h-8 w-44 bg-card text-xs">
               <SelectValue className="min-w-0 truncate" />
@@ -216,7 +288,8 @@ export function SandboxesView({ onNavigate }) {
           </Select>
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={inventory.refresh}><RefreshCw className="size-3.5" /></Button>
-          <Button size="sm" onClick={() => setCreating(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New {compute.target} sandbox</Button>
+          {canConnect && <Button variant="outline" size="sm" onClick={onConnect}><Monitor aria-hidden="true" className="size-3.5" />Connect machine</Button>}
+          <Button size="sm" disabled={!availableLocation} onClick={beginCreation} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
         </div>
         {selectedBoxes.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent/30 px-6 py-2">
           <span role="status" className="mr-auto text-xs"><strong>{number(selectedBoxes.length)}</strong> selected{selectedBoxes.length > matchingSelected && <span className="text-muted-foreground"> · {number(selectedBoxes.length - matchingSelected)} outside current filters</span>}</span>
@@ -225,44 +298,44 @@ export function SandboxesView({ onNavigate }) {
         </div>}
         {deleteErrors.length > 0 && <div role="alert" className="border-b border-border px-6 py-2 text-xs text-destructive">
           <div className="flex items-center justify-between gap-2"><p>Some sandboxes could not be deleted. Failed boxes remain selected for retry.</p><Button variant="ghost" size="icon-sm" aria-label="Dismiss deletion errors" onClick={() => setDeleteErrors([])}><X className="size-3.5" /></Button></div>
-          <ul className="max-h-28 overflow-auto">{deleteErrors.map((error) => <li key={error.name}><strong>{error.name}</strong>: {error.message}</li>)}</ul>
+          <ul className="max-h-28 overflow-auto">{deleteErrors.map((error) => <li key={error.key}><strong>{error.name}</strong> <LocationBadge location={error.location} />: {error.message}</li>)}</ul>
         </div>}
         <div ref={virtual.ref} onScroll={virtual.onScroll} tabIndex={0} role="region" aria-label="Sandbox inventory" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
           {loading ? <p role="status" className="py-20 text-center text-sm text-muted-foreground">Loading sandboxes…</p>
-            : unreachable ? <div role="alert" className="py-16 text-center"><p>Gateway unreachable</p><p className="mt-2 text-sm text-muted-foreground">{live.overview.error}</p><Button variant="outline" onClick={inventory.refresh} className="mt-4">Retry</Button></div>
-            : !ordered.length ? <div className="py-20 text-center"><Box className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{sandboxes.length ? "No matching sandboxes" : "No sandboxes yet"}</p><Button variant="outline" className="mt-4" onClick={() => sandboxes.length ? clearFilters() : setCreating(true)}>{sandboxes.length ? "Clear filters" : "Create sandbox"}</Button></div>
+            : unreachable ? <div role="alert" className="py-16 text-center"><p>Inventory unavailable</p><p className="mt-2 text-sm text-muted-foreground">{inventory.error}</p><Button variant="outline" onClick={inventory.refresh} className="mt-4">Retry</Button></div>
+            : !ordered.length ? <div className="py-20 text-center"><Box className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{sandboxes.length ? "No matching sandboxes" : "No sandboxes yet"}</p><Button variant="outline" disabled={!sandboxes.length && !availableLocation} className="mt-4" onClick={() => sandboxes.length ? clearFilters() : beginCreation()}>{sandboxes.length ? "Clear filters" : "Create sandbox"}</Button></div>
             : <table aria-label="Sandboxes" aria-rowcount={ordered.length + 1} className="w-full min-w-[1040px] table-fixed border-separate border-spacing-0 text-xs">
               <colgroup><col style={{ width: 48 }} />{COLUMNS.map((column) => <col key={column.id} style={{ width: column.width }} />)}</colgroup>
               <thead className="sticky top-0 z-10 bg-muted"><tr aria-rowindex={1}>
-                <th scope="col" className="h-9 border-b border-border px-4"><SelectionCheckbox label="Select all matching sandboxes" checked={allMatchingSelected} mixed={matchingSelected > 0 && !allMatchingSelected} disabled={deleting} onChange={toggleMatching} /></th>
+                <th scope="col" className="h-9 border-b border-border px-4"><SelectionCheckbox label="Select all matching sandboxes" checked={allMatchingSelected} mixed={matchingSelected > 0 && !allMatchingSelected} disabled={deleting || !selectable.length} onChange={toggleMatching} /></th>
                 {COLUMNS.map((column) => <th key={column.id} scope="col" aria-sort={sort.key === column.id ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="h-9 border-b border-border px-4 text-left font-medium text-muted-foreground first:pl-6">
                   <button onClick={() => setSort((current) => ({key: column.id, direction: current.key === column.id && current.direction === "asc" ? "desc" : "asc"}))} className="flex h-9 w-full items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring">{column.label}{sort.key === column.id && (sort.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>
                 </th>)}
               </tr></thead>
               <tbody>
                 {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={7} style={{ height: virtual.paddingTop, padding: 0, border: 0 }} /></tr>}
-                {ordered.slice(virtual.start, virtual.end).map((row, index) => <InventoryRow key={keyOf(row.sandbox)} row={row} now={now} index={virtual.start + index + 2} onOpen={openSandbox} selected={selected.has(keyOf(row.sandbox))} onSelect={toggleSelected} disabled={deleting} />)}
+                {ordered.slice(virtual.start, virtual.end).map((row, index) => <InventoryRow key={keyOf(row.sandbox)} row={row} now={now} index={virtual.start + index + 2} onOpen={setOpened} selected={selected.has(keyOf(row.sandbox))} onSelect={toggleSelected} disabled={deleting || live.demo || !row.sandbox.location?.connected} />)}
                 {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={7} style={{ height: (ordered.length - virtual.end) * ROW_HEIGHT, padding: 0, border: 0 }} /></tr>}
               </tbody>
             </table>}
         </div>
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-6 py-2 text-[11px] text-muted-foreground"><span><strong className="font-medium text-foreground">{number(ordered.length)}</strong>{filtering ? ` of ${number(sandboxes.length)}` : ""} sandboxes</span><span className="hidden sm:inline">Click a row to inspect · ⌘K to search</span></div>
       </div>
-      <SandboxSheet key={opened ?? "closed"} name={opened} liveData={live} onClose={() => setOpened(null)} onNavigate={onNavigate} />
+      {openedSandbox && openedLocation?.connected && <LocationProvider key={keyOf(openedSandbox)} location={openedLocation}><SandboxSheet name={openedSandbox.name} sandbox={openedSandbox} liveData={openedLive} onClose={() => setOpened(null)} onNavigate={onNavigate} onChanged={inventory.refresh} /></LocationProvider>}
       <AlertDialog open={deleteTargets !== null} onOpenChange={(open) => { if (!open && !deletionInFlight.current) setDeleteTargets(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {number(deleteTargets?.length ?? 0)} {deleteTargets?.length === 1 ? "sandbox" : "sandboxes"}?</AlertDialogTitle>
             <AlertDialogDescription>This permanently deletes the selected sandboxes and their data. This cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
-          <ul aria-label="Sandboxes to delete" className="max-h-48 overflow-auto rounded-md border border-border p-3 text-xs">{deleteTargets?.map((sandbox) => <li key={keyOf(sandbox)} className="break-all py-1">{sandbox.name} · {sandbox.computeTarget === "cloud" ? "Cloud" : "Local"}</li>)}</ul>
+          <ul aria-label="Sandboxes to delete" className="max-h-48 overflow-auto rounded-md border border-border p-3 text-xs">{deleteTargets?.map((sandbox) => <li key={keyOf(sandbox)} className="flex items-center gap-2 break-all py-1">{sandbox.name}<LocationBadge location={sandbox.location} /></li>)}</ul>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" disabled={deleting || !deleteTargets?.length} onClick={deleteSelected}>{deleting ? "Deleting…" : "Delete sandboxes"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <CreateSandboxDialog open={creating} onOpenChange={setCreating} onCreated={sandboxCreated} />
+      <LocationProvider location={chosenLocation}><CreateSandboxDialog open={creating} onOpenChange={setCreating} onCreated={sandboxCreated} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} /></LocationProvider>
     </>
   )
 }
@@ -270,9 +343,11 @@ export function SandboxesView({ onNavigate }) {
 const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen, selected, onSelect, disabled }) {
   const { sandbox, owner, image } = row
   const cell = "h-10 border-b border-border/60 px-4 py-0 align-middle text-muted-foreground"
-  return <tr aria-rowindex={index} onClick={() => onOpen(sandbox)} className={`group cursor-pointer transition-colors hover:bg-muted/60 focus-within:bg-muted/60 ${selected ? "bg-accent/40" : "bg-card"}`}>
-    <td className={cell} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${sandbox.name} (${sandbox.computeTarget})`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
-    <td className={`${cell} pl-6`}><button aria-haspopup="dialog" aria-label={`Open ${sandbox.name} (${sandbox.computeTarget})`} onClick={(event) => { event.stopPropagation(); onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"><LocationIcon target={sandbox.computeTarget} /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+  const disconnected = !sandbox.location?.connected
+  const label = `${sandbox.name} at ${locationLabel(sandbox.location)}`
+  return <tr aria-rowindex={index} aria-disabled={disconnected || undefined} onClick={() => { if (!disconnected) onOpen(sandbox) }} className={`group transition-colors ${disconnected ? "opacity-60" : "cursor-pointer hover:bg-muted/60 focus-within:bg-muted/60"} ${selected ? "bg-accent/40" : "bg-card"}`}>
+    <td className={cell} onClick={(event) => event.stopPropagation()}><SelectionCheckbox label={`Select ${label}`} checked={selected} disabled={disabled} onChange={() => onSelect(sandbox)} /></td>
+    <td className={`${cell} pl-6`}><button disabled={disconnected} aria-haspopup="dialog" aria-label={`Open ${label}`} onClick={(event) => { event.stopPropagation(); if (!disconnected) onOpen(sandbox) }} className="flex h-9 w-full min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"><LocationIcon location={sandbox.location} /><span className="truncate font-medium text-foreground" title={sandbox.name}>{sandbox.name}</span><LocationBadge location={sandbox.location} /><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
     <td className={cell}><span className="flex items-center gap-1.5 whitespace-nowrap"><span className={`size-1.5 shrink-0 rounded-full ${styleOf(sandbox.phase).bar}`} />{PHASE_LABEL[sandbox.phase] ?? "Unknown"}</span></td>
     <td className={cell}><span className="block truncate" title={owner}>{owner}</span></td>
     <td className={cell}><span className="block truncate font-mono text-[11px]" title={sandbox.image || image}>{image}</span></td>
@@ -281,9 +356,11 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
   </tr>
 })
 
-function LocationIcon({target}) {
-  const Icon = target === "cloud" ? Cloud : Laptop
-  return <span role="img" aria-label={`${target === "cloud" ? "Cloud" : "Local"} sandbox`} title={target === "cloud" ? "Cloud compute" : "Local compute"}><Icon aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /></span>
+function LocationIcon({ location }) {
+  const cloud = location?.cloud || location?.target === "cloud"
+  const Icon = cloud ? Cloud : location?.remote ? Monitor : Laptop
+  const label = cloud ? "Cloud compute" : location?.remote ? "SSH machine" : "Local compute"
+  return <span role="img" aria-label={label} title={label}><Icon aria-hidden="true" strokeWidth={1.4} className="size-3.5 shrink-0 text-muted-foreground" /></span>
 }
 
 function SelectionCheckbox({ label, checked, mixed = false, disabled, onChange }) {

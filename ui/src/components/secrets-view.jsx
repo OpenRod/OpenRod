@@ -15,7 +15,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { useVirtualRows } from "@/hooks/use-virtual-rows"
 import { indexSecrets, filterSecrets } from "@/lib/secret-inventory"
 import { NumberTicker } from "@/components/ui/number-ticker"
-import { useApi } from "@/lib/compute"
+import { useApi, useLocation } from "@/lib/location-context"
 import { useLive } from "@/lib/live"
 import { absoluteTime } from "@/lib/format"
 import { serviceOf } from "@/lib/services"
@@ -184,6 +184,11 @@ const COLUMNS = [
 const EXPIRY_LABEL = { none: "No expiry", expired: "Expired", expiring: "Within 7 days", scheduled: "Scheduled" }
 
 export function SecretsView() {
+  const location = useLocation()
+  return <ScopedSecretsView key={location?.id ?? location?.context ?? "default"} />
+}
+
+function ScopedSecretsView() {
   const api = useApi()
   const live = useLive()
   const [data, setData] = React.useState(null)
@@ -206,7 +211,7 @@ export function SecretsView() {
     try { const d = await api.secrets(); setData(d); setError(null); return d }
     catch (e) { setError(e.message); return null }
     finally { setLoading(false) }
-  }, [])
+  }, [api])
   React.useEffect(() => { load() }, [load])
   React.useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000)

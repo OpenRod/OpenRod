@@ -5,7 +5,7 @@ export const SANDBOX_ROOT = "/sandbox"
 export const TRANSFER_LIMIT = 1024 ** 3
 
 export function formatBytes(bytes) {
-  if (bytes == null || !Number.isFinite(bytes)) return "—"
+  if (bytes == null || !Number.isFinite(bytes)) return "-"
   if (bytes < 1024) return `${bytes} B`
   const units = ["KB", "MB", "GB", "TB"]
   let value = bytes / 1024

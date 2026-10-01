@@ -56,6 +56,7 @@ export function formToSpec(form) {
       host: e.host.trim(),
       ports: e.ports.split(/[\s,]+/).filter(Boolean).map(Number),
       protocol: e.protocol,
+      ...(e.protocol === "tcp" && e.tlsSkip ? { tlsSkip: true } : {}),
       access: e.protocol === "tcp" || e.access === "custom" ? null : e.access,
       allow: e.protocol === "tcp" || e.access !== "custom" ? [] : e.allow.filter((r) => r.path),
       deny: e.protocol === "tcp" ? [] : e.deny.filter((r) => r.path),
