@@ -136,10 +136,11 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
     if (live.demo) return
     let cancelled = false
     let timer
+    let delay = 30000
     const refresh = async () => {
-      try { const d = await api.sandbox(name); if (!cancelled) { setDetail(d); setError(null) } }
+      try { const d = await api.sandbox(name); if (!cancelled) { setDetail(d); setError(null); delay = d.setupJobs?.some(job => job.status === 'waiting') ? 2000 : 30000 } }
       catch (e) { if (!cancelled) setError(e.message) }
-      if (!cancelled) timer = setTimeout(refresh, 30000)
+      if (!cancelled) timer = setTimeout(refresh, delay)
     }
     refresh()
     return () => { cancelled = true; clearTimeout(timer) }
@@ -210,7 +211,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                 <TabsList variant="line" aria-label="Sandbox information" className="max-w-full">
                   <TabsTrigger value="overview" className="px-3 text-xs">Overview</TabsTrigger>
                   <TabsTrigger value="rules" className="px-3 text-xs">Rules{detail?.policy && <span className="text-muted-foreground">{rules.length}</span>}</TabsTrigger>
-                  <TabsTrigger value="setups" className="px-3 text-xs">Setups</TabsTrigger>
+                  <TabsTrigger value="setups" className="px-3 text-xs">MCPs &amp; Skills</TabsTrigger>
                   <TabsTrigger value="files" className="px-3 text-xs">Files</TabsTrigger>
                   <TabsTrigger value="activity" className="px-3 text-xs">Activity</TabsTrigger>
                   <TabsTrigger value="details" className="px-3 text-xs">Details</TabsTrigger>
@@ -239,6 +240,9 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
                       </Section>
                     )}
                     <Section title="At a glance">
+                      {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
+                        {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}
+                      </p>)}
                       <dl className="grid grid-cols-2 gap-4 lg:grid-cols-1">
                         {[["Status", <span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} aria-hidden="true" />{PHASE_LABEL[phase] ?? "Unknown"}</span>], ["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
@@ -310,7 +314,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
               )}
 
               </TabsContent>
-              <TabsContent value="setups" className="min-h-0 overflow-y-auto"><SetupsView sandbox={name} /></TabsContent>
+              <TabsContent value="setups" className="min-h-0 overflow-y-auto"><SetupsView sandbox={name} setupIds={detail?.setupIds ?? []} /></TabsContent>
               <TabsContent value="files" className="flex min-h-0 flex-col">
                 <FilesView sandbox={sandbox} demo={live.demo} />
               </TabsContent>

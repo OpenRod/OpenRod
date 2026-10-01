@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { SandboxSheet } from "@/components/sandbox-sheet"
@@ -187,7 +188,17 @@ export function SandboxesView({ onNavigate }) {
             <Input ref={search} value={query} onChange={(e) => { setQuery(e.target.value) }} placeholder="Search name, owner, image…" aria-label="Search sandboxes" className="h-9 pl-9 pr-8 text-xs" />
             {query && <button aria-label="Clear search" className="absolute top-2.5 right-2" onClick={() => setQuery("")}><X className="size-4" /></button>}
           </div>
-          <select aria-label="Filter by image" value={imageFilter} onChange={(e) => setImageFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="">All images</option>{images.map((image) => <option key={image}>{image}</option>)}</select>
+          <Select value={imageFilter} onValueChange={(value) => setImageFilter(value ?? "")} items={[{ value: "", label: "All images" }, ...images.map((image) => ({ value: image, label: image }))]}>
+            <SelectTrigger aria-label="Filter by image" className="h-8 w-44 bg-card text-xs">
+              <SelectValue className="min-w-0 truncate" />
+            </SelectTrigger>
+            <SelectContent align="end" alignItemWithTrigger={false} className="w-max min-w-44 max-w-[min(24rem,calc(100vw-2rem))]">
+              <SelectGroup>
+                <SelectItem value="" className="text-xs">All images</SelectItem>
+                {images.map((image) => <SelectItem key={image} value={image} className="text-xs [&_[data-slot=select-item-text]]:truncate">{image}</SelectItem>)}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={live.refresh}><RefreshCw className="size-3.5" /></Button>
           <Button size="sm" onClick={() => setCreating(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>

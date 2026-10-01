@@ -1,0 +1,12 @@
+[
+  { "id": "claude", "name": "Claude Code", "command": "claude", "config": ".claude.json", "key": "mcpServers", "format": "claude", "skills": ".claude/skills" },
+  { "id": "codex", "name": "Codex", "command": "codex", "config": ".codex/config.toml", "key": "mcp_servers", "format": "codex", "skills": ".agents/skills", "extraSkillRoots": [".codex/skills"] },
+  { "id": "opencode", "name": "OpenCode", "command": "opencode", "config": ".config/opencode/opencode.json", "alternateConfig": ".config/opencode/opencode.jsonc", "key": "mcp", "format": "opencode", "skills": ".config/opencode/skills", "extraSkillRoots": [".claude/skills", ".agents/skills"] },
+  { "id": "pi", "name": "Pi", "command": "pi", "config": ".pi/agent/mcp.json", "key": "mcpServers", "format": "json", "skills": ".pi/agent/skills", "extraSkillRoots": [".agents/skills"], "note": "Requires a Pi version with built-in MCP support; MCP extensions can override it." },
+  { "id": "cursor", "name": "Cursor", "command": "cursor-agent", "config": ".cursor/mcp.json", "key": "mcpServers", "format": "json", "skills": ".cursor/skills" },
+  { "id": "antigravity", "name": "Antigravity CLI", "command": "agy", "config": ".gemini/config/mcp_config.json", "key": "mcpServers", "format": "antigravity", "skills": ".gemini/antigravity-cli/skills" },
+  { "id": "copilot", "name": "GitHub Copilot", "command": "copilot", "config": ".copilot/mcp-config.json", "key": "mcpServers", "format": "copilot", "skills": ".copilot/skills" },
+  { "id": "kiro", "name": "Kiro CLI", "command": "kiro-cli", "config": ".kiro/settings/mcp.json", "key": "mcpServers", "format": "json", "skills": ".kiro/skills" },
+  { "id": "droid", "name": "Factory Droid", "command": "droid", "config": ".factory/mcp.json", "key": "mcpServers", "format": "droid", "skills": ".factory/skills" },
+  { "id": "aider", "name": "Aider", "command": "aider", "reason": "Aider has no supported native MCP or SKILL.md setup integration. Choose another agent to use this Setup." }
+]

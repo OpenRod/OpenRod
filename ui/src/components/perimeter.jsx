@@ -151,17 +151,18 @@ export function Perimeter({ name, phase, agents = [], agentStatus = "Agent inven
                 {[{ kind: "mcps", title: "MCPs", icon: Plug }, { kind: "skills", title: "Skills", icon: BookOpen }].map(({ kind, title, icon }) => {
                   const inventory = agent.resources?.[kind]
                   const checked = inventory?.status === "checked"
+                  const unsupported = inventory?.status === "unsupported"
                   const items = checked ? inventory.items : []
                   const key = `${agent.name}:${kind}`
                   return <Group key={kind} title={title} aria-label={`${agent.name} ${title}`} count={checked ? items.length : "—"} icon={icon}
-                    summary={checked ? "In agent user configuration" : "Inventory unavailable"} open={!!expanded[key]} onToggle={() => toggle(key)}
+                    summary={unsupported ? "Setup integration unavailable" : checked ? "In agent user configuration" : "Inventory unavailable"} open={!!expanded[key]} onToggle={() => toggle(key)}
                     className={cn("border-0 shadow-none", kind === "skills" && "border-t border-border/60")}>
                     <div data-resource-list className="max-h-48 touch-pan-y select-text space-y-0.5 overflow-y-auto overscroll-contain">
                       {items.map((item) => <div key={item.name} className="flex min-h-[23px] items-center gap-2 rounded-md border border-border/80 bg-card px-2.5 py-1 text-[11px]">
                         <span className="min-w-0 flex-1 break-words">{kind === "skills" ? item.name.replace(/^os-[a-f0-9]{8}-(?=.)/i, "") : item.name}</span>
                         {item.disabled && <span className="shrink-0 text-[10px] text-muted-foreground">Disabled</span>}
                       </div>)}
-                      {!items.length && <p className="px-2 py-2 text-center text-[11px] text-muted-foreground">{checked ? `No ${title} found in user configuration` : `${title} inventory unavailable`}</p>}
+                      {!items.length && <p className="px-2 py-2 text-center text-[11px] text-muted-foreground">{unsupported ? `${title} integration unavailable` : checked ? `No ${title} found in user configuration` : `${title} inventory unavailable`}</p>}
                     </div>
                   </Group>
                 })}

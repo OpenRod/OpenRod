@@ -1,3 +1,4 @@
+import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
@@ -17,7 +18,7 @@ import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { useLive } from "@/lib/live"
 import { sessionCommand } from "@/lib/sandbox-session"
 import { AGENTS } from "@/lib/image-templates"
-import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate } from "@/lib/quick-setup"
+import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { policiesFor } from "@/lib/groups"
 import { agentAccessFor } from "../../shared/agent-access.js"
@@ -120,7 +121,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   const [name, setName] = React.useState("")
   const [images, setImages] = React.useState([])
   const [setupIds, setSetupIds] = React.useState([])
-  const [setupTarget, setSetupTarget] = React.useState("claude")
+  const [setupAccessReview, setSetupAccessReview] = React.useState(null)
   const [imageTemplate, setImageTemplate] = React.useState("")
   const [chosen, setChosen] = React.useState([])
   const [mode, setMode] = React.useState("quick")
@@ -149,7 +150,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     setName(nextName(new Set(list.map((s) => s.name))))
     setMode(initialImageTemplate ? "template" : "quick")
     setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setProgress("")
-    setSetupIds([]); setSetupTarget("codex")
+    setSetupIds([])
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
     api.imageTemplates().then((items) => setImages(items.filter((t) => t.status === "ready" || t.exists))).catch(() => {})
@@ -170,9 +171,10 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
   }))] : chosen
   const templateAgents = chosenImage?.managed && chosenImage.recipe.source === "build" ? AGENTS.filter((agent) => chosenImage.recipe.agents.includes(agent.id)) : null
 
-  const quickSetupTargets = agentIds.filter((id) => ['codex', 'claude', 'cursor'].includes(id))
-  const hasSetups = setupIds.length > 0 || Boolean(chosenImage?.recipe?.setups?.length)
-  const missingSetupAgent = mode === "quick" && hasSetups && !quickSetupTargets.length
+  const setupAgentIds = mode === "quick" ? agentIds : (templateAgents ?? []).map((agent) => agent.id)
+  const setupTargets = setupTargetsFor(setupAgentIds)
+  const hasSetups = mode === "quick" ? setupIds.length > 0 : Boolean(chosenImage?.recipe?.setups?.length)
+  const missingSetupAgent = hasSetups && !setupTargets.length
 
   function toggleAgent(id) {
     const next = agentIds.includes(id) ? agentIds.filter((item) => item !== id) : [...agentIds, id]
@@ -216,10 +218,14 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
     try {
       const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
       let environment = chosenImage
+      let launchSetupIds = [], launchAccessReview = null
+      setPreparing(true)
       if (mode === "quick") {
-        setPreparing(true)
+        const prepared = await prepareQuickSetups(api, setupIds, setupAccessReview, { signal: controller.signal, onProgress: setProgress })
+        launchSetupIds = prepared.setups.map(s => s.id)
+        launchAccessReview = prepared.accessReview
         environment = await prepareQuickTemplate(api, agentIds, {
-          withSetups: setupIds.length > 0, signal: controller.signal, onProgress: setProgress,
+          withSetups: setupIds.length > 0, setups: prepared.setups, signal: controller.signal, onProgress: setProgress,
           onBuild: (value) => {
             buildName.current = value
             if (controller.signal.aborted) void api.cancelImageBuild(value).catch(() => {})
@@ -228,7 +234,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
       }
       if (controller.signal.aborted) return
       setPreparing(false); setProgress("Creating sandbox…")
-      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, setups: setupIds, setupTargets: mode === "quick" ? quickSetupTargets : [setupTarget], ...(group ? { group } : {}), ...files })
+      const created = await api.create({ name: name.trim(), imageTemplate: environment.name, includeTemplateAccess: mode === "template", ...(mode === "quick" ? { session: quickSession(agentIds, openIn) } : {}), providers: attachedProviders, template, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets, ...(group ? { group } : {}), ...files })
       toast.success(`Creating ${created.name}`, { description: `Connect with: ${sessionCommand(created)}` })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
@@ -278,7 +284,6 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                     </label>
                   ))}
                 </div>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">{selectedAgents.length ? `${selectedAgents.length} selected · installed together in one environment.` : "Select agents, or leave empty for a terminal-only environment."}</p>
               </fieldset>
               {selectedAgents.length > 0 && <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-xs font-medium">Open in</legend>
@@ -326,12 +331,13 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
               </div>
             </TabsContent>
 
-            <div className="space-y-3 border-t pt-4">
-              <SetupPicker value={setupIds} onChange={setSetupIds} inherited={chosenImage?.recipe?.setups ?? []} />
-              {hasSetups && (mode === "quick" ? <p role={missingSetupAgent ? "alert" : undefined} className={`text-xs ${missingSetupAgent ? 'text-destructive' : 'text-muted-foreground'}`}>
-                {missingSetupAgent ? 'Select Codex, Claude Code or Cursor above to use this Setup.' : `Configure for: ${selectedAgents.filter((agent) => quickSetupTargets.includes(agent.id)).map((agent) => agent.name).join(', ')}.`}
-              </p> : <fieldset className="space-y-2"><legend className="text-xs font-medium">Configure Setups for</legend><div className="flex gap-4">{[['claude', 'Claude Code'], ['codex', 'Codex'], ['cursor', 'Cursor']].map(([id, label]) => <label key={id} className="flex items-center gap-1.5 text-xs"><input type="radio" name="setup-agent" value={id} checked={setupTarget === id} onChange={() => setSetupTarget(id)} />{label}</label>)}</div><p className="text-[11px] text-muted-foreground">The selected agent and Python 3.11+ must be installed in the template.</p></fieldset>)}
-            </div>
+            {(mode === "quick" || (hasSetups && (missingSetupAgent || setupAgentIds.includes('aider')))) && <div className="space-y-3 border-t pt-4">
+              {mode === "quick" && <SetupPicker autoPrepare automaticAccess preparationContext="sandbox" accessReview={setupAccessReview} onAccessReview={setSetupAccessReview} value={setupIds} onChange={setSetupIds} />}
+              {hasSetups && missingSetupAgent && <p role="alert" className="text-xs text-destructive">
+                {setupAgentIds.includes('aider') ? 'Setup installation is unavailable for Aider. Choose another agent.' : mode === "quick" ? 'Choose an agent to use this Setup.' : 'Choose a template with a supported agent to use this Setup.'}
+              </p>}
+              {hasSetups && !missingSetupAgent && setupAgentIds.includes('aider') && <p className="text-xs text-muted-foreground">Setup installation is unavailable for Aider.</p>}
+            </div>}
 
             {mode === "template" && <div className="grid gap-1.5">
               <span className="text-xs font-medium">Providers</span>
@@ -373,7 +379,6 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              {agentAccess.profiles.length > 0 && <p className="text-[11px] text-muted-foreground">Agent network rules: {agentAccess.profiles.map((profile) => `${profile.name} (${profile.endpoints.length} destinations)`).join(", ")}</p>}
 
             </div>
 
@@ -410,7 +415,7 @@ export function CreateSandboxDialog({ open, onOpenChange, onCreated, initialImag
                 </div>
 
               </SetupSection>
-                  {agentAccess.profiles.length > 0 && <SetupSection title="Agent default rules" summary={agentAccess.profiles.map((profile) => profile.name).join(", ")}>
+                  {agentAccess.profiles.length > 0 && <SetupSection title="Network rules" summary={`${new Set(agentAccess.profiles.flatMap((profile) => profile.endpoints.map((endpoint) => `${endpoint.host}:${endpoint.ports.join(",")}`))).size} destinations`}>
                     <div className="max-h-52 divide-y overflow-y-auto">
                       {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
                         <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · agent-{profile.id}</span></summary>
