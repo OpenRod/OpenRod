@@ -25,7 +25,7 @@ printf '%s' '${script}' | base64 -d > /usr/local/sbin/openrod-worker-bootstrap
 chmod 700 /usr/local/sbin/openrod-worker-bootstrap
 cat > /etc/systemd/system/openrod-worker-bootstrap.service <<'UNIT'
 [Unit]
-Description=ShellOS private worker bootstrap
+Description=OpenRod private worker bootstrap
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=7200

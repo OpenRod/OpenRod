@@ -137,10 +137,10 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
         </div>
       </div>
       <ul className="grid list-disc gap-1.5 pl-4">
-        <li>Needs Linux with Docker. On Ubuntu or Debian, ShellOS can install Docker (it asks first; needs passwordless sudo).</li>
+        <li>Needs Linux with Docker. On Ubuntu or Debian, OpenRod can install Docker (it asks first; needs passwordless sudo).</li>
         <li>Docker access is admin access. Connect only to machines you trust.</li>
         <li>The host gets credentials for its own gateway, never your main one.</li>
-        <li>The link runs inside ShellOS on this computer. Stopping ShellOS disconnects it; disconnect any time from the gateway menu in the sidebar.</li>
+        <li>The link runs inside OpenRod on this computer. Stopping OpenRod disconnects it; disconnect any time from the gateway menu in the sidebar.</li>
       </ul>
     </Details>
     </div>
@@ -161,7 +161,7 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
       </div>}
 
       {job.status === "needs-docker" && (job.probe?.dockerInstallSupported ? <div className="grid gap-2 border-t border-border pt-3">
-        <p className="text-muted-foreground">ShellOS will install <code className="font-mono">docker.io</code>, start it, and add your SSH user to the <code className="font-mono">docker</code> group (root-equivalent). Nothing changes unless you approve.</p>
+        <p className="text-muted-foreground">OpenRod will install <code className="font-mono">docker.io</code>, start it, and add your SSH user to the <code className="font-mono">docker</code> group (root-equivalent). Nothing changes unless you approve.</p>
         <Button type="button" size="sm" className="justify-self-start" disabled={locked} onClick={() => run("docker", () => api.installConnectionDocker(job.id))}>{busy === "docker" ? "Starting…" : "Install Docker and continue"}</Button>
       </div> : <div className="grid gap-2 border-t border-border pt-3">
         <p className="text-muted-foreground">{job.probe?.dockerInstallReason || "Automatic install works on Ubuntu and Debian only."} Install Docker yourself, then check again.</p>

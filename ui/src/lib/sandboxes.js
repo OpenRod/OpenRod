@@ -1,5 +1,5 @@
 import { groupsFromLabels } from "../../shared/group-membership.js"
-// Gateway phases folded onto the ShellOS Desk status palette. The palette has five
+// Gateway phases folded onto the OpenRod Desk status palette. The palette has five
 // states and the gateway ten; the fold keeps each colour meaning one thing.
 export const STATUS = {
   running: { label: "Ready", bar: "bg-emerald-500", strip: "bg-emerald-500", cell: "bg-emerald-500/85", ring: "ring-emerald-600/30" },

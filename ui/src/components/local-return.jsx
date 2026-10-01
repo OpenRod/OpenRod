@@ -28,7 +28,7 @@ export function LocalReturn({children}) {
     const location = inventory.locations.find(item => !item.remote && item.connected)
     if (!location) throw Error('Connect a local gateway before importing this workspace.')
     const destination = api.forContext(location.context)
-    const groups = await chooseGroups(destination, 'local ShellOS', transfer.current.signal)
+    const groups = await chooseGroups(destination, 'local OpenRod', transfer.current.signal)
     if (detached.current) return
     const result=await destination.importCloud({ ...event.data.bundle, ...(groups ? { destinationGroups: groups } : {}) })
     window.opener.postMessage({type:'openrod-local-result',nonce:nonce.current,name:result.name},CLOUD_ORIGIN)

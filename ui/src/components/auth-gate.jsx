@@ -67,16 +67,16 @@ export function AuthGate({ children }) {
     try { await authRequest('logout', {}) } catch (e) { setError(e.message) }
     finally { setUser(null) }
   }
-  if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading ShellOS…</div>
+  if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading OpenRod…</div>
   if (config?.mode === 'local') return <LocalComputeProvider><LocalReturn>{children}</LocalReturn></LocalComputeProvider>
   if (user) return <LocalConnect user={user} logout={logout}><CloudComputeProvider user={user} logout={logout}><CloudMachine key={user.uid} logout={logout}>{children}</CloudMachine></CloudComputeProvider></LocalConnect>
   return <main className="grid min-h-screen place-items-center bg-background px-6">
     <section className="w-full max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
-      <h1 className="text-2xl font-semibold tracking-tight">{window.location.hash.startsWith('#local-connect=') ? 'Sign in to ShellOS' : 'Your workspace, in the cloud.'}</h1>
-      <p className="mt-3 text-sm text-muted-foreground">{window.location.hash.startsWith('#local-connect=') ? 'Sign in with Google. You’ll return to local ShellOS automatically.' : 'Sign in or create your account with Google. Your workspace runs on your own private machine.'}</p>
+      <h1 className="text-2xl font-semibold tracking-tight">{window.location.hash.startsWith('#local-connect=') ? 'Sign in to OpenRod' : 'Your workspace, in the cloud.'}</h1>
+      <p className="mt-3 text-sm text-muted-foreground">{window.location.hash.startsWith('#local-connect=') ? 'Sign in with Google. You’ll return to local OpenRod automatically.' : 'Sign in or create your account with Google. Your workspace runs on your own private machine.'}</p>
       {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
       <button disabled={busy || !config} onClick={login} className="mt-6 w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? 'Signing in…' : 'Continue with Google'}</button>
-      <p className="mt-5 text-xs text-muted-foreground">Running ShellOS locally? No account required.</p>
+      <p className="mt-5 text-xs text-muted-foreground">Running OpenRod locally? No account required.</p>
     </section>
   </main>
 }

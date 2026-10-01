@@ -15,7 +15,7 @@ resource "google_firestore_database" "cloud" {
 }
 resource "google_project_iam_custom_role" "machine_registry" {
   role_id     = "openrod_${replace(var.org_id, "-", "_")}_machines"
-  title       = "ShellOS private machine registry"
+  title       = "OpenRod private machine registry"
   permissions = ["datastore.databases.get", "datastore.entities.get", "datastore.entities.create", "datastore.entities.update"]
 }
 resource "google_project_iam_member" "machine_registry" {
@@ -29,7 +29,7 @@ resource "google_project_iam_member" "machine_registry" {
 }
 resource "google_project_iam_custom_role" "machine_provisioner" {
   role_id     = "openrod_${replace(var.org_id, "-", "_")}_provisioner"
-  title       = "ShellOS fixed private worker provisioning"
+  title       = "OpenRod fixed private worker provisioning"
   permissions = ["compute.instances.create", "compute.instances.get", "compute.instances.setMetadata", "compute.instances.setLabels", "compute.instances.setTags", "compute.disks.create", "compute.disks.use", "compute.subnetworks.use"]
 }
 resource "google_project_iam_member" "machine_provisioner" {

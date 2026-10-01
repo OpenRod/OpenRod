@@ -92,7 +92,7 @@ test('aws-eks is never an inventory source or an allowed resource owner', async 
   await assert.rejects(inventory.resolve(contextKey(snapshot.returnContext)), { status: 409 })
 })
 
-test('HTTP explicit owner marker rejects arbitrary locations and does not widen ShellOS Cloud context authorization', async t => {
+test('HTTP explicit owner marker rejects arbitrary locations and does not widen OpenRod Cloud context authorization', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-context-authorization-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const moduleUrl = new URL('./api.js', import.meta.url).href
