@@ -1,10 +1,39 @@
 // Browser side of the console API. Every call is same-origin; the server
 // holds the gateway certificate, so nothing here carries a credential.
 
+let binding
+let loadingBinding
+
+async function loadContext() {
+  const response = await fetch("/api/os/context")
+  const context = await response.json()
+  if (!response.ok) throw new Error(context.error ?? "Could not read gateway registrations.")
+  if (!binding) {
+    const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "")
+    binding = JSON.stringify([
+      params.get("gateway") || context.gateway,
+      params.get("workspace") || context.workspace,
+    ])
+  }
+  return context
+}
+
+async function boundContext() {
+  if (!binding) {
+    loadingBinding ??= loadContext().finally(() => { loadingBinding = null })
+    await loadingBinding
+  }
+  return binding
+}
+
 async function request(path, { method = "GET", body } = {}) {
+  const context = await boundContext()
   const response = await fetch(`/api/os${path}`, {
     method,
-    headers: method === "GET" ? undefined : { "content-type": "application/json", "x-openshell-console": "1" },
+    headers: {
+      "x-openshell-context": context,
+      ...(method === "GET" ? {} : { "content-type": "application/json", "x-openshell-console": "1" }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const payload = await response.json().catch(() => ({}))
@@ -34,6 +63,11 @@ export const api = {
   cloudExport: (name) => request(`/cloud-export?name=${encodeURIComponent(name)}`),
   importCloud: (bundle) => request("/cloud-import", { method: "POST", body: bundle }),
   cloudTransfer: (name, ticket) => request("/cloud-transfer", { method: "POST", body: { name, ticket } }),
+  context: loadContext,
+  contextKey: boundContext,
+  onboarding: () => request("/onboarding"),
+  checkGateway: (gateway) => request("/onboarding/check", { method: "POST", body: { gateway } }),
+  selectContext: (body) => request("/context", { method: "POST", body }),
   previewActivityDeletion: (body) => request('/activity/delete-preview', { method: 'POST', body }),
   deleteActivity: (token) => request('/activity/delete', { method: 'POST', body: { token } }),
   activityDestinations: () => request('/activity-destinations'),
@@ -95,8 +129,9 @@ export const api = {
   prepareDownload: (sandbox, path) => request(`/files/${encodeURIComponent(sandbox)}/download`, { method: "POST", body: { path } }),
   startUpload: (sandbox) => request(`/files/${encodeURIComponent(sandbox)}/uploads`, { method: "POST", body: {} }),
   uploadFile: async (sandbox, id, path, file, signal) => {
+    const context = await boundContext()
     const response = await fetch(`/api/os/files/${encodeURIComponent(sandbox)}/uploads/${id}?path=${encodeURIComponent(path)}`, {
-      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1" }, body: file, signal,
+      method: "POST", headers: { "content-type": "application/octet-stream", "x-openshell-console": "1", "x-openshell-context": context }, body: file, signal,
     })
     const payload = await response.json().catch(() => ({}))
     if (response.status === 401) window.dispatchEvent(new Event("openrod-session-expired"))

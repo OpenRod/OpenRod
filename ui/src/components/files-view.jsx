@@ -149,7 +149,7 @@ export function FilesView({ sandbox, demo }) {
     try {
       const { token, filename, bytes } = await api.prepareDownload(name, target)
       const link = document.createElement("a")
-      link.href = `/api/os/downloads/${token}`
+      link.href = `/api/os/downloads/${token}?context=${encodeURIComponent(await api.contextKey())}`
       link.download = filename
       document.body.append(link); link.click(); link.remove()
       toast.success(`Downloading ${filename}`, { id, description: formatBytes(bytes) })

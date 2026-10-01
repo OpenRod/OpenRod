@@ -1,10 +1,11 @@
 # OpenShell Console
 
-A local control plane UI for the OpenShell gateway, built on the OpenRod Desk design system.
+A local control plane UI for OpenShell gateways. Start with the [project getting-started guide](../README.md#set-up-a-connection) for prerequisites, source or locally built tarball installation, manual registration, and troubleshooting. No published npm package is assumed.
 
 ```bash
-npm install
+npm ci
 npm run dev        # http://127.0.0.1:4600
+# Production: npm run build && npm start -- --open
 ```
 
 ## Local and OpenRod Cloud modes
@@ -21,6 +22,18 @@ Cloud mode uses Google Identity Platform sign-in and backend-enforced organizati
 
 See [the GCP deployment guide](../deploy/gcp/README.md) and [.env.example](.env.example). Run `npm test` for the console and authentication regression suite.
 
+## First connection
+
+1. Your administrator deploys and secures the gateway, creates a workspace and sandbox, and supplies its endpoint and approved mTLS bundle through a secure channel. The console does not provision infrastructure.
+2. Open **Set up connection** in the sidebar. Review the detected Node/OpenShell/OpenSSH/kubectl tools and actual local paths. Node 22.13+ is required; CLI/gateway 0.1.2 is verified. OpenSSH is needed for native SSH, kubectl only for a Kubernetes tunnel, and Docker is not needed to connect.
+3. Choose an existing registration. If you need a new one, review the generated commands and run them yourself in a terminal, following the [manual registration procedure](../README.md#register-a-new-gateway). **Refresh registrations** afterward. The UI never runs setup commands or receives certificate uploads/pasted credentials.
+4. Click **Check connection**. This reads registration metadata and TLS files, checks certificate validity and key match, and makes a real list-workspaces request. It does not write configuration or databases, activate a context, start collectors, execute in a sandbox, or mutate the gateway. Only HTTPS mTLS is supported, not OIDC, edge auth, or plaintext HTTP.
+5. Select a returned workspace, review the persistent effects, and click **Use gateway**. Activation revalidates the choice, saves it, and starts activity collection. Then open a **Ready** sandbox and choose **SSH shell → Open SSH in terminal** for actual OpenSSH.
+
+With no saved console selection and no `OPENSHELL_GATEWAY`, the CLI active gateway is a suggestion only: there is no automatic connection or collection. **Check connection** is an explicit read-only probe; **Use gateway** starts the active connection and collection. Saved/environment selections reconnect on restart. Checking another registration is not a pause for a context that is already active.
+
+For CLI 0.1.2 loopback registration, install the administrator's bundle **before** `gateway add ENDPOINT --name NAME --local`, then restore the **same original bundle afterward**, even if registration fails: this CLI version was observed replacing the preinstalled certificates. Refuse existing registration names, keep directories at 0700 and bundle files at 0600, and never print keys. `--local` refers to a loopback/tunnel endpoint, not where compute runs. For a non-loopback remote gateway, use the administrator's existing CLI workflow; there is no `--mtls` flag.
+
 ## Pages
 
 - **Sandboxes**: a compact virtualized inventory table with sticky sortable columns, status counts, image and group filters, and search across the entire loaded fleet. Rows show name, status, owner, image, group, uptime, and creation age. Only viewport rows plus overscan are mounted; filtering and sorting are memoized separately from live traffic updates. A single click opens a centered popup with the access graph and a compact summary shown first. Rules, Activity, and Details tabs separate the longer content; navigation and lifecycle actions remain visible while each panel scrolls independently. The development-only `?fleet=1000` and `?fleet=10000` previews exercise large inventories without creating real sandboxes. This is client-side windowing over the loaded inventory, not server-side pagination. Owner comes from the owner field or labels; uptime requires a reported start time, and missing data is shown as “Not reported” instead of using creation age. A ready sandbox has **Open in Cursor** and **Open in VS Code** buttons (only for editors installed on this machine). They run `openshell sandbox connect <name> --editor …`, so OpenShell adds its managed SSH config (one `Include` line in `~/.ssh/config`, Host blocks in `~/.config/openshell/ssh_config`) and the editor connects over Remote-SSH. **Open in browser** runs the sandbox's session (its agent, or a shell) in a new browser tab: xterm.js in the page, a WebSocket to the console, and the gateway's interactive exec behind it (the RPC `openshell sandbox exec --tty` uses). The tab's menu starts another session as a shell or any installed agent. Each tab is one session, and it ends when the tab closes.
@@ -30,17 +43,17 @@ See [the GCP deployment guide](../deploy/gcp/README.md) and [.env.example](.env.
 
 ### Security
 
-- **Policies**: create-time policies (writable and read-only paths, Landlock mode, starting network rules), picked independently from the image in New sandbox. Built-ins plus your own, saved as JSON in `policies/`. Capture a running sandbox's rules, duplicate, or edit a policy. Existing group references and service-opening defaults are preserved. A policy is fixed once the sandbox exists; later network changes happen on the Network page.
+- **Policies**: create-time policies (writable and read-only paths, Landlock mode, starting network rules), picked independently from the image in New sandbox. Built-ins plus your own, saved under the selected gateway/workspace's `policies/` data directory. Capture a running sandbox's rules, duplicate, or edit a policy. Existing group references and service-opening defaults are preserved. A policy is fixed once the sandbox exists; later network changes happen on the Network page.
 - **Network**: one page with an **Egress** tab and an **Ingress** tab (`#egress`, `#ingress`).
 - **Egress** (Network): reusable network rules. **Add rule** asks for a name, destinations (hosts, with `*.` and `**.` wildcards) and an action, Allow or Block, plus what it applies to: **Groups** (the default), **Specific sandboxes**, or **Every sandbox**. A group can be created right in the form. Below the choice, the form lists the sandboxes the rule reaches today. Sandboxes start locked down, so nothing leaves one until an allow rule covers it, and a block always beats an allow. Blocking a host also blocks its subdomains. **Advanced** (allow only) holds ports (default 443 and 80), requests (any, read only, read & write, or specific method/path pairs, plus blocked requests), programs (default any), enforce vs audit, and private addresses. Presets: GitHub read and clone, npm, PyPI. Saved as JSON in `policies/egress/`; saving re-applies the rule to every sandbox it covered before or after. The tab also lists destinations, recently blocked hosts (Allow opens a pre-filled rule) and each sandbox's rules and revisions, where one-off sandbox rules can still be added.
   - How a network rule maps to OpenShell: an allow is one OpenShell rule named `egress_<id>` with an endpoint per destination (no inspection unless Advanced asks for it) and binaries `/**` unless programs are set. OpenShell has no host-level deny, so a block is an inspected endpoint per host (and `**.host`) whose deny rules match every request, on every port the sandbox's rules open (allow rules, its policy, one-off rules and providers). It answers HTTP with `policy_denied` and refuses non-HTTP traffic.
   - "All destinations" (Open) is shown but disabled: OpenShell 0.1.2 rejects `*` hosts, and endpoints without a host only open IP addresses in the VM driver.
 - **Groups**: sandboxes that share network access. Create a group on the Groups page (optionally adding sandboxes in the same step), inline in the rule form, or inline in the New sandbox dialog. Put a sandbox in a group from the Groups page (a group menu per sandbox, bulk **Move to**, or a group's panel), or pick the group when creating the sandbox; the dialog lists the network rules it will get. A sandbox is in one group at a time and can change groups whenever; its rules are rewritten right away. Network rules aimed at a group reach every sandbox in it, including ones added later. Deleting a group moves its sandboxes to No group; the sandboxes are kept.
-  - Membership is stored by the console in `policies/org/members.json`, not in the sandbox: gateway labels are fixed at creation. A sandbox with no stored membership falls back to the group label it was created with. Deleting a sandbox from the console forgets its membership, so a later sandbox with the same name starts ungrouped. Groups are saved in `policies/org/groups/<id>.json`; one from before the console managed groups may pin a policy (`template`), which the New sandbox dialog shows.
-- **Blocked everywhere** (top row of Network → Egress → Rules, and "Block everywhere" on a blocked host): hosts blocked in every sandbox, with their subdomains, written into each one as the `org_blocked` rule. They override every rule. Saved in `policies/org/organization.json`; a background pass every 15s settles requests policy already decides and adds missing rules to sandboxes created outside the console. The Organization page itself is the Enterprise Version.
-- **Ingress** (Network): every way into a sandbox, per sandbox. A sandbox starts closed (it has no network interface); the page lists what's open and who can use it. Open a port as a gateway URL with presets (dev server, Vite, Jupyter) and an auto-close timer (1h / 8h / 1 day / until closed), change the timer, or close it. Also shows terminal/exec sessions from the gateway's audit log, the session lifetime from `gateway.toml`, and inbound visits. Policies can open services at start. Auto-close deadlines live in `.state/ingress.json` and are enforced every 30 s while the console runs (and on startup for anything overdue).
+  - Membership is stored by the console in scoped `policies/org/members.json`, not in the sandbox: gateway labels are fixed at creation. A sandbox with no stored membership falls back to the group label it was created with. Deleting a sandbox from the console forgets its membership, so a later sandbox with the same name starts ungrouped. Groups are saved in scoped `policies/org/groups/<id>.json`; one from before the console managed groups may pin a policy (`template`), which the New sandbox dialog shows.
+- **Blocked everywhere** (top row of Network → Egress → Rules, and "Block everywhere" on a blocked host): hosts blocked in every sandbox in the selected context, with their subdomains, written into each one as the `org_blocked` rule. They override every rule. Saved in scoped `policies/org/organization.json`. Background reconciliation is disabled unless `OPENSHELL_CONSOLE_SWEEP=1`; when enabled, it runs every 15s only for the startup gateway/workspace. Switching contexts does not apply stored rules to another gateway. The Organization page itself is the Enterprise Version.
+- **Ingress** (Network): gateway-exposed services per sandbox. Open a port as a gateway URL with presets (dev server, Vite, Jupyter) and an auto-close timer, change its timer, or close it. Also shows terminal/exec sessions from the gateway's audit log. Policies can open services at start. Auto-close deadlines live in `ingress.json` under the console data directory, carry their originating gateway/workspace, and are enforced every 30s while the console is active. Persisted deadlines can resume on activation/restart; switching contexts does not cancel them.
 - **Secrets**: add (masked, never shown again), rotate, set expiry, attach/detach, delete. Each secret shows exactly which hosts it can be sent to, how it's injected, and which programs may use it. Import NVIDIA's published provider profiles (pinned to v0.1.2).
-- **Activity collection**: automatically collects and retains gateway events while the console server runs. Export and Webhook are available in Activity. The separate gateway setting for sandbox OCSF JSON files remains available through the CLI; it does not control Activity collection and is not exposed as an Activity toggle. Legacy `#guardrails` links redirect to Activity.
+- **Activity collection**: automatically collects and retains gateway events after activation while the console server runs, including with no browser open. A fresh unconfigured console and **Check connection** do not start collection. Export and Webhook are available in Activity. The separate gateway setting for sandbox OCSF JSON files remains available through the CLI; it does not control Activity collection and is not exposed as an Activity toggle. Legacy `#guardrails` links redirect to Activity.
 
 Changes go through the gateway's server-side patch operations (`UpdateConfig.merge_operations`), so the gateway validates every edit before storing it.
 
@@ -50,7 +63,7 @@ The Templates page lists image templates. An image template is an OpenShell sand
 
 - One page: a name, the agents to install, an optional public repository and a runtime (Node.js, Python). Claude Code, Codex, OpenCode and Gemini CLI are shown; Pi, Cursor, Antigravity, Copilot, Kiro, Factory Droid and Aider are under **More agents**, and any other agent installs through setup commands. **Advanced** holds what the sandbox starts in (any installed agent opens as a session, or a shell, or a custom command), the OS, apt packages, setup commands, non-secret environment variables and the generated Dockerfile. **Use an existing image** takes a local image or a registry reference instead of building one.
 - A build runs in local Docker (tagged `openshell-template/<name>:<id>`, as the non-root UID 1000 sandbox user). On success the console creates the OpenShell template: image and environment go into the template itself; the recipe and start command go into the `openshell.console/recipe` annotation so the console can edit it. Nothing is stored in `.state/`; a running or failed build lives only in server memory.
-- OpenShell has no template update. Editing rebuilds, then deletes and recreates the template under the same name. Existing sandboxes are unaffected: a previous build's image is removed from Docker only if no sandbox or template still points at it, because a stopped sandbox resolves its image again when it starts. The gateway records the template each sandbox came from, but recreating resets the version, so sandboxes from before and after an edit both show `<name>@1`.
+- OpenShell has no template update. Editing rebuilds, then deletes and recreates the template under the same name. Existing sandboxes are unaffected. Published images remain in Docker because another workspace or gateway may still reference them; remove unused images explicitly through Docker. The gateway records the template each sandbox came from, but recreating resets the version, so sandboxes from before and after an edit both show `<name>@1`.
 - Template and sandbox names follow OpenShell's rule: lowercase letters, digits and dashes, at most 19 characters.
 - Built templates add each selected agent's sign-in and model destinations to the sandbox policy at launch, as rules named `agent-<id>` from the reviewed table in `shared/agent-access.js`; the launch dialog lists them per agent with any sign-in note. Agents such as Pi finish browser sign-in by redirecting to a `localhost` callback inside the sandbox, which the host browser can't reach: copy the full URL from the "site can't be reached" page, paste it into the agent's prompt and press Enter. Existing sandboxes keep the policy they were created with.
 - Policies, providers and ingress are chosen in New sandbox, as before; OpenShell templates don't hold policy. CPU and memory aren't offered because the VM driver ignores per-sandbox limits. Templates created with the CLI show up and can be launched, but not edited here.
@@ -92,25 +105,29 @@ missing attribution displays “Not reported”.
 
 ## How it connects
 
-The browser only talks to `/api/os/*` on this dev server. `server/` holds an
-`@nvidia/openshell-sdk` client (built from OpenShell v0.1.2, vendored in
-`vendor/`) authenticated with the same mTLS bundle the `openshell` CLI uses
-(`~/.config/openshell/gateways/<active>/mtls`). The certificate never reaches
-the browser, and provider credential values are never returned.
+The browser talks only to `/api/os/*` on the local console server, in both
+development and production. `server/` holds an `@nvidia/openshell-sdk` client
+(built from OpenShell v0.1.2, vendored in `vendor/`) authenticated with the
+selected CLI registration's mTLS bundle. **Set up connection** checks a registration
+before **Use gateway** activates it; the sidebar can then change registered gateways
+and available workspaces without restarting the process. Credentials never
+reach the browser, and provider credential values are never returned.
 
-The server binds to 127.0.0.1 only. Every route checks the socket, Host and
+The server binds to loopback only (127.0.0.1 by default). Every route checks the socket, Host and
 Origin, and each change additionally requires a same-origin POST with
 an `x-openshell-console` header. Writes use JSON.
 
 ### SSH connections
 
-The sandbox popup's **Connect** section uses the gateway already selected by
-the console, whether its endpoint is local or remote. Every generated CLI
-command includes `--gateway <name>` so changing the CLI's active gateway cannot
-redirect a connection.
+The sandbox popup's **Connect** section uses the selected gateway and workspace.
+Every generated CLI command includes both `--gateway <name>` and
+`--workspace <name>`. Browser requests from stale selections are rejected;
+already-open terminal sessions keep their original target.
 
-- **Open in browser** keeps the SDK-backed xterm session inside the console.
-- **Native SSH → New session** opens the sandbox's configured shell or agent in
+- **Open in browser** keeps an SDK-backed `execInteractive` xterm session inside the console. This is not an OpenSSH connection and does not prove native SSH works.
+- **Native SSH → SSH shell → Open SSH in terminal** launches actual OpenSSH
+  using an owner-only temporary config, removed when SSH exits.
+- **Native SSH → Exec new** opens the sandbox's configured shell or agent in
   the project directory with `openshell sandbox exec --tty`.
 - **Native SSH → Attach** uses `openshell sandbox connect` for sandboxes whose
   canonical process owns a TTY. It is omitted otherwise.
@@ -180,11 +197,12 @@ There are three connection paths:
 
 1. **Browser terminal:** the page obtains a one-use ticket, opens a WebSocket to
    the console server, and the server starts `execInteractive` through the SDK.
-2. **New native session:** the console opens a system terminal with a
-   gateway-pinned `openshell sandbox exec --tty` command.
-3. **Canonical attach or direct OpenSSH:** `sandbox connect`, or an `ssh`
-   command using the generated Host block, runs OpenSSH through
-   `openshell ssh-proxy`. The proxy authenticates to the selected gateway and
+2. **Native OpenSSH:** the console generates an SSH config and opens
+   `ssh -F <private-config> <alias>` in the system terminal. Its wrapper removes
+   the config after exit. **Copy command** generates its own temporary config.
+3. **Exec new or canonical attach:** `sandbox exec --tty` starts the configured
+   program; `sandbox connect` attaches to a canonical TTY. Direct SSH uses
+   `openshell ssh-proxy`, which authenticates to the selected gateway and
    requests an ephemeral relay session. Sandbox port 22 is never exposed.
 
 **Show SSH config** asks the CLI to render the Host block and returns it to the
@@ -193,15 +211,27 @@ certificate private key or ephemeral relay token. The action does not write the
 Host block; the operator may save it or use it as a temporary config:
 
 ```bash
-openshell sandbox ssh-config codex > /tmp/openshell-codex-ssh-config
-chmod 600 /tmp/openshell-codex-ssh-config
-ssh -F /tmp/openshell-codex-ssh-config openshell-codex.default
+(
+  # Replace these with your activated context and a Ready sandbox.
+  gateway='team-gateway'
+  workspace='default'
+  sandbox='my-sandbox'
+  umask 077
+  dir=$(mktemp -d) || exit
+  trap 'rm -f "$dir/config"; rmdir "$dir"' EXIT
+  "${OPENSHELL_BIN:-openshell}" --gateway "$gateway" --workspace "$workspace" \
+    sandbox ssh-config "$sandbox" > "$dir/config" || exit
+  ssh -F "$dir/config" "openshell-$sandbox.$workspace"
+)
 ```
 
-Moving from a local gateway to a gateway on GCP or another remote host changes
-only the selected gateway endpoint and its authentication material. The console
-and OpenSSH still connect through the gateway; no sandbox SSH port is opened.
-Docker is used to build local OCI images and is not part of the SSH transport.
+For a compatible mTLS registration, moving to a remote gateway changes the
+selected endpoint and authentication material, not the SSH transport. A private
+Kubernetes evaluation can use a loopback `kubectl port-forward`; the UI calls
+that a local/tunnel endpoint even though the compute is remote. Kubernetes user
+authentication is separate from transport TLS: shared/public deployments need
+upstream OIDC or a trusted access proxy, which this console does not yet support.
+Docker builds OCI images; it is not part of SSH transport.
 
 Native terminal launch requires the `openshell` CLI and OpenSSH on the console
 machine. Set `OPENSHELL_BIN` to an executable path when the CLI is not on
@@ -227,7 +257,7 @@ Opening a sandbox's graph or details runs a read-only executable inventory insid
 
 ## Activity investigations and retention
 
-Activity now searches a local SQLite archive at `ui/.state/activity.sqlite` (Node 22.13+ required). The console server collects logs and platform events even with no browser open. Collection stops when the server stops. There is no automatic expiry; this is a local investigation store, not an immutable external SIEM archive.
+Activity searches a gateway/workspace-scoped SQLite archive in the console data directory (Node 22.13+ required). Collection begins on **Use gateway**, or automatically on startup for a saved/environment-selected context—not for a fresh CLI suggestion or **Check connection**. The active context is collected even with no browser open; switching pauses the previous collector, and server shutdown stops collection. Existing archived records remain in their original context. There is no automatic expiry; this is a local investigation store, not an immutable external SIEM archive.
 
 - Searches, category/severity filters, exact-match pivots, sorting, and time ranges apply to retained events on the server. Pages use a fixed ingestion snapshot and time anchor so new arrivals cannot shift subsequent pages. Export includes every matching retained event plus coverage metadata.
 - Source cursors are saved after evidence is persisted and used to resume watches. Rejected cursors fall back to bounded replay (400 logs and 400 platform events); stream warnings and interruptions remain visible. Earlier history and unresolved gaps are never claimed complete.
@@ -247,7 +277,7 @@ Activity retains console-normalized records derived from the gateway log stream,
 
 Destinations are saved paused, with a cursor starting at creation (no automatic historical backfill). Enable forwarding to send all subsequent matching events, including those collected while paused. Filters cover sandbox names, event categories, and decisions. The server sends independently of browser tabs, resuming persisted positions after restarts. Failed events block later delivery to that destination, retry exponentially up to five minutes, and pause after eight failures. Retry/enable resumes the same event; pause retains the position. Delivery is at least once, with a stable event ID and `Idempotency-Key` for receiver deduplication. Removing a destination discards its position and credential but preserves Activity history.
 
-Configuration, credentials, delivery positions, counters, and latest test/failure status live in `.state/activity-delivery.sqlite` (owner-only permissions; credentials are not encrypted at rest and never returned by the API). No destination is configured automatically. HTTPS requests validate certificates, reject redirects and nonpublic addresses, pin DNS resolution per attempt, and have a 10-second request timeout and 1 MB event limit. There is no separate daemon: collection and delivery require the console server to be running; upstream collection gaps still apply.
+Configuration, credentials, delivery positions, counters, and latest test/failure status live in the selected context's `activity-delivery.sqlite` (owner-only permissions; credentials are not encrypted at rest and never returned by the API). No destination is configured automatically. Previously configured enabled delivery can resume when its context activates or reconnects on restart; delivery workers may continue sending their original context's pending events after selection changes. **Check connection** does not create or start these workers. HTTPS requests validate certificates, reject redirects and nonpublic addresses, pin DNS resolution per attempt, and have a 10-second request timeout and 1 MB event limit. There is no separate daemon: collection and delivery require the console server to be running; upstream collection gaps still apply.
 
 Validation: `node --test server/activity-delivery.test.js server/activity-store.test.js server/activity-collector.test.js src/lib/activity-inventory.test.js src/lib/activity-targets.test.js`.
 
@@ -274,3 +304,45 @@ The review excludes MCP environment values, auth headers and tokens, shows porta
 This version is a private local-operator catalog, not organization/group distribution. Credential binding, automatic dependency packaging, remote endpoint upload, background synchronization and live MCP handshake/tool testing are not implemented. “Installed” verifies configuration and file contents; it does not mean authenticated, reachable or tool-call verified. Pending launch jobs live in the console process; after a restart, check and enable from the sandbox's Setups tab.
 
 Run regression checks with `node --test ui/server/*.test.js ui/src/lib/*.test.js` from the repository root and `npm --prefix ui run build`. Setup tests cover snapshot pinning, secret exclusion, invalid/expired selections, file limits, links, configuration preservation, executable permissions, drift-safe removal, network preflight and image recipes. Live verification additionally exercised discovery/review/save in the browser, install/reapply/remove in an isolated sandbox, blocked runtime access without policy changes, and image-to-new-sandbox inheritance.
+
+## Console data directory
+
+Mutable state lives under `$XDG_STATE_HOME/openshell-console`, or
+`~/.local/state/openshell-console`; override with `OPENSHELL_CONSOLE_DATA_DIR`.
+Gateway/workspace state is stored in `contexts/<scope-hash>/`, including
+`activity.sqlite`, `activity-delivery.sqlite`, and `policies/` with organization
+rules and memberships. SQLite companion files can exist alongside the databases.
+Service auto-close deadlines are stored separately in the root `ingress.json`,
+with their originating context. File jobs and image builds retain their originating
+context. Installed packages never write into their own directory and exclude
+checkout policies and databases.
+
+Legacy checkout policies migrate once only for the original local loopback
+`openshell/default` registration. Old `ui/.state` activity databases are left
+untouched; they are not silently reassigned to another gateway.
+Organization-policy reconciliation is off unless `OPENSHELL_CONSOLE_SWEEP=1`,
+and then stays bound to the startup context. Explicit policy edits still apply
+immediately.
+
+### OpenShell registration and console selection
+
+`$XDG_CONFIG_HOME/openshell`, otherwise `~/.config/openshell`, holds the CLI and console's shared configuration:
+
+- `gateways/NAME/metadata.json`: CLI registration endpoint/authentication metadata.
+- `gateways/NAME/mtls/{ca.crt,tls.crt,tls.key}`: server-side credential files.
+- `active_gateway`: the CLI's active gateway, only a suggestion for a fresh console.
+- `console-context.json`: the console's owner-only selection file, written by activation.
+
+Gateway selection precedence is `OPENSHELL_GATEWAY`, saved console gateway,
+CLI active gateway suggestion, then `openshell` suggestion. Workspace precedence
+is `OPENSHELL_WORKSPACE`, saved workspace, then `default`. Environment variables
+pin their respective fields; restart without them to change those fields in the
+UI. `OPENSHELL_WORKSPACE` alone does not activate a fresh console.
+Saved console selections and environment-pinned gateways reconnect on restart,
+starting collection and allowing previously configured deliveries/deadlines to
+resume. Opening setup or checking another registration is not a global pause.
+
+Selection is shared by all tabs connected to the process. It does not rewrite
+the CLI active gateway. Existing sessions remain pinned to their original context;
+stale requests are rejected. See the [persistence summary](../README.md#what-is-saved-and-what-runs)
+and [security guidance](../SECURITY.md) before activating a sensitive gateway.

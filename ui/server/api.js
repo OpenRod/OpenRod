@@ -2,7 +2,7 @@ import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.j
 import { localTransfer, importTransfer, exportTransfer } from './cloud-transfer.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
-import { fileURLToPath } from 'node:url'
+import { scopedStateDirectory } from './paths.js'
 import { createActivityStore } from './activity-store.js'
 import { createActivityDelivery } from './activity-delivery.js'
 import { exportEvent } from '../src/lib/activity-export.js'
@@ -11,7 +11,8 @@ import { randomUUID } from 'node:crypto'
 import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
 import { PROJECT_LABEL, templateSession, isSession, sessionLaunch } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
-import { WORKSPACE, gateway, iso, logView, policyView, providerView, sandboxView } from './gateway.js'
+import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
+import { checkGateway, onboardingInfo } from './onboarding.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, createInGroups, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
@@ -62,9 +63,9 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 
 // ---- reads ------------------------------------------------------------------
 
-async function listSandboxes() {
-  const { client } = await gateway()
-  const response = await client.raw.listSandboxes({ workspaceScope: WORKSPACE })
+async function listSandboxes(current) {
+  const { client, workspaceScope } = current ?? await gateway()
+  const response = await client.raw.listSandboxes({ workspaceScope })
   return nameSandboxImages(response.sandboxes.map(sandboxView), await listImageTemplates().catch(() => [])).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
 }
 
@@ -72,12 +73,13 @@ async function listSandboxes() {
 const live = (sandboxes) => sandboxes.filter((s) => s.phase !== 'deleting')
 
 async function overview() {
-  const { client, target } = await gateway()
+  const current = await gateway()
+  const { client, target, workspace, workspaceScope } = current
   const [health, info, providers, sandboxes] = await Promise.all([
     client.health(),
     client.raw.getGatewayInfo({}),
-    client.raw.listProviders({ workspaceScope: WORKSPACE }),
-    listSandboxes(),
+    client.raw.listProviders({ workspaceScope }),
+    listSandboxes(current),
   ])
   return {
     gateway: {
@@ -85,6 +87,7 @@ async function overview() {
       endpoint: target.endpoint,
       authMode: target.authMode,
       remote: target.remote,
+      workspace,
       status: health.status,
       version: health.version,
       drivers: (info.computeDrivers ?? []).map((d) => ({
@@ -99,10 +102,10 @@ async function overview() {
 }
 
 async function sandboxDetail(name) {
-  const { client, target } = await gateway()
+  const { client, target, workspace, workspaceScope } = await gateway()
   const [sandbox, config] = await Promise.all([
-    client.raw.getSandbox({ name, workspaceScope: WORKSPACE }),
-    client.sandbox.getConfig(name).catch(() => null),
+    client.raw.getSandbox({ name, workspaceScope }),
+    client.sandbox.getConfig(name, { workspace }).catch(() => null),
   ])
   const templates = await listImageTemplates().catch(() => [])
   const [view] = nameSandboxImages([sandboxView(sandbox.sandbox)], templates)
@@ -125,7 +128,7 @@ async function sandboxDetail(name) {
 // ---- writes -----------------------------------------------------------------
 
 export async function createSandbox(input, { sessionOverride = false } = {}) {
-  const { client, target } = await gateway()
+  const { client, target, workspace } = await gateway()
   // An image template is an OpenShell sandbox template: the gateway supplies
   // its image and environment; the console adds how the sandbox starts.
   const saved = input.imageTemplate ? await imageTemplateForLaunch(String(input.imageTemplate)) : null
@@ -180,14 +183,15 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
       tty: launch.tty,
     }
     const created = saved
-      ? await client.sandbox.createFromTemplate({ ...spec, workloadTemplate: saved.name })
-      : await client.sandbox.create({ ...spec, ...(image ? { image } : {}) })
+      ? await client.sandbox.createFromTemplate({ ...spec, workloadTemplate: saved.name, workspace })
+      : await client.sandbox.create({ ...spec, workspace, ...(image ? { image } : {}) })
     // Labels are fixed at creation, so Setup membership is bound to the
     // gateway and immutable id returned for this new sandbox.
     await setSandboxSetups({ name: created.name, id: created.id, gateway: target.endpoint }, setupMembers)
     return created
   })
   const template = plan.template
+
   // Services a template opens at start go through the same path as opening
   // one by hand, so they get the same auto-close deadline.
   const opened = []
@@ -202,12 +206,12 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
 }
 
 async function lifecycle(name, action) {
-  const { client, target } = await gateway()
-  if (action === 'stop') await client.raw.stopSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
-  else if (action === 'start') await client.raw.startSandbox({ name, workspaceScope: WORKSPACE, requestId: randomUUID() })
+  const { client, target, workspace, workspaceScope } = await gateway()
+  if (action === 'stop') await client.raw.stopSandbox({ name, workspaceScope, requestId: randomUUID() })
+  else if (action === 'start') await client.raw.startSandbox({ name, workspaceScope, requestId: randomUUID() })
   else if (action === 'delete') {
-    const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope: WORKSPACE })).sandbox)
-    const result = await client.sandbox.delete(name)
+    const sandbox = sandboxView((await client.raw.getSandbox({ name, workspaceScope })).sandbox)
+    const result = await client.sandbox.delete(name, { workspace })
     // A later sandbox with this name must not inherit its group.
     await assignGroup([name], null, { forget: true })
     try { await forgetSandbox({ ...sandbox, gateway: target.endpoint }) } catch { /* the sandbox is deleted either way */ }
@@ -234,8 +238,9 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
     if (refreshing || stopped) return
     refreshing = true
     try {
-      const { client, target } = await connect()
-      const sandboxes = await list()
+      const current = await connect()
+      const { client, target, workspaceScope } = current
+      const sandboxes = await list(current)
       if (stopped) return
       const serialized = JSON.stringify(sandboxes)
       if (serialized !== lastList) { lastList = serialized; emit('sandboxes', sandboxes) }
@@ -244,14 +249,14 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
       for (const [id, controller] of watches) if (!wanted.has(id)) { controller.abort(); watches.delete(id); status(id, { status: 'inactive', stoppedAt: new Date().toISOString() }) }
       for (const sandbox of live(sandboxes)) {
         const id = `${target.endpoint}|${sandbox.id || sandbox.name}|${sandbox.createdAt || ''}`
-        if (!watches.has(id)) watch(client, sandbox, id).catch((error) => emit('gateway-error', { message: `Collection failed: ${error.message}` }))
+        if (!watches.has(id)) watch(client, sandbox, id, workspaceScope).catch((error) => emit('gateway-error', { message: `Collection failed: ${error.message}` }))
       }
       emit('gateway-health', { status: 'connected' })
       health()
     } catch (error) { emit('gateway-error', { message: error.message }) }
     finally { refreshing = false }
   }
-  async function watch(client, sandbox, id) {
+  async function watch(client, sandbox, id, workspaceScope) {
     const controller = new AbortController()
     watches.set(id, controller)
     const previous = store.getSource(id)
@@ -265,10 +270,10 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
     }
     // Subscribe first with bounded replay. A separate history read confirms source reachability.
     try {
-      const stream = client.raw.watchSandbox({ sandbox: sandbox.name, workspaceScope: WORKSPACE, followStatus: true, followLogs: true, followEvents: true, logTailLines: 400, eventTail: 400, resumeAfterCursor: cursor }, { signal: controller.signal })
+      const stream = client.raw.watchSandbox({ sandbox: sandbox.name, workspaceScope, followStatus: true, followLogs: true, followEvents: true, logTailLines: 400, eventTail: 400, resumeAfterCursor: cursor }, { signal: controller.signal })
       const recovery = (async () => {
         try {
-          const logs = await client.raw.getSandboxLogs({ sandbox: sandbox.name, lines: 400, workspaceScope: WORKSPACE }, { signal: controller.signal })
+          const logs = await client.raw.getSandboxLogs({ sandbox: sandbox.name, lines: 400, workspaceScope }, { signal: controller.signal })
           if (stopped || controller.signal.aborted) return
           for (const line of logs.logs) save(line)
           status(id, { lastHistoryAt: new Date().toISOString(), historyError: null, replayLines: logs.logs.length, replayMayBeTruncated: logs.logs.length >= 400 })
@@ -304,59 +309,145 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
   }
   return {
     start() {
+      if (timer) return
+      stopped = false
       for (const source of store.coverage().sources) store.source(source.id, { status: 'unverified', gapPossible: true })
       refresh(); timer = setInterval(refresh, interval)
     },
-    stop() { stopped = true; clearInterval(timer); clearTimeout(healthTimer); for (const controller of watches.values()) controller.abort(); watches.clear() },
+    stop() { stopped = true; clearInterval(timer); clearTimeout(healthTimer); timer = null; healthTimer = null; for (const controller of watches.values()) controller.abort(); watches.clear() },
     add(res) { clients.add(res); if (lastList) res.write(`event: sandboxes\ndata: ${lastList}\n\n`); res.write(`event: collection\ndata: ${JSON.stringify(store.coverage())}\n\n`) },
     remove(res) { clients.delete(res) },
     logsDeleted(result) { emit('activity-deleted', result); health() },
+    contextChanged() { emit('context-changed', {}); for (const res of clients) res.end(); clients.clear() },
   }
 }
 
 // ---- router -----------------------------------------------------------------
 
 export function openshellApi(security = createSecurity(cloudConfig())) {
-  return {
-    name: 'openshell-console-api',
-    configureServer(server) {
-      server.middlewares.use(security.middleware)
-      const store = createActivityStore(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity.sqlite'))
-      const delivery = createActivityDelivery(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.state/activity-delivery.sqlite'), store)
-      delivery.start()
-      const hub = createHub(store)
-      if (server.httpServer?.listening) hub.start()
-      else server.httpServer?.once('listening', () => hub.start())
-      server.httpServer?.once('close', () => { hub.stop(); delivery.stop(); store.close() })
-      const stopSweeper = startSweeper((message) => server.config.logger.info(`[ingress] ${message}`))
-      // Several consoles can share one gateway during development. Each one's
-      // organization pass re-applies its own stored policy to every sandbox, so
-      // only one of them may run it. Ingress deadlines are per console and stay on.
-      const stopOrgSweeper = process.env.OPENSHELL_CONSOLE_SWEEP === '0' ? () => {} : startOrgSweeper((message) => server.config.logger.info(`[org] ${message}`))
-      server.httpServer?.once('close', () => { stopSweeper(); stopOrgSweeper() })
-      // Browser terminals arrive as WebSocket upgrades, which skip the middleware.
-      server.httpServer?.on('upgrade', async (req, socket, head) => {
+  const configure = (server) => {
+    const api = createOpenShellApi({ httpServer: server.httpServer, logger: server.config.logger, security })
+    server.middlewares.use(api.middleware)
+  }
+  return { name: 'openshell-console-api', configureServer: configure, configurePreviewServer: configure }
+}
+
+// Both Vite and the installed CLI use this exact HTTP/WebSocket lifecycle.
+export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(cloudConfig()) } = {}) {
+  const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
+  const initialContext = contextSelection()
+  const initialKey = contextKey(initialContext)
+  let stopSweeper = null
+  let active = null, closed = false, closing
+  function runtimeFor(context) {
+    return runWithContext(context, () => {
+      const key = contextKey()
+      if (!runtimes.has(key)) {
+        const directory = scopedStateDirectory()
+        const store = createActivityStore(path.join(directory, 'activity.sqlite'))
+        let delivery
+        try { delivery = createActivityDelivery(path.join(directory, 'activity-delivery.sqlite'), store) }
+        catch (error) { store.close(); throw error }
+        const hub = createHub(store, { connect: () => gateway(context) })
+        delivery.start()
+        // Reapplying organization policy is opt-in and stays on the startup
+        // scope. Merely opening or switching consoles must not rewrite policy.
+        const stopOrgSweeper = process.env.OPENSHELL_CONSOLE_SWEEP === '1' && key === initialKey
+          ? startOrgSweeper((message) => logger.info(`[org] ${message}`)) : () => {}
+        runtimes.set(key, { store, delivery, hub, context, stopOrgSweeper })
+      }
+      return runtimes.get(key)
+    })
+  }
+  function activate(context) {
+    if (closed) return
+    stopSweeper ??= startSweeper((message) => logger.info(`[ingress] ${message}`))
+    const next = runtimeFor(context)
+    if (active !== next) {
+      if (active) { active.hub.contextChanged(); active.hub.stop() }
+      active = next
+      if (httpServer?.listening) runWithContext(next.context, () => next.hub.start())
+    }
+    return next
+  }
+  const start = () => { if (!closed && (security.config.mode !== 'local' || contextConfigured())) activate(initialContext) }
+  const upgrade = async (req, socket, head) => {
+    if (closed) { socket.destroy(); return }
+    try {
+      if (requestPath(req) !== '/api/os/terminal') return
+      const identity = await security.authenticate(req)
+      if (socket.destroyed || closed) { socket.destroy(); return }
+      if (identity) security.watch(req, socket, identity)
+      if (terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid)) {
+        sockets.add(socket)
+        socket.once('close', () => sockets.delete(socket))
+      }
+    } catch (error) { socket.end(`HTTP/1.1 ${error.status === 400 ? '400 Bad Request' : '403 Forbidden'}\r\nConnection: close\r\n\r\n`) }
+  }
+  function close() {
+    if (closed) return closing
+    closed = true
+    httpServer?.off('listening', start)
+    httpServer?.off('upgrade', upgrade)
+    httpServer?.off('close', close)
+    for (const res of streams) res.end()
+    for (const socket of sockets) socket.destroy()
+    stopSweeper?.()
+    for (const runtime of runtimes.values()) { runtime.hub.stop(); runtime.stopOrgSweeper() }
+    const drain = [...pending, ...[...responses].filter((res) => !res.destroyed && !res.writableFinished)
+      .map((res) => new Promise((resolve) => res.once('close', resolve)))]
+    closing = Promise.allSettled(drain).then(() => {
+      for (const runtime of runtimes.values()) { runtime.delivery.stop(); runtime.store.close() }
+      streams.clear(); sockets.clear(); runtimes.clear()
+    })
+    return closing
+  }
+  httpServer?.on('upgrade', upgrade)
+  httpServer?.once('close', close)
+  if (httpServer?.listening) start()
+  else httpServer?.once('listening', start)
+  const route = (req, res, next = () => res.writeHead(404).end()) => {
+    const pathname = (req.url ?? '/').split('?', 1)[0]
+    if (pathname !== '/api/os' && !pathname.startsWith('/api/os/')) return next()
+    if (!security.isAllowed(req)) { res.writeHead(403).end(); return }
+    if (closed) { res.writeHead(503).end(); return }
+    responses.add(res)
+    res.once('close', () => responses.delete(res))
+    const operation = runWithContext(contextSelection(), async () => {
         try {
-          if (requestPath(req) !== '/api/os/terminal') return
-          const identity = await security.authenticate(req)
-          if (socket.destroyed) return
-          if (identity) security.watch(req, socket, identity)
-          terminalUpgrade(req, socket, head, security.isAllowed, identity?.uid)
-        } catch (error) { socket.end(`HTTP/1.1 ${error.status === 400 ? '400 Bad Request' : '403 Forbidden'}\r\nConnection: close\r\n\r\n`) }
-      })
-      server.middlewares.use('/api/os', async (req, res) => {
-        if (!security.isAllowed(req)) { res.writeHead(403).end(); return }
-        const url = new URL(req.url, 'http://local')
-        const parts = url.pathname.split('/').filter(Boolean)
-        try {
+          const url = new URL(req.url, 'http://local')
+          const parts = url.pathname.slice('/api/os'.length).split('/').filter(Boolean)
           assertCloudOperation(parts)
+          if (security.config.mode !== 'local' && (parts[0] === 'onboarding' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
+          const requestedContext = req.headers['x-openshell-context'] ?? url.searchParams.get('context')
+          if (requestedContext != null && requestedContext !== contextKey()) return send(res, 409, { error: 'Console context changed. Reload before continuing.' })
+          // Setup reads and probes must not create databases, start background
+          // jobs, or contact the CLI's active gateway on a fresh installation.
+          if (req.method === 'GET' && parts.length === 1) {
+            if (parts[0] === 'context') return send(res, 200, { ...await consoleContext(), ...(security.config.mode !== 'local' ? { configured: true } : {}) })
+            if (parts[0] === 'onboarding') return send(res, 200, onboardingInfo())
+          }
+          if (isMutation(req, security)) {
+            if (parts[0] === 'onboarding' && parts[1] === 'check' && parts.length === 2) {
+              const input = await body(req)
+              return send(res, 200, await checkGateway(input.gateway))
+            }
+            if (parts[0] === 'context' && parts.length === 1) {
+              const result = await selectConsoleContext(await body(req))
+              activate({ gateway: result.gateway, workspace: result.workspace })
+              return send(res, 200, result)
+            }
+          }
+          if (security.config.mode === 'local' && !contextConfigured()) return send(res, 428, { error: 'Set up a connection and choose Use gateway before accessing sandboxes.', setupRequired: true })
+          const { store, delivery, hub } = runtimeFor(contextSelection())
           if (req.method === 'GET') {
             if (parts[0] === 'stream') {
               res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' })
               res.write(': connected\n\n')
               const ping = setInterval(() => res.write(': ping\n\n'), 15000)
+              streams.add(res)
               hub.add(res)
-              req.on('close', () => { clearInterval(ping); hub.remove(res) })
+              res.on('close', () => { clearInterval(ping); streams.delete(res); hub.remove(res) })
               return
             }
             if (parts[0] === 'cloud-export') return send(res, 200, await exportTransfer({ name: url.searchParams.get('name') }))
@@ -429,9 +520,13 @@ export function openshellApi(security = createSecurity(cloudConfig())) {
           return send(res, 404, { error: 'Not found' })
         } catch (error) {
           // Gateway errors carry a readable message; nothing here includes credentials.
-          send(res, error.status ?? 502, { error: error.rawMessage ?? error.message ?? 'Gateway request failed', ...(error.code === 'TEMPLATE_IN_USE' ? { code: error.code, sandboxes: error.sandboxes } : {}) })
+          if (res.headersSent) res.destroy(error)
+          else send(res, error.status ?? 502, { error: error.rawMessage ?? error.message ?? 'Gateway request failed', ...(error.code === 'TEMPLATE_IN_USE' ? { code: error.code, sandboxes: error.sandboxes } : {}) })
         }
       })
-    },
+    pending.add(operation)
+    operation.then(() => pending.delete(operation), () => pending.delete(operation))
+    return operation
   }
+  return { middleware: (req, res, next) => security.middleware(req, res, () => route(req, res, next)), close }
 }

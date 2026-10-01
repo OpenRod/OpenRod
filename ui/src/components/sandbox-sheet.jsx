@@ -1,7 +1,7 @@
 import { SetupsView } from "@/components/setups-view"
 import { useCloudMode } from "./auth-gate"
 import * as React from "react"
-import { AlertTriangle, Box, Copy, FolderLock, Globe, Play, Square, SquareCode, SquareTerminal, Terminal, Trash2 } from "lucide-react"
+import { AlertTriangle, Box, Copy, Globe, Play, Square, SquareCode, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,7 @@ import { ContinueInCloud, ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/live"
-import { defaultSession, sessionName, terminalHref } from "@/lib/sandbox-session"
+import { sessionName, terminalHref } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
 import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
@@ -62,9 +62,10 @@ function useEditors() {
 }
 
 // Cloud sandboxes have no local SSH or editors, so only the browser terminal applies.
-function OpenIn({ name, editors, cloud }) {
+function OpenIn({ name, editors, cloud, context }) {
   const [connection, setConnection] = React.useState(null)
   const [error, setError] = React.useState(null)
+  const [mode, setMode] = React.useState("ssh")
   const [opening, setOpening] = React.useState(false)
   const [loadingConfig, setLoadingConfig] = React.useState(false)
   const [config, setConfig] = React.useState(null)
@@ -72,14 +73,17 @@ function OpenIn({ name, editors, cloud }) {
   React.useEffect(() => {
     if (cloud) return
     let cancelled = false
-    setConnection(null); setError(null); setConfig(null)
+    setConnection(null); setError(null); setMode("ssh"); setConfig(null)
     api.sshConnection(name)
-      .then((value) => { if (!cancelled) setConnection(value) })
+      .then((value) => { if (!cancelled) { setConnection(value); setMode(value.defaultMode) } })
       .catch((e) => { if (!cancelled) setError(e.message) })
     return () => { cancelled = true }
-  }, [name, cloud])
+  }, [name, cloud, context?.name, context?.workspace])
 
-  const plan = connection?.modes.exec
+  const plan = connection?.modes[mode] ?? connection?.modes.ssh
+  const actionLabel = mode === "ssh" ? "Open SSH in terminal"
+    : mode === "attach" ? "Attach canonical TTY"
+    : `Exec new ${sessionName(plan?.session)?.toLowerCase() ?? "session"}`
   const unavailable = error || (!connection ? "Checking connection…"
     : !connection.cliInstalled ? "Install the openshell CLI to connect."
     : !connection.sshInstalled ? "Install OpenSSH to connect."
@@ -103,8 +107,8 @@ function OpenIn({ name, editors, cloud }) {
   async function open() {
     setOpening(true)
     try {
-      await api.openSshTerminal(name, "exec")
-      toast.success(`Opening ${name} over SSH`)
+      await api.openSshTerminal(name, mode)
+      toast.success(mode === "ssh" ? `Opening SSH to ${name}` : mode === "attach" ? `Attaching to ${name}` : `Starting a new session in ${name}`)
     } catch (e) {
       toast.error("Couldn’t open SSH terminal", { description: e.message })
     } finally {
@@ -119,7 +123,7 @@ function OpenIn({ name, editors, cloud }) {
     finally { setLoadingConfig(false) }
   }
 
-  const browser = <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} render={<a href={terminalHref(name)} target="_blank" rel="noreferrer" />}>
+  const browser = <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} disabled={!cloud && (!context?.name || !context?.workspace)} render={<a href={cloud || (context?.name && context?.workspace) ? terminalHref(name, undefined, context) : undefined} target="_blank" rel="noreferrer" />}>
     <Globe className="size-3.5" />Browser
   </Button>
 
@@ -128,18 +132,44 @@ function OpenIn({ name, editors, cloud }) {
   return (
     <>
       <Section title="Open in">
+        {connection && <>
+          <dl aria-label="SSH target" className="mb-3 grid gap-1 text-[11px]">
+            <div><dt className="text-muted-foreground">Gateway</dt><dd className="break-all font-mono">{connection.gateway.name}</dd></div>
+            <div><dt className="text-muted-foreground">Workspace</dt><dd className="break-all font-mono">{connection.gateway.workspace}</dd></div>
+            <div><dt className="text-muted-foreground">Sandbox</dt><dd className="break-all font-mono">{name}</dd></div>
+          </dl>
+          <div className="mb-2 flex flex-wrap gap-1 rounded-md bg-muted p-1">
+            <Button type="button" variant={mode === "ssh" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("ssh")}>SSH shell</Button>
+            <Button type="button" variant={mode === "exec" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("exec")}>Exec new</Button>
+            {connection.modes.attach && <Button type="button" variant={mode === "attach" ? "secondary" : "ghost"} size="xs" onClick={() => setMode("attach")}>Attach TTY</Button>}
+          </div>
+        </>}
         <div className="grid grid-cols-2 gap-1.5">
-          <Button variant="outline" size="sm" className="justify-start text-xs" disabled={!connection?.canOpenTerminal || opening} title={unavailable ?? undefined} onClick={open}>
+          <Button variant="outline" size="sm" className="justify-start text-xs" disabled={!connection?.canOpenTerminal || opening} title={unavailable ?? actionLabel} onClick={open}>
             {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" />}Terminal
           </Button>
           {[{ id: "cursor", label: "Cursor" }, { id: "vscode", label: "VS Code" }].map((editor) => {
             const installed = editors.some((item) => item.id === editor.id)
-            return <Button key={editor.id} variant="outline" size="sm" className="justify-start text-xs" disabled={!installed || opening} title={!installed ? `${editor.label} is not installed.` : undefined} onClick={() => openEditor(editor)}>
+            return <Button key={editor.id} variant="outline" size="sm" className="justify-start text-xs" disabled={!installed || opening} title={!installed ? `${editor.label} is not installed.` : "Connects over SSH through OpenShell. The first time, OpenShell adds one Include line to ~/.ssh/config."} onClick={() => openEditor(editor)}>
               <img src={`/logos/${editor.id}.svg`} alt="" className="size-3.5 dark:invert" />{editor.label}
             </Button>
           })}
           {browser}
         </div>
+        {connection && <div className="mt-2 space-y-1.5">
+          {plan && <CopyCommand command={plan.command} />}
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            {mode === "ssh" ? "Direct OpenSSH login shell. Its private, temporary config is removed when the session exits."
+              : mode === "attach" ? "Reconnects to the sandbox’s original TTY process."
+              : "Starts a separate shell or agent with openshell exec."}
+          </p>
+          <details className="text-[10px] text-muted-foreground">
+            <summary className="cursor-pointer py-1">How SSH reaches this sandbox</summary>
+            <p className="mt-1">OpenSSH → OpenShell SSH proxy → gateway → this sandbox. The SSH target is the sandbox, not the gateway host.</p>
+            <p className="mt-2 break-all font-mono">{connection.gateway.endpoint}</p>
+            <p className="mt-1">A localhost gateway address can be a tunnel to a remote Kubernetes cluster. It does not mean the sandbox runs on this machine.</p>
+          </details>
+        </div>}
         <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3">
           <Button variant="outline" size="sm" className="justify-start text-xs font-normal text-muted-foreground" disabled={!plan} onClick={copyCommand}>
             <Copy className="size-3.5" />Copy SSH command
@@ -288,7 +318,7 @@ export function SandboxSheet({ name, onClose, onNavigate, liveData }) {
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && !live.demo && <OpenIn key={name} name={name} editors={editors} cloud={cloud} />}
+                    {phase === "ready" && !live.demo && <OpenIn key={name} name={name} editors={editors} cloud={cloud} context={live.overview?.gateway} />}
                     {!live.demo && phase === "ready" && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
