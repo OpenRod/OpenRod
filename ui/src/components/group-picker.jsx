@@ -12,8 +12,8 @@ function GroupChip({ pressed, onClick, children, count, muted }) {
   return (
     <button type="button" aria-pressed={pressed} onClick={onClick}
       className={cn("flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-        pressed ? "border-foreground/25 bg-accent text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
-      {pressed ? <Check className="size-3" aria-hidden="true" /> : !muted && <Users className="size-3 opacity-60" aria-hidden="true" />}
+        pressed ? "border-foreground/50 bg-accent font-medium text-foreground" : "border-foreground/20 bg-background text-foreground hover:border-foreground/40 hover:bg-accent/50")}>
+      {pressed ? <Check className="size-3" aria-hidden="true" /> : !muted && <Users className="size-3 text-muted-foreground" aria-hidden="true" />}
       {children}
       {count != null && <span className="font-mono text-[10px] tabular-nums text-faint">{count}</span>}
     </button>
@@ -77,8 +77,8 @@ export function GroupPicker({ groups, counts = {}, value, onChange, multiple = f
       {groups.map((g) => (
         required && !multiple ? <label key={g.id} className="relative min-w-0 cursor-pointer">
           <input type="radio" name={radioName} value={g.id} checked={value === g.id} onChange={() => onChange(g.id)} required className="peer sr-only" />
-          <span className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground peer-checked:border-foreground/25 peer-checked:bg-accent peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
-            {value === g.id ? <Check className="size-3 shrink-0" aria-hidden="true" /> : <Users className="size-3 shrink-0 opacity-60" aria-hidden="true" />}
+          <span className="flex items-center gap-1.5 rounded-md border border-foreground/20 bg-background px-3 py-2 text-xs text-foreground transition-colors hover:border-foreground/40 hover:bg-accent/50 peer-checked:border-foreground/50 peer-checked:bg-accent peer-checked:font-medium peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+            {value === g.id ? <Check className="size-3 shrink-0" aria-hidden="true" /> : <Users className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
             <span className="break-words">{g.name}</span>
             {counts[g.id] != null && <span aria-label={`${counts[g.id]} sandboxes`} className="font-mono text-[10px] text-faint">{counts[g.id]}</span>}
           </span>
