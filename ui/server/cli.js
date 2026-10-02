@@ -10,6 +10,7 @@ import { parseArgs } from 'node:util'
 const HELP = `Usage: openshell-console [--host 127.0.0.1] [--port 4600] [--open | --no-open]
 
 Serve the OpenShell Console locally for local sandboxes or configured SSH hosts.
+Open the printed link: it carries a secret that changes on every start.
 
   --host <host>  Loopback only: 127.0.0.1, localhost, or ::1
   --port <port>  HTTP port from 1 to 65535 (default: 4600)
@@ -101,6 +102,8 @@ export async function startConsole(options = parseOptions([]), logger = console)
     await fs.access(path.join(directory, 'index.html'))
   } catch { throw new Error('Built frontend is missing. Run npm run build from the source checkout before starting or packaging the console.') }
   const { createOpenShellApi, isLocalApiRequest } = await import('./api.js')
+  const { createLaunchToken, tokenUrl } = await import('./launch-token.js')
+  const token = createLaunchToken()
   const serveStatic = staticMiddleware(directory)
   const connections = new Set()
   let api
@@ -123,7 +126,7 @@ export async function startConsole(options = parseOptions([]), logger = console)
     server.once('error', error)
     server.listen(port, host === 'localhost' ? '127.0.0.1' : host, () => { server.off('error', error); resolve() })
   })
-  try { api = createOpenShellApi({ httpServer: server, logger }) }
+  try { api = createOpenShellApi({ httpServer: server, logger, token }) }
   catch (error) { server.close(); throw error }
   server.on('upgrade', (req, socket) => { if ((req.url ?? '').split('?', 1)[0] !== '/api/os/terminal') socket.destroy() })
   let closing
@@ -138,8 +141,9 @@ export async function startConsole(options = parseOptions([]), logger = console)
     })()
     return closing
   }
-  const url = `http://${host === '::1' ? '[::1]' : host}:${port}`
-  logger.info(`OpenShell Console: ${url}`)
+  // The link carries this launch's secret; it changes on every restart.
+  const url = tokenUrl(host, port, token)
+  logger.info(`OpenRod console (open this link): ${url}`)
   if (options.open) openBrowser(url, logger)
   return { server, url, close }
 }

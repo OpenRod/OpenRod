@@ -37,6 +37,7 @@ import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from '.
 // address, so check the socket, the Host and the browser's own origin claims.
 export { isLocalApiRequest } from './security.js'
 import { createSecurity, cloudConfig, assertCloudOperation, requestPath } from './security.js'
+import { createLaunchToken, createTokenGate, tokenUrl } from './launch-token.js'
 
 // A mutation must also carry a JSON body and a custom header, which a
 // cross-site form or image tag cannot send without a CORS preflight we never grant.
@@ -329,16 +330,23 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
 
 // ---- router -----------------------------------------------------------------
 
-export function openshellApi(security = createSecurity(cloudConfig())) {
+export function openshellApi(security = createSecurity(cloudConfig()), token = createLaunchToken()) {
   const configure = (server) => {
-    const api = createOpenShellApi({ httpServer: server.httpServer, logger: server.config.logger, security })
+    const logger = server.config.logger
+    const api = createOpenShellApi({ httpServer: server.httpServer, logger, security, token })
     server.middlewares.use(api.middleware)
+    if (security.config.mode !== 'local') return
+    const link = () => { const { address, port } = server.httpServer.address(); return tokenUrl(address, port, token) }
+    const printUrls = server.printUrls?.bind(server)
+    if (printUrls) server.printUrls = () => { printUrls(); logger.info(`  ➜  Console: ${link()}  (open this link)`) }
+    else server.httpServer?.once('listening', () => logger.info(`OpenRod console (open this link): ${link()}`))
   }
   return { name: 'openshell-console-api', configureServer: configure, configurePreviewServer: configure }
 }
 
 // Both Vite and the installed CLI use this exact HTTP/WebSocket lifecycle.
-export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(cloudConfig()) } = {}) {
+export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(cloudConfig()), token = createLaunchToken() } = {}) {
+  const gate = security.config.mode === 'local' ? createTokenGate(token) : null
   const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
   const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative() }) : null
   const cloudOff = security.config.mode === 'local' && !cloudOrigin()
@@ -399,6 +407,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
   const upgrade = async (req, socket, head) => {
     if (closed) { socket.destroy(); return }
     try {
+      if (gate?.upgrade(req, socket)) return
       if (localCloud?.upgrade(req, socket, head)) return
       const pathname = requestPath(req)
       if (!['/api/os/terminal', '/api/os/ssh'].includes(pathname)) return
@@ -612,8 +621,9 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
   }
   const middleware = (req, res, next) => {
     if (closed) { res.writeHead(503).end(); return }
+    if (gate?.http(req, res)) return
     const authenticate = () => security.middleware(req, res, () => route(req, res, next))
     return localCloud ? localCloud.middleware(req, res, authenticate) : authenticate()
   }
-  return { middleware, close }
+  return { middleware, close, token }
 }

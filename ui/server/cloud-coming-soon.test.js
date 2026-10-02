@@ -6,6 +6,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { cloudOrigin } from './cloud-origin.js'
+import { tokenCookie } from './launch-token.js'
+const TOKEN = 'test-launch-token-' + 'x'.repeat(32)
 
 test('cloud origin is unset by default and must be an HTTPS origin when configured', () => {
   assert.equal(cloudOrigin({}), null)
@@ -23,7 +25,7 @@ test('local console refuses every cloud endpoint while cloud is unconfigured', {
     import { createServer } from 'node:http'
     import { createOpenShellApi } from ${JSON.stringify(moduleUrl)}
     const server = createServer((request, response) => api.middleware(request, response, () => response.writeHead(404).end()))
-    const api = createOpenShellApi({ httpServer: server })
+    const api = createOpenShellApi({ httpServer: server, token: ${JSON.stringify(TOKEN)} })
     server.listen(0, '127.0.0.1', () => console.log('READY http://127.0.0.1:' + server.address().port))
     process.on('SIGTERM', async () => { await api.close(); server.close(() => process.exit(0)); server.closeAllConnections() })
   `], { env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -36,7 +38,8 @@ test('local console refuses every cloud endpoint while cloud is unconfigured', {
     child.once('exit', (code) => reject(new Error(`Console exited ${code}: ${stderr}`)))
     child.stdout.on('data', (chunk) => { output += chunk; const match = /READY (http:\/\/127\.0\.0\.1:\d+)/.exec(output); if (match) resolve(match[1]) })
   })
-  const headers = { origin, 'content-type': 'application/json', 'x-openshell-console': '1' }
+  const port = Number(new URL(origin).port), cookie = tokenCookie(port, TOKEN)
+  const headers = { origin, cookie, 'content-type': 'application/json', 'x-openshell-console': '1' }
   const ticket = 'openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)
   const requests = [
     ['POST', '/api/os/cloud-transfer', { name: 'demo', ticket }],
@@ -50,13 +53,12 @@ test('local console refuses every cloud endpoint while cloud is unconfigured', {
     ['POST', '/api/remote/os/sandboxes', { name: 'demo' }],
   ]
   for (const [method, route, body] of requests) {
-    const response = await fetch(origin + route, { method, headers: body ? headers : { origin }, body: body && JSON.stringify(body) })
+    const response = await fetch(origin + route, { method, headers: body ? headers : { origin, cookie }, body: body && JSON.stringify(body) })
     assert.equal(response.status, 409, route)
     assert.deepEqual(await response.json(), { error: 'Cloud is coming soon.' }, route)
   }
-  const port = Number(new URL(origin).port)
   const reply = await new Promise((resolve, reject) => {
-    const socket = net.connect(port, '127.0.0.1', () => socket.write(`GET /api/remote/os/terminal?owner=x HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: ${origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${Buffer.from('a'.repeat(16)).toString('base64')}\r\nSec-WebSocket-Version: 13\r\n\r\n`))
+    const socket = net.connect(port, '127.0.0.1', () => socket.write(`GET /api/remote/os/terminal?owner=x HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: ${origin}\r\nCookie: ${cookie}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${Buffer.from('a'.repeat(16)).toString('base64')}\r\nSec-WebSocket-Version: 13\r\n\r\n`))
     let data = ''
     socket.on('data', (chunk) => { data += chunk }).on('end', () => resolve(data)).on('error', reject)
   })
