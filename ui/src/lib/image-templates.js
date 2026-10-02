@@ -31,12 +31,9 @@ export const selectedAgents = (recipe) => AGENTS.filter((a) => recipe.agents.inc
 export const RUNTIMES = [
   { id: 'node', name: 'Node.js 22', logo: '/logos/templates/nodejs.svg' },
   { id: 'python', name: 'Python 3', logo: '/logos/templates/python.svg' },
-  // Open in VS Code needs this: its network rule lives in shared/agent-access.js.
-  { id: 'vscode', name: 'VS Code Server', logo: '/logos/vscode.svg' },
 ]
 // OpenShell intercepts TLS with its own CA. curl and the VS Code CLI read it
-// from CURL_CA_BUNDLE and SSL_CERT_FILE; GNU wget, which Remote-SSH tries
-// first, needs it in wgetrc.
+// from CURL_CA_BUNDLE and SSL_CERT_FILE.
 export const OPENSHELL_CA_BUNDLE = '/run/openshell-supervisor-ca/material/ca-bundle.crt'
 // What a sandbox runs first. Agents and the shell open as sessions; anything
 // else is a custom command.
@@ -118,9 +115,6 @@ export function dockerfileFor(recipe) {
   const lines = [`FROM ${recipe.base}`, '', 'USER root', 'ENV DEBIAN_FRONTEND=noninteractive', `RUN apt-get update --error-on=any && apt-get install -y --no-install-recommends ${packages.map(quote).join(' ')} && rm -rf /var/lib/apt/lists/*`, 'RUN if getent passwd 1000 >/dev/null; then usermod --login sandbox --home /sandbox --move-home --shell /bin/bash "$(getent passwd 1000 | cut -d: -f1)"; else useradd --uid 1000 --create-home --home-dir /sandbox --shell /bin/bash sandbox; fi && chown -R 1000:1000 /sandbox']
   if (hasNode) lines.push('', 'COPY --from=node:22-bookworm-slim /usr/local/ /usr/local/')
   if (hasPython) lines.push('', 'RUN python3 -m venv /usr/local/venv', 'ENV PATH="/usr/local/venv/bin:${PATH}"')
-  // VS Code Remote-SSH downloads its version-matched server with curl or wget
-  // (curl is always installed above).
-  if (recipe.runtimes.includes('vscode')) lines.push(`RUN echo 'ca_certificate = ${OPENSHELL_CA_BUNDLE}' >> /etc/wgetrc`)
   for (const agent of agents.filter((a) => a.npm)) lines.push(`RUN npm install --global ${agent.ignoreScripts ? '--ignore-scripts ' : ''}${agent.npm}`)
   // Debian and Ubuntu install fd as fdfind; Pi looks for fd.
   if (recipe.agents.includes('pi')) lines.push('RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd')

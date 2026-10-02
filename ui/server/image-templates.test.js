@@ -644,14 +644,3 @@ for (const cancellation of [false,true]) test(`Docker ${cancellation ? 'cancella
   }
 })
 
-test('VS Code Server is a validated, stored recipe choice that keeps curl and trusts the OpenShell CA in wget', () => {
-  const recipe = newRecipe({ name: 'code', runtimes: ['vscode'], packages: [] })
-  assert.deepEqual(recipeErrors(recipe), {})
-  assert.deepEqual(storedRecipe(recipe).runtimes, ['vscode'])
-  const dockerfile = dockerfileFor(recipe)
-  assert.match(dockerfile, /apt-get install -y --no-install-recommends [^\n]*'curl'/)
-  assert.match(dockerfile, /^RUN echo 'ca_certificate = \/run\/openshell-supervisor-ca\/material\/ca-bundle\.crt' >> \/etc\/wgetrc$/m)
-  assert(dockerfile.indexOf('/etc/wgetrc') < dockerfile.indexOf('USER sandbox'))
-  assert.doesNotMatch(dockerfileFor(newRecipe({ name: 'plain' })), /wgetrc/)
-  assert.equal(recipeErrors(newRecipe({ name: 'bad', runtimes: ['vscode-insiders'] })).runtimes, 'Choose a supported runtime.')
-})

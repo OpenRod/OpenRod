@@ -22,23 +22,8 @@ test('matches a unique template image but does not guess for shared or missing o
  assert.equal(imageName('sha256:' + 'a'.repeat(64)), 'Unknown template')
 })
 
-test('VS Code Server is labeled at creation and shown from the label or the template recipe', async () => {
-  const { TOOLS_LABEL, imageTemplateLabels, hasVscodeServer, sandboxTools } = await import('./sandbox-images.js')
-  const code = { name: 'code', managed: true, image: 'openshell-template/code:a1', recipe: { source: 'build', agents: ['claude'], runtimes: ['node', 'vscode'] } }
-  const plain = { name: 'plain', managed: true, image: 'openshell-template/plain:a1', recipe: { source: 'build', agents: ['claude'], runtimes: ['node'] } }
-  assert.deepEqual(imageTemplateLabels(code), { [IMAGE_TEMPLATE_NAME]: 'code', [TOOLS_LABEL]: 'vscode' })
-  assert.deepEqual(imageTemplateLabels(plain), { [IMAGE_TEMPLATE_NAME]: 'plain' })
-  assert.deepEqual(imageTemplateLabels({ ...code, managed: false }), { [IMAGE_TEMPLATE_NAME]: 'code' })
+test('sandboxes launched from a template are labeled with its name', async () => {
+  const { imageTemplateLabels } = await import('./sandbox-images.js')
+  assert.deepEqual(imageTemplateLabels({ name: 'code' }), { [IMAGE_TEMPLATE_NAME]: 'code' })
   assert.deepEqual(imageTemplateLabels(null), {})
-  // The label wins over the template, which may have been edited since.
-  assert.deepEqual(sandboxTools({ labels: { [TOOLS_LABEL]: '' } }, code), [])
-  const [labeled, fromRecipe, without, unknown] = nameSandboxImages([
-    { name: 'a', image: 'x', labels: { [TOOLS_LABEL]: 'vscode' } },
-    { name: 'b', image: code.image, labels: {} },
-    { name: 'c', image: plain.image, labels: {} },
-    { name: 'd', image: 'custom:latest', labels: {} },
-  ], [code, plain])
-  assert.deepEqual([labeled, fromRecipe, without, unknown].map(hasVscodeServer), [true, true, false, false])
-  assert.equal(hasVscodeServer({ labels: { [TOOLS_LABEL]: 'vscode' } }), true)
-  assert.equal(hasVscodeServer(null), false)
 })

@@ -148,8 +148,8 @@ function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted }) {
           <Field label="Repository" htmlFor="template-repository" hint="Optional. A public HTTPS repository, cloned into /sandbox/project. Private repositories can be cloned after launch.">
             <Input id="template-repository" value={recipe.repository} onChange={(e) => patch({ repository: e.target.value.trim() })} placeholder="https://github.com/your-team/project.git" className="font-mono text-xs" />
           </Field>
-          <Field label="Runtimes and tools" hint={[bundled.length && `${bundled.join(' and ')} ${bundled.length > 1 ? 'are' : 'is'} included for the selected agents.`, recipe.runtimes.includes('vscode') && 'VS Code Server lets Open in VS Code download its server from Microsoft\'s VS Code hosts.'].filter(Boolean).join(' ') || undefined}>
-            <div className="grid gap-2 sm:grid-cols-2">{RUNTIMES.map((r) => <Toggle key={r.id} selected={recipe.runtimes.includes(r.id)} onClick={() => toggleRuntime(r.id)}><img src={r.logo} alt="" className={`size-5 object-contain ${r.id === 'vscode' ? 'dark:invert' : ''}`} /><span className="font-medium text-foreground">{r.name}</span></Toggle>)}</div>
+          <Field label="Runtimes and tools" hint={[bundled.length && `${bundled.join(' and ')} ${bundled.length > 1 ? 'are' : 'is'} included for the selected agents.`].filter(Boolean).join(' ') || undefined}>
+            <div className="grid gap-2 sm:grid-cols-2">{RUNTIMES.map((r) => <Toggle key={r.id} selected={recipe.runtimes.includes(r.id)} onClick={() => toggleRuntime(r.id)}><img src={r.logo} alt="" className="size-5 object-contain" /><span className="font-medium text-foreground">{r.name}</span></Toggle>)}</div>
           </Field>
         </> : <Field label="Image" htmlFor="template-image" hint={local?.error ? local.error : 'An image on the selected Docker engine, or a registry reference Docker is signed in to. OpenShell boots it as is.'}>
           <Input id="template-image" value={recipe.image} onChange={(e) => patch({ image: e.target.value.trim() })} placeholder="ghcr.io/your-team/workspace:latest" className="font-mono text-xs" />
