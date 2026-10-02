@@ -13,7 +13,7 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 
 ---
 
-## ✨ What you can do
+### ✨ What you can do
 
 | | |
 | --- | --- |
@@ -26,7 +26,7 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 
 ---
 
-## 🚀 Quick start
+### 🚀 Quick start
 
 **You'll need**
 
@@ -88,7 +88,7 @@ Every start generates a new random secret. The page stores it in an HttpOnly coo
 
 ---
 
-## 🧭 Opening a sandbox
+### 🧭 Opening a sandbox
 
 | Open in | How it works |
 | --- | --- |
@@ -101,7 +101,7 @@ Details: [docs/opening-sandboxes.md](docs/opening-sandboxes.md)
 
 ---
 
-## 🌐 Remote SSH hosts
+### 🌐 Remote SSH hosts
 
 Run a persistent second gateway in Docker on a Linux machine you reach over SSH. Your local gateway is never reconfigured.
 
@@ -115,7 +115,7 @@ Run a persistent second gateway in Docker on a Linux machine you reach over SSH.
 
 ---
 
-## 🛠️ Troubleshooting
+### 🛠️ Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
@@ -129,7 +129,7 @@ More: [docs/remote-hosts.md#troubleshooting](docs/remote-hosts.md#troubleshootin
 
 ---
 
-## 💾 What gets saved
+### 💾 What gets saved
 
 OpenRod keeps config in `~/.config/openshell` and state in `~/.local/state/openshell-console`. Activity history and webhook credentials are **not encrypted**.
 
@@ -137,7 +137,7 @@ OpenRod keeps config in `~/.config/openshell` and state in `~/.local/state/opens
 
 ---
 
-## 🔒 Security
+### 🔒 Security
 
 - **Your authority, your machine.** OpenRod can do whatever your gateway credentials allow. Keys stay on the server and never reach the browser.
 - **Loopback only.** No login and no multi-user support. Don't proxy it or expose it on a LAN.
@@ -148,7 +148,7 @@ Full threat model and vulnerability reporting: [SECURITY.md](SECURITY.md)
 
 ---
 
-## 🧰 Development
+### 🧰 Development
 
 ```bash
 cd ui
