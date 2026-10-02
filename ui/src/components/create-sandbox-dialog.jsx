@@ -238,13 +238,12 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     const catalog = persistentGateway(location) ? api.syncLocalCatalog() : Promise.resolve(null)
     catalog.then(async (copied) => {
       if (!current) return
-      const [value, list] = await Promise.all([api.org(), api.setups()])
+      const value = await api.org()
       if (!current) return
       // Offer the latest local snapshot alongside remote-authored groups;
       // retained snapshots keep supporting their existing remote sandboxes.
       if (copied?.available) value.groups = value.groups.filter(g => !copied.importedGroups.includes(g.id) || copied.groups.includes(g.id))
       setOrg(value); setLocalCatalog(copied)
-      setSetupSources(Object.fromEntries(list.filter(s => s.preparedFrom).map(s => [s.id, s.preparedFrom.id])))
     }).catch((e) => { if (current) { setOrg(null); setError(`Could not load sandbox settings: ${e.message}`) } }).finally(() => { if (current) setCatalogLoading(false) })
     return () => { current = false }
   }, [open, api, location?.connected, location?.remote, initialImageTemplate, catalogAttempt])
@@ -356,7 +355,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
               <Label htmlFor="sandbox-location" className="text-xs">Location</Label>
               <Select value={locationKey(location) ?? ""} onValueChange={onLocationChange} items={locations.map((item) => ({ value: locationKey(item), label: `${locationLabel(item)}${!item.connected ? " · Disconnected" : ""}` }))}>
                 <SelectTrigger id="sandbox-location" className="w-full text-xs"><SelectValue placeholder="Choose a connected location" /></SelectTrigger>
-                <SelectContent>{locations.map((item) => <SelectItem key={locationKey(item)} value={locationKey(item)} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
+                <SelectContent align="start" alignItemWithTrigger={false}>{locations.map((item) => <SelectItem key={locationKey(item)} value={locationKey(item)} disabled={!item.connected}>{locationLabel(item)}{!item.connected ? " · Disconnected" : ""}</SelectItem>)}</SelectContent>
               </Select>
             </div>}
             {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to create a sandbox.</p>}

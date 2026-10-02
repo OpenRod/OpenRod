@@ -22,6 +22,7 @@ import { absoluteTime } from "@/lib/format"
 import { serviceOf } from "@/lib/services"
 import { AddSecretDialog } from "@/components/add-secret-dialog"
 import { ServiceLogo } from "@/components/service-logo"
+import { SelectField } from '@/components/ui/select-field'
 
 const INJECTION = {
   header: (c) => `sent as the ${c.headerName ?? "custom"} header`,
@@ -164,11 +165,11 @@ function SecretDetails({ secret, profile, sandboxes, onRotate, onDelete, onDone 
         ))}
         {!secret.attachedTo.length && <span className="text-muted-foreground/70">no sandbox</span>}
         {free.length > 0 && (
-          <select value="" disabled={busy} onChange={(e) => e.target.value && attach(e.target.value, true)} aria-label="Attach to a sandbox"
+          <SelectField value="" disabled={busy} onChange={(e) => e.target.value && attach(e.target.value, true)} aria-label="Attach to a sandbox"
             className="ml-auto h-7 rounded-md border border-input bg-transparent px-1.5 text-[11px] text-muted-foreground">
             <option value="">Attach to…</option>
             {free.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-          </select>
+          </SelectField>
         )}
         {busy && <Spinner className="size-3" />}
       </div>
@@ -252,8 +253,8 @@ function ScopedSecretsView() {
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
         <SearchInput ref={search} value={query} onValueChange={setQuery} placeholder="Search name, sandbox, host…" aria-label="Search secrets" className="mr-auto w-full sm:w-72" />
-        <select aria-label="Filter by service" value={service} onChange={(e) => setService(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs"><option value="">All services</option>{services.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
-        <select aria-label="Filter by expiry" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="h-8 rounded-md border border-border bg-card px-2 text-xs"><option value="">Any expiry</option>{Object.entries(EXPIRY_LABEL).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
+        <SelectField aria-label="Filter by service" value={service} onChange={(e) => setService(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs"><option value="">All services</option>{services.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</SelectField>
+        <SelectField aria-label="Filter by expiry" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="h-8 rounded-md border border-border bg-card px-2 text-xs"><option value="">Any expiry</option>{Object.entries(EXPIRY_LABEL).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</SelectField>
         {filtering && <Button variant="ghost" size="sm" onClick={clear}><X />Clear</Button>}
         <Button variant="ghost" size="icon-sm" aria-label="Refresh secrets" disabled={loading} onClick={refresh}><RefreshCw className={loading ? "animate-spin" : ""} /></Button>
         <Button size="sm" disabled={!data} onClick={() => setAdding(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus />Add secret</Button>

@@ -31,6 +31,7 @@ import { groupFor } from "@/lib/groups"
 import { hostMatches } from "@/lib/egress"
 import { SOURCE, SOURCE_ORDER, displayName, hostOf, isIp, portOf, program, sourceOf } from "@/lib/policy-sources"
 import { cn } from "@/lib/utils"
+import { SelectField } from '@/components/ui/select-field'
 
 const REVISION = {
   loaded: { label: "Enforced", dot: "bg-emerald-500", cls: "bg-emerald-50 text-emerald-800 border-emerald-600/20" },
@@ -421,7 +422,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
         <SearchInput ref={search} value={query} onValueChange={setQuery} placeholder={view === "sandboxes" ? "Search sandbox…" : view === "rules" ? "Search rule, destination…" : "Search destination, sandbox, rule…"} aria-label="Search egress" className="mr-auto w-full sm:w-64" />
-        {view === "destinations" && <select aria-label="Filter by source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{sourceOptions.map((o) => <option key={o.id} value={o.id}>{o.id === "all" ? "All sources" : o.label}</option>)}</select>}
+        {view === "destinations" && <SelectField aria-label="Filter by source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-8 max-w-44 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{sourceOptions.map((o) => <option key={o.id} value={o.id}>{o.id === "all" ? "All sources" : o.label}</option>)}</SelectField>}
         {filtering && <Button variant="ghost" size="sm" onClick={clear}><X className="size-3" />Clear</Button>}
         {forSandbox && view === "rules" && <>
           <span className="flex items-center gap-1 rounded-md border border-foreground/20 bg-accent py-0.5 pr-0.5 pl-2 text-[12px]">
@@ -527,9 +528,9 @@ function InlineRequest({ kind, onAdd }) {
   }
   return (
     <form className="flex items-center gap-1.5" onSubmit={async (e) => { e.preventDefault(); if (await onAdd({ method, path })) { setOpen(false); setPath("") } }}>
-      <select value={method} onChange={(e) => setMethod(e.target.value)} aria-label="Method" className="h-7 rounded-md border border-input bg-card px-1 font-mono text-[11px]">
+      <SelectField value={method} onChange={(e) => setMethod(e.target.value)} aria-label="Method" className="h-7 rounded-md border border-input bg-card px-1 font-mono text-[11px]">
         {METHODS.map((m) => <option key={m}>{m}</option>)}
-      </select>
+      </SelectField>
       <Input value={path} onChange={(e) => setPath(e.target.value)} className="h-7 w-48 bg-card font-mono text-[11px]" placeholder="/path/**" aria-label="Path pattern" autoFocus />
       <Button type="submit" size="xs" variant={kind === "deny" ? "destructive" : "outline"} disabled={!path.startsWith("/")}>{kind === "deny" ? "Block" : "Allow"}</Button>
       <Button type="button" size="icon-xs" variant="ghost" onClick={() => setOpen(false)} aria-label="Cancel"><X /></Button>
