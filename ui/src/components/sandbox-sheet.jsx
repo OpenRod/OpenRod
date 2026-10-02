@@ -14,7 +14,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
 import { CopyCommand } from "@/components/copy-command"
-import { ContinueInCloud, ContinueLocally } from "@/components/cloud-transfer"
+import { ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
 import { useApi, useLocation } from "@/lib/location-context"
 import { hasVscodeServer } from "@/lib/sandbox-images"
@@ -323,7 +323,7 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
                     {phase === "ready" && !live.demo && location?.connected !== false && <OpenIn key={name} name={name} editors={editors} cursorAgent={agents.some((agent) => agent.name === "Cursor")} vscodeServer={hasVscodeServer(sandbox)} cloud={!nativeActions} context={location ? { name: location.gateway, workspace: location.workspace, target: location.target } : { ...live.overview?.gateway, target: compute?.target }} />}
-                    {!live.demo && phase === "ready" && location?.connected !== false && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
+                    {!live.demo && phase === "ready" && location?.connected !== false && (cloud && <ContinueLocally key={name} name={name} sandbox={sandbox} />)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}
