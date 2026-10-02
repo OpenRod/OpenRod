@@ -28,7 +28,7 @@ export function StepTrail({ step }) {
 const hostOf = (location) => location?.label?.replace(/^SSH · /, "") ?? location?.gateway
 
 // Line drawings in currentColor so they sit on the dot grid in either theme.
-function LaptopArt({ live }) {
+export function LaptopArt({ live }) {
   const reduce = useReducedMotion()
   const id = React.useId()
   return <svg viewBox="0 0 72 48" className="h-16 w-auto text-foreground" aria-hidden="true">
@@ -50,7 +50,7 @@ function LaptopArt({ live }) {
   </svg>
 }
 
-function ServerArt({ live }) {
+export function ServerArt({ live }) {
   const reduce = useReducedMotion()
   return <svg viewBox="0 0 52 50" className="h-[60px] w-auto text-foreground" aria-hidden="true">
     {[0, 1, 2].map((unit) => <g key={unit}>

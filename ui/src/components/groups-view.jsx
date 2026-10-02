@@ -23,6 +23,7 @@ import { useLive } from "@/lib/live"
 import { groupId, groupPolicies, policiesFor, groupFor } from "@/lib/groups"
 import { styleOf } from "@/lib/sandboxes"
 import { cn } from "@/lib/utils"
+import { SelectField } from '@/components/ui/select-field'
 
 // Groups: sandboxes that share network access. A group is a name; network
 // rules aimed at it reach every sandbox in it, including ones added later.
@@ -249,11 +250,11 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
               </ul>
             ) : <p className="text-[11px] text-muted-foreground">No sandboxes yet. Add one below, or pick {group.name} when you create a sandbox.</p>}
             {others.length > 0 && (
-              <select value="" aria-label={`Add a sandbox to ${group.name}`} disabled={busy} onChange={(e) => e.target.value && move([e.target.value], group.id)}
+              <SelectField value="" aria-label={`Add a sandbox to ${group.name}`} disabled={busy} onChange={(e) => e.target.value && move([e.target.value], group.id)}
                 className="h-8 w-fit rounded-md border border-dashed border-border bg-transparent px-2 text-[11px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <option value="">+ Add sandbox</option>
                 {others.map((s) => <option key={s.name} value={s.name}>{s.name}{namesOf(s.name) ? ` (also in ${namesOf(s.name)})` : ""}</option>)}
-              </select>
+              </SelectField>
             )}
           </section>
 

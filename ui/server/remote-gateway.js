@@ -366,6 +366,17 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
         throw error
       }
     },
+    // Disconnects if needed, then drops the remembered location so it no longer
+    // appears. The host itself stays in the user's SSH configuration.
+    async forget() {
+      if (disconnecting || job?.status === 'working') throw fail('Wait for the current connection change to finish.', 409)
+      await loadHistory()
+      if (active?.status === 'connected' || active?.status === 'connecting') await this.disconnect()
+      active = null
+      lastRemote = null
+      await saveHistory()
+      return { ok: true }
+    },
     async disconnect() {
       idle()
       const current = contextSelection()

@@ -12,6 +12,7 @@ import { useApi, useLocation } from "@/lib/location-context"
 import { useLive } from "@/lib/live"
 import { relativeTime } from "@/lib/format"
 import { styleOf } from "@/lib/sandboxes"
+import { SelectField } from '@/components/ui/select-field'
 
 export const DURATIONS = [
   { minutes: 60, label: "1 hour" },
@@ -246,9 +247,9 @@ function ScopedIngressView() {
           : (
             <div className="mx-auto grid max-w-6xl gap-6 px-4 py-5 sm:px-6 xl:grid-cols-[minmax(0,1fr)_17rem]">
               <div className="min-w-0 space-y-6">
-                <select value={selected} onChange={(e) => setScope(e.target.value)} className="h-8 rounded-md border border-input bg-transparent px-2 font-mono text-xs md:hidden" aria-label="Sandbox">
+                <SelectField value={selected} onChange={(e) => setScope(e.target.value)} className="h-8 rounded-md border border-input bg-transparent px-2 font-mono text-xs md:hidden" aria-label="Sandbox">
                   {sandboxes.map((s) => <option key={s.id}>{s.name}</option>)}
-                </select>
+                </SelectField>
 
                 <BlurFade duration={0.22} offset={3} blur="1px">
                   <div className={`rounded-lg border p-5 ${services.length ? "border-emerald-600/20 bg-emerald-50/40" : "border-border bg-card"}`}>

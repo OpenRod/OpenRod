@@ -1,6 +1,6 @@
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import * as React from "react"
-import { Activity, Package, Box, DoorOpen, Layers3, Inbox, KeyRound, Network, Server, Users } from "lucide-react"
+import { Activity, Package, Box, DoorOpen, Layers3, Inbox, KeyRound, Network, Server, Users, Cable } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
@@ -26,6 +26,7 @@ const ENVIRONMENT = [
   { label: "Templates", icon: Layers3, view: "templates" },
   { label: "MCPs & Skills", icon: Package, view: "setups" },
   { label: "Activity", icon: Activity, view: "activity" },
+  { label: "Connections", icon: Cable, view: "connections" },
 ]
 
 // Network is one page with Egress and Ingress tabs; each tab is its own view,
