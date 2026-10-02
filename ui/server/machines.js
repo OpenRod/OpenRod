@@ -1,7 +1,6 @@
 import http from 'node:http'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { signWorkerRequest } from './worker-auth.js'
-export const MACHINE_DATABASE='openrod-cloud'
 const fail=(message,status=503)=>Object.assign(Error(message),{status})
 export function machineName(uid) {
  if(typeof uid!=='string'||!uid||uid.length>128)throw fail('Invalid account',400)
@@ -76,9 +75,4 @@ export function createMachineManager(store,compute,{ready=workerReady}={}) {
   try{return await task}finally{inflight.delete(identity.uid)}
  }
  return {store,ensure,async status(identity){const r=await ensure(identity);return {name:r.name,status:r.state,error:r.error??null}},async target(identity){const r=await ensure(identity);if(r.state!=='ready'||!r.address)throw fail('Your cloud machine is starting. Please try again shortly.');return r}}
-}
-export async function firebaseMachines(config) {
- const { getApps }=await import('firebase-admin/app'),{getFirestore}=await import('firebase-admin/firestore')
- const { createCompute }=await import('./compute.js')
- return createMachineManager(createMachineStore(getFirestore(getApps()[0],MACHINE_DATABASE),{maxMachines:Number(process.env.OPENROD_MAX_MACHINES??10)}),await createCompute(config))
 }

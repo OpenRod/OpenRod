@@ -7,7 +7,7 @@ import * as React from 'react'
 import { Cloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { buttonVariants } from '@/components/ui/button'
-import { CLOUD_AVAILABLE } from '@/lib/cloud-origin'
+import { CLOUD_AVAILABLE, CLOUD_SOON } from '@/lib/cloud-origin'
 import { LINK_REQUIRED } from '@/lib/api'
 
 async function authRequest(path, body) {
@@ -40,7 +40,6 @@ export function AuthGate({ children }) {
   const [config, setConfig] = React.useState(null)
   const [user, setUser] = React.useState(null)
   const [loading, setLoading] = React.useState(true)
-  const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState('')
   const [linkRequired, setLinkRequired] = React.useState(false)
   React.useEffect(() => {
@@ -66,20 +65,8 @@ export function AuthGate({ children }) {
     window.addEventListener(LINK_REQUIRED, locked)
     return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); window.removeEventListener(LINK_REQUIRED, locked) }
   }, [])
-  async function login() {
-    setBusy(true); setError('')
-    let auth, sdk
-    try {
-      const { initializeApp, getApps } = await import('firebase/app')
-      sdk = await import('firebase/auth')
-      auth = sdk.getAuth(getApps()[0] ?? initializeApp(config.firebase))
-      await sdk.setPersistence(auth, sdk.inMemoryPersistence)
-      const result = await sdk.signInWithPopup(auth, new sdk.GoogleAuthProvider())
-      const session = await authRequest('session', { idToken: await result.user.getIdToken() })
-      setUser(session.user ?? null)
-    } catch (e) { setError(e.message) }
-    finally { if (auth) await sdk.signOut(auth).catch(() => {}); setBusy(false) }
-  }
+  // Google sign-in returns with the cloud release.
+  const login = () => setError(CLOUD_SOON)
   async function logout() {
     try { await authRequest('logout', {}) } catch (e) { setError(e.message) }
     finally { setUser(null) }
@@ -98,7 +85,7 @@ export function AuthGate({ children }) {
       <h1 className="text-2xl font-semibold tracking-tight">{window.location.hash.startsWith('#local-connect=') ? 'Sign in to OpenRod' : 'Your workspace, in the cloud.'}</h1>
       <p className="mt-3 text-sm text-muted-foreground">{window.location.hash.startsWith('#local-connect=') ? 'Sign in with Google. You’ll return to local OpenRod automatically.' : 'Sign in or create your account with Google. Your workspace runs on your own private machine.'}</p>
       {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
-      <button disabled={busy || !config} onClick={login} className="mt-6 w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? 'Signing in…' : 'Continue with Google'}</button>
+      <button disabled={!config} onClick={login} className="mt-6 w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50">Continue with Google</button>
       <p className="mt-5 text-xs text-muted-foreground">Running OpenRod locally? No account required.</p>
     </section>
   </main>

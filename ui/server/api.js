@@ -37,7 +37,7 @@ import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from '.
 // header alone is not proof of a local caller when Vite is bound to a LAN
 // address, so check the socket, the Host and the browser's own origin claims.
 export { isLocalApiRequest } from './security.js'
-import { createSecurity, cloudConfig, assertCloudOperation, requestPath } from './security.js'
+import { createSecurity, releaseConfig, assertCloudOperation, requestPath } from './security.js'
 import { createLaunchToken, createTokenGate, tokenUrl } from './launch-token.js'
 
 // A mutation must also carry a JSON body and a custom header, which a
@@ -331,7 +331,7 @@ export function createHub(store, { connect = gateway, list = listSandboxes, inte
 
 // ---- router -----------------------------------------------------------------
 
-export function openshellApi(security = createSecurity(cloudConfig()), token = createLaunchToken()) {
+export function openshellApi(security = createSecurity(releaseConfig()), token = createLaunchToken()) {
   const configure = (server) => {
     const logger = server.config.logger
     const api = createOpenShellApi({ httpServer: server.httpServer, logger, security, token })
@@ -346,7 +346,7 @@ export function openshellApi(security = createSecurity(cloudConfig()), token = c
 }
 
 // Both Vite and the installed CLI use this exact HTTP/WebSocket lifecycle.
-export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(cloudConfig()), token = createLaunchToken() } = {}) {
+export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(releaseConfig()), token = createLaunchToken() } = {}) {
   const gate = security.config.mode === 'local' ? createTokenGate(token) : null
   const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
   const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative() }) : null

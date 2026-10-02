@@ -1,6 +1,4 @@
-import {createCloudConnections} from './cloud-connections.js'
-import { firebaseMachines, MACHINE_DATABASE } from './machines.js'
-import { createHandoffs, cloudRouter } from './cloud-proxy.js'
+import { cloudRouter } from './cloud-proxy.js'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,12 +7,12 @@ import connect from 'connect'
 import serveStatic from 'serve-static'
 import { createSessionRevocations } from './session-revocations.js'
 import { openshellApi } from './api.js'
-import { cloudConfig, createSecurity, firebaseAuth, requestPath } from './security.js'
+import { CLOUD_UNRELEASED, createSecurity, releaseConfig, requestPath } from './security.js'
 
-export async function createConsoleServer({ config = cloudConfig(), auth, machines, handoffs, connections, dist = path.resolve(import.meta.dirname, '../dist') } = {}) {
+export async function createConsoleServer({ config = releaseConfig(), auth, machines, handoffs, connections, dist = path.resolve(import.meta.dirname, '../dist') } = {}) {
+  if (config.mode === 'cloud' && !(auth && machines && handoffs && connections)) throw Error(CLOUD_UNRELEASED)
   if (!fs.existsSync(path.join(dist, 'index.html'))) throw Error('Build the UI with npm run build before starting the server')
   const revocations = config.mode === 'cloud' ? createSessionRevocations(path.resolve(import.meta.dirname, '../.state/sessions.sqlite')) : undefined
-  auth ??= config.mode === 'cloud' ? await firebaseAuth(config) : undefined
   const security = createSecurity(config, auth, revocations)
   const app = connect()
   const server = http.createServer(app)
@@ -30,13 +28,7 @@ export async function createConsoleServer({ config = cloudConfig(), auth, machin
     next()
   })
   if (config.mode === 'cloud') {
-    if (!handoffs || !connections) {
-      const {getApps} = await import('firebase-admin/app'), {getFirestore} = await import('firebase-admin/firestore')
-      const db=getFirestore(getApps()[0], MACHINE_DATABASE)
-      handoffs ??= createHandoffs(db)
-      connections ??= createCloudConnections(db,auth,{org:config.org,isSessionRevoked:security.isSessionRevoked})
-    }
-    const routes = cloudRouter(security, machines ?? await firebaseMachines(config), handoffs, auth, {connections})
+    const routes = cloudRouter(security, machines, handoffs, auth, {connections})
     app.use(routes.publicRoutes)
     app.use(security.middleware)
     app.use(routes.protectedRoutes)
