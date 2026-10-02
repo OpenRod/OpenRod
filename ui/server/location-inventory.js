@@ -82,6 +82,13 @@ export function createLocationInventory({ connections, listSandboxes, listTempla
   }
   return {
     locations, resolve,
+    // Drops the cached remote reading so a forgotten host leaves nothing behind.
+    async forget() {
+      await load()
+      cached = null
+      await writes.catch(() => {})
+      await fs.rm(file, { force: true })
+    },
     refresh: () => refreshing ??= collect().finally(() => { refreshing = null }),
   }
 }

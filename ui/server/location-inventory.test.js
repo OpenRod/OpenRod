@@ -140,3 +140,13 @@ test('HTTP explicit owner marker rejects arbitrary locations and does not widen 
     cloud: { explicit: 409, staleDefault: 409, selected: 200 },
   })
 })
+
+test('forget removes the cached remote reading from memory and disk', async t => {
+  const { options, inventory } = await fixture(t)
+  await inventory.refresh()
+  const file = path.join(options.directory, 'remote-gateways', 'last-inventory.json')
+  await fs.access(file)
+  await inventory.forget()
+  await assert.rejects(fs.access(file))
+  await inventory.forget()
+})
