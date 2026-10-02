@@ -1,11 +1,11 @@
 {
-  "name": "openshell-console",
+  "name": "openrod",
   "version": "0.1.0",
   "description": "A local console for OpenShell gateways, sandboxes, and activity.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "openshell-console": "./server/cli.js"
+    "openrod": "./server/cli.js"
   },
   "files": [
     "dist/",
