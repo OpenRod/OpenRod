@@ -16,6 +16,7 @@ import { LocationChip, StepTrail } from '@/components/location-step'
 import { useApi, useLocation } from '@/lib/location-context'
 import { LocationBadge } from '@/components/location-badge'
 import { buildTemplateWithSetups } from '@/lib/setup-template-build'
+import { persistentGateway } from '@/lib/sandbox-session'
 import { AGENTS, BASES, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
 
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
@@ -71,6 +72,21 @@ function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted, onC
   React.useEffect(() => {
     try { sessionStorage.setItem(draftKey, JSON.stringify({ recipe, replace, baseline, advanced: [...sections] })) } catch { /* recovery is best effort */ }
   }, [draftKey, recipe, replace, baseline, sections])
+  // On an SSH host, offer the latest snapshot of local MCPs & Skills, as New
+  // sandbox does. Setups this template already uses stay visible.
+  const remote = persistentGateway(location)
+  const [catalog, setCatalog] = React.useState({ loading: remote, value: null, error: '' })
+  const [catalogAttempt, setCatalogAttempt] = React.useState(0)
+  const [savedSetups] = React.useState(() => newRecipe(initial?.recipe).setups)
+  React.useEffect(() => {
+    if (!remote) return
+    let current = true
+    setCatalog({ loading: true, value: null, error: '' })
+    api.syncLocalCatalog()
+      .then((value) => { if (current) setCatalog({ loading: false, value, error: '' }) })
+      .catch((e) => { if (current) setCatalog({ loading: false, value: null, error: e.message }) })
+    return () => { current = false }
+  }, [api, remote, catalogAttempt])
   React.useEffect(() => {
     let current = true
     api.localImages().then((value) => { if (current) setLocal(value) }).catch((e) => { if (current) setLocal({ images: [], error: e.message }) })
@@ -190,7 +206,13 @@ function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted, onC
       </motion.div>
 
       <motion.aside {...reveal(0.06)} className="grid min-w-0 content-start gap-6 border-t border-border bg-muted/25 p-5 @3xl:overflow-y-auto @3xl:border-t-0 @3xl:border-l @3xl:p-6">
-        <SetupPicker autoPrepare preparationContext="template" value={recipe.setups} onChange={(setups) => patch({ setups })} />
+        {catalog.loading && <p role="status" className="text-xs text-muted-foreground">Loading your local MCPs &amp; Skills…</p>}
+        {catalog.value?.available && <p className="text-xs text-muted-foreground">Your local MCPs &amp; Skills are available here. Existing remote templates keep their settings.</p>}
+        {catalog.error && <div className="grid gap-2">
+          <p role="alert" className="text-xs text-destructive">Could not load your local MCPs &amp; Skills: {catalog.error}</p>
+          <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => setCatalogAttempt((n) => n + 1)}>Retry</Button>
+        </div>}
+        {!catalog.loading && <SetupPicker localCatalog={catalog.value} retained={savedSetups} autoPrepare preparationContext="template" value={recipe.setups} onChange={(setups) => patch({ setups })} />}
 
         <div className="grid min-w-0">
           {build && <FormSection title="Runtimes and tools" summary={runtimeSummary} {...section('runtimes')}>
