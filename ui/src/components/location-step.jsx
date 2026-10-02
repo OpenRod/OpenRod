@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { DotPattern } from "@/components/ui/dot-pattern"
 import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
+import { connectLocalGateway } from "@/lib/locations"
 
 export function StepTrail({ step }) {
   return <ol aria-label="Steps" className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -138,7 +139,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   async function chooseRegisteredLocal() {
     setLocalBusy(true); setError(null)
     try {
-      await api.connect({ localGateway: locals[0].name })
+      await connectLocalGateway(api, locals[0].name)
       window.location.reload()
     } catch (reason) { setError(reason.message); setLocalBusy(false) }
   }

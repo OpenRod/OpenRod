@@ -1,6 +1,6 @@
 import { useApi, useCompute } from '@/lib/compute'
 import * as React from "react"
-import { Plus } from "lucide-react"
+import { Loader2, Plus } from "lucide-react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
 import { SandboxCreationNotifications } from "@/components/sandbox-creation-notices"
 import { AppSidebar } from "@/components/app-sidebar"
@@ -18,6 +18,7 @@ import { LiveProvider, useLive } from "@/lib/live"
 import { Button } from "@/components/ui/button"
 import { LocationProvider } from "@/lib/location-context"
 import { LocationBadge } from "@/components/location-badge"
+import { connectLocalGateway } from "@/lib/locations"
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -87,18 +88,41 @@ function viewFromLocation() {
   return TITLES[view] ? view : "sandboxes"
 }
 
-function ConnectionGate({ onSetup, children }) {
+function ConnectionGate({ onSetup, onConnections, children }) {
+  const api = useApi()
   const { connection, overview } = useLive()
+  const gated = Boolean(onSetup) && connection === "setup-required"
+  const [locals, setLocals] = React.useState(null)
+  const [state, setState] = React.useState({ busy: false, error: null })
+  React.useEffect(() => {
+    if (!gated) return
+    let alive = true
+    api.connections().then((next) => { if (alive) setLocals(next.locals) }).catch(() => { if (alive) setLocals([]) })
+    return () => { alive = false }
+  }, [gated, api])
   if (!onSetup) return children
   if (connection === "connecting" && !overview) return <section className="p-8">
     <p role="status" className="text-sm text-muted-foreground">Reading connection settings…</p>
   </section>
-  if (connection !== "setup-required") return children
+  if (!gated) return children
+  async function chooseThisComputer() {
+    setState({ busy: true, error: null })
+    try {
+      await connectLocalGateway(api, locals[0].name)
+      window.location.reload()
+    } catch (reason) { setState({ busy: false, error: reason.message }) }
+  }
+  const action = "bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"
   return (
     <section aria-labelledby="setup-heading" className="mx-auto my-16 grid w-full max-w-md justify-items-center gap-4 px-6 text-center">
-      <h2 id="setup-heading" className="text-xl font-semibold tracking-tight">No sandbox location yet</h2>
-      <p className="text-sm text-muted-foreground">Create a sandbox on this computer or on your own server. You’ll choose where in the first step.</p>
-      <Button onClick={onSetup} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus aria-hidden="true" className="size-4" />New sandbox</Button>
+      <h2 id="setup-heading" className="text-xl font-semibold tracking-tight">Choose where sandboxes run</h2>
+      <p className="text-sm text-muted-foreground">Groups, network rules and secrets need a location. You don’t need a sandbox first.</p>
+      <div className="flex flex-wrap justify-center gap-2">
+        {locals?.length > 0 && <Button onClick={chooseThisComputer} disabled={state.busy} title={`Use the ${locals[0].name} gateway`} className={action}>{state.busy && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}Use this computer</Button>}
+        <Button variant="outline" onClick={onConnections}>Connect a remote machine</Button>
+        <Button variant={locals?.length ? "ghost" : undefined} onClick={onSetup} className={locals?.length ? "" : action}><Plus aria-hidden="true" className="size-4" />New sandbox</Button>
+      </div>
+      {state.error && <p role="alert" className="text-xs text-destructive">{state.error}</p>}
     </section>
   )
 }
@@ -161,7 +185,7 @@ export function App() {
           <SandboxCreationNotifications />
           <PageBoundary key={`${view}:${pageLocation?.target ?? ""}:${pageLocation?.context ?? ""}`} view={view}>
           <ScopedPage location={pageLocation}>
-          <ConnectionGate onSetup={view === "sandboxes" || view === "templates" || view === "connections" ? undefined : connectMachine}>
+          <ConnectionGate onSetup={view === "sandboxes" || view === "templates" || view === "connections" ? undefined : connectMachine} onConnections={() => navigate("connections")}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} allowRemote={!cloud} createRequest={createRequest} onCreateRequestHandled={() => setCreateRequest(0)} />}
           {view === "activity" && <ActivityView />}
           {view === "groups" && <GroupsView onNavigate={navigate} />}
