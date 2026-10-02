@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in OpenRod doesn't work as expected.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: OpenRod version
+      description: Output of `openrod --version`.
+    validations:
+      required: true
+  - type: input
+    id: openshell
+    attributes:
+      label: OpenShell version
+      description: Output of `openshell --version`, and whether the gateway is local or on an SSH host.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Linux, Other]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove tokens, keys and other secrets first.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: This is not a security vulnerability (those go to the Security tab).
+          required: true

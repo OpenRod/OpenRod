@@ -1,5 +1,7 @@
 # OpenRod
 
+[![CI](https://github.com/OpenRod/OpenRod/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenRod/OpenRod/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/openrod)](https://www.npmjs.com/package/openrod) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 OpenRod is an open-source web console for [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell). It runs on your own computer, talks to your OpenShell gateway with the gateway's mTLS credentials held server-side, and gives you one place to create and manage sandboxes and image templates, open agent sessions in the browser or your terminal, edit network and egress policy, bring your MCP servers and Skills into sandboxes, and review sandbox activity. It can also run a second, persistent gateway on a Linux machine you reach over SSH, so long-running agent work continues while your laptop sleeps.
 
 OpenRod is an independent community project. It is **not affiliated with, endorsed by, or supported by NVIDIA**. "NVIDIA" and "OpenShell" are used only to describe compatibility.
