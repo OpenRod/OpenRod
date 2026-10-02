@@ -89,16 +89,11 @@ export function AppSidebar({ view, onNavigate }) {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {SECURITY.map(({ label, icon: Icon, view: target, also = [], disabled }) => (
+              {SECURITY.map(({ label, icon: Icon, view: target, also = [] }) => (
                 <SidebarMenuItem key={target}>
-                  <SidebarMenuButton disabled={disabled} isActive={!disabled && (view === target || also.includes(view))}
-                    onClick={disabled ? undefined : () => onNavigate(also.includes(view) ? view : target)}
-                    className={disabled ? "h-auto items-start text-muted-foreground" : undefined}>
-                    <Icon className={disabled ? "mt-0.5" : undefined} />
-                    <span>
-                      <span className="block">{label}</span>
-                      {disabled && <span className="block text-[10px]">Enterprise Version</span>}
-                    </span>
+                  <SidebarMenuButton isActive={view === target || also.includes(view)} onClick={() => onNavigate(also.includes(view) ? view : target)}>
+                    <Icon />
+                    {label}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

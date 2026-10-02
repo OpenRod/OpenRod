@@ -618,7 +618,7 @@ function RuleRow({ rule, onOp, onDelete, busy, locked, managedBy, onManage }) {
                   </span>
                 ))}
                 <span className="ml-auto flex items-center gap-2">
-                  {managedBy && (onManage ? <button onClick={onManage} className="text-[12px] text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">Managed in {managedBy}</button> : <span className="text-[12px] text-muted-foreground">Managed in {managedBy} · Enterprise Version</span>)}
+                  {managedBy && (onManage ? <button onClick={onManage} className="text-[12px] text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">Managed in {managedBy}</button> : <span className="text-[12px] text-muted-foreground">Managed in {managedBy}</span>)}
                   {!locked && onDelete && <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-destructive" disabled={busy} onClick={onDelete}><Trash2 />Delete</Button>}
                 </span>
               </div>
