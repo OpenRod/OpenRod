@@ -33,27 +33,34 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 - Node.js **22.13+**
 - macOS (Apple Silicon) or Linux
 - OpenShell **0.1.2** with a local gateway
+- Docker, running: [Docker Desktop](https://docs.docker.com/desktop/) on macOS (`brew install --cask docker-desktop`, then open it once) or [Docker Engine](https://docs.docker.com/engine/install/) on Linux. OpenRod builds sandbox images with it, including for Quick setup.
 - OpenSSH and OpenSSL
 
-**1. Install OpenShell** (pinned to the supported release)
+**1. Install and start Docker** (on Linux, install [Docker Engine](https://docs.docker.com/engine/install/) instead)
+
+```bash
+brew install --cask docker-desktop && open -a Docker
+```
+
+**2. Install OpenShell** (pinned to the supported release)
 
 ```bash
 curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | OPENSHELL_VERSION=v0.1.2 sh
 ```
 
-**2. Run OpenRod**
+**3. Run OpenRod**
 
 ```bash
 npx openrod --open
 ```
 
-**3. Open the link it prints**
+**4. Open the link it prints**
 
 ```text
 OpenRod console (open this link): http://127.0.0.1:4600/?token=<secret>
 ```
 
-**4. Connect your gateway.** Go to **Sandboxes → New sandbox → This computer**, and you're in.
+**5. Connect your gateway.** Go to **Sandboxes → New sandbox → This computer**, and you're in.
 
 > [!WARNING]
 > Treat that link like a password. Anyone who has it while OpenRod is running can use your gateway credentials.
@@ -121,7 +128,8 @@ Run a persistent second gateway in Docker on a Linux machine you reach over SSH.
 | --- | --- |
 | No SSH hosts | Add a concrete `Host my-host` entry to `~/.ssh/config`, then refresh |
 | Host key or auth rejected | Run `ssh my-host` yourself and verify the host |
-| Docker missing or inaccessible | Install Docker Engine and grant the SSH user socket access |
+| `Docker isn’t running` or `Local Docker is required to build images` | Install or start Docker on this computer (Docker Desktop on macOS, Docker Engine on Linux), then click **Try again** |
+| Docker missing or inaccessible on the SSH host | Install Docker Engine and grant the SSH user socket access |
 | Local gateway missing | Start and register it with the OpenShell CLI (HTTPS/mTLS only) |
 | Sandbox not Ready | Inspect its conditions in the console |
 

@@ -507,7 +507,7 @@ test('local Docker discovery is independent of selected SSH compute and unavaila
     } }))
     assert.equal(engine.endpoint, 'unix:///local.sock')
     assert.equal(engine.architecture, 'arm64')
-    await assert.rejects(localEngine({ execute: async () => { throw new Error('Docker daemon is stopped') } }), /Local Docker is required.*Install or start Docker/)
+    await assert.rejects(localEngine({ execute: async () => { throw new Error('Docker daemon is stopped') } }), { message: 'Local Docker is required to build images. Docker daemon is stopped' })
   } finally {
     if (previousHost === undefined) delete process.env.DOCKER_HOST
     else process.env.DOCKER_HOST = previousHost
@@ -518,7 +518,36 @@ test('Docker reports server diagnostics before rejecting a malformed engine resp
   await assert.rejects(localEngine({ execute: async args => args[0] === 'context'
     ? JSON.stringify([{ Endpoints: { docker: { Host: 'unix:///local.sock' } } }])
     : JSON.stringify({ ServerErrors: ['Cannot connect to the Docker daemon.'] }),
-  }), /Cannot connect to the Docker daemon/)
+  }), { status: 503, message: 'Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.' })
+})
+
+test('a stopped or missing Docker CLI yields one actionable sentence instead of the JSON dump', async () => {
+  const {runDocker} = await import('./image-templates.js')
+  const {EventEmitter} = await import('node:events'), {PassThrough} = await import('node:stream')
+  const previousHost = process.env.DOCKER_HOST
+  delete process.env.DOCKER_HOST
+  // Real `docker info --format '{{json .}}'` with no daemon: exit 1, a ~1.4k JSON dump on stdout, the reason on stderr.
+  const dump = JSON.stringify({ ID: '', Containers: 0, Driver: '', ServerErrors: null, Warnings: null, ClientInfo: { Debug: false, Plugins: Array(20).fill({ SchemaVersion: '0.1.0', Vendor: 'Docker Inc.' }) } })
+  const cli = (stderr) => (args, options) => runDocker(args, { ...options, spawnProcess: () => {
+    const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => {}
+    setImmediate(() => {
+      if (stderr === 'ENOENT') return child.emit('error', Object.assign(new Error('spawn docker ENOENT'), { code: 'ENOENT' }))
+      if (args[0] === 'context') { child.stdout.end(JSON.stringify([{ Endpoints: { docker: { Host: 'unix:///var/run/docker.sock' } } }])); child.stderr.end(); return setImmediate(() => child.emit('close', 0)) }
+      child.stdout.end(dump); child.stderr.end(stderr); setImmediate(() => child.emit('close', 1))
+    })
+    return child
+  } })
+  try {
+    const stopped = 'failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory\n'
+    await assert.rejects(cli(stopped)(['info', '--format', '{{json .}}']), { message: stopped.trim() })
+    for (const reason of [stopped, 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n', 'dial unix /var/run/docker.sock: connect: connection refused\n'])
+      await assert.rejects(localEngine({ execute: cli(reason) }), { status: 503, message: 'Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.' })
+    await assert.rejects(localEngine({ execute: cli('ENOENT') }), { message: 'Docker isn’t installed. Install Docker Desktop (macOS: brew install --cask docker-desktop) or Docker Engine (Linux), start it, then try again.' })
+    await assert.rejects(cli('')(['info']), { message: dump })
+  } finally {
+    if (previousHost === undefined) delete process.env.DOCKER_HOST
+    else process.env.DOCKER_HOST = previousHost
+  }
 })
 
 test('a Docker context pointing at the SSH deployment engine cannot be used to build remotely', async () => {

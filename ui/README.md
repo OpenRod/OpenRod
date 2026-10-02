@@ -7,6 +7,7 @@ A web console for [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell). Creat
 - Node.js 22.13 or newer
 - macOS (Apple Silicon) or Linux
 - [OpenShell](https://github.com/NVIDIA/OpenShell) 0.1.2 with a local gateway
+- Docker, running: [Docker Desktop](https://docs.docker.com/desktop/) on macOS (`brew install --cask docker-desktop`, then open it once) or [Docker Engine](https://docs.docker.com/engine/install/) on Linux. OpenRod builds sandbox images with it, including for Quick setup.
 - OpenSSH and OpenSSL
 
 Install OpenShell, pinned to the supported release:
