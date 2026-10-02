@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenRod customer console
+Description=OpenRod console
 After=network-online.target docker.service openrod-metadata-guard.service
 Wants=network-online.target
 Requires=docker.service openrod-metadata-guard.service
