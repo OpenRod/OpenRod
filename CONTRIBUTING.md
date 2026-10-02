@@ -14,7 +14,9 @@ Every commit must carry a [Developer Certificate of Origin](https://developercer
 Signed-off-by: Your Name <you@example.com>
 ```
 
-Use your real name and an email you can be reached at. To sign off commits you already made, run `git rebase --signoff main` (or `git commit --amend -s` for the last commit) and force-push your branch.
+Use your real name and your GitHub noreply email (`<id>+<login>@users.noreply.github.com`). To sign off commits you already made, run `git rebase --signoff main` (or `git commit --amend -s` for the last commit) and force-push your branch.
+
+The `identity` check fails a pull request when a commit's author, committer or `Co-authored-by` email is not a GitHub noreply address, or when a commit message, file name or added line contains a term from a blocklist kept outside the repository. Set `git config user.email` to your noreply address and enable **Block command line pushes that expose my email** in your GitHub email settings, then amend or rebase the flagged commits.
 
 Do not include credentials, real policy data, runtime databases, or unlicensed assets in pull requests. Report security issues privately as described in [SECURITY.md](SECURITY.md), not in issues or pull requests.
 
@@ -26,7 +28,7 @@ npm ci
 npm run dev
 ```
 
-Node.js 22.13+ is required for the SQLite-backed activity archive. See [Prerequisites](README.md#prerequisites): OpenShell CLI/gateway 0.1.2, OpenSSH and OpenSSL locally, and a trusted native Linux/rootful Docker host for remote compute. Use disposable gateway state and an approved host for mutation checks.
+Node.js 22.13+ is required for the SQLite-backed activity archive. See the [Quick start](README.md#-quick-start) requirements: OpenShell CLI/gateway 0.1.2, OpenSSH and OpenSSL locally, and a trusted native Linux/rootful Docker host for remote compute. Use disposable gateway state and an approved host for mutation checks.
 
 First-run development is intentionally unconfigured. A CLI active-gateway suggestion alone must not activate collection. **New sandbox → Where should it run?** selects the local gateway (**This computer**) or probes an SSH alias (**Remote machine**); missing runtime images are downloaded on the host or uploaded as a package. Never reconfigure the original local gateway, install Docker with automatic privilege escalation, or accept TLS keys through browser forms.
 
@@ -51,7 +53,7 @@ For onboarding or connection changes, verify against a real, administrator-appro
 6. Switch contexts while a session is live: it must never retarget another same-named sandbox. Disconnecting the viewer detaches remote tmux sessions; local interactive exec keeps its previous lifecycle. Verify SSH loss closes only the local viewer transport and a tmux worker continues producing remote output, failed connections do not report Ready, and stopped sandboxes cannot launch sessions.
 7. In the disposable context, verify disclosed persistent behavior: collection stops for the old context on a switch, configured deliveries can keep their original target, configured service deadlines retain their original context, and organization reconciliation stays off unless `OPENSHELL_CONSOLE_SWEEP=1`, then remains bound to the startup context. Never configure a real recipient or remote policy merely to exercise setup.
 
-Do not remove or modify an operator's real config to simulate first run. The [local-state reference](ui/README.md#console-data-directory) lists files that must remain separate from a contributor's fixtures. Keep browser screenshots and failure reports free of TLS keys, provider credentials, and real activity evidence.
+Do not remove or modify an operator's real config to simulate first run. The [local-state reference](docs/architecture.md#console-data-directory) lists files that must remain separate from a contributor's fixtures. Keep browser screenshots and failure reports free of TLS keys, provider credentials, and real activity evidence.
 
 ## Packaging and release
 
@@ -61,4 +63,4 @@ Do not remove or modify an operator's real config to simulate first run. The [lo
 4. Inspect the tarball. It must include the built frontend, production server, SDK, required runtime dependencies, licenses, and third-party notices. It must not contain credentials, checkout policies, runtime databases, tests, or the Vite development server.
 5. Install the tarball into an isolated prefix and run its `openrod` executable. Verify unconfigured startup and host discovery before activating a gateway. Then check static assets, API, SSE, browser terminal, native SSH, stale-context refusal, restart/persistence disclosure, and graceful SIGTERM.
 6. Review dependency/font/asset licensing. `ui/THIRD_PARTY_NOTICES.md` contains installed dependency license texts; refresh it when bundled libraries or fonts change. Preserve the SDK archive's upstream copyright notice in `ui/vendor/OPENSHELL-LICENSE`.
-7. A maintainer creates the release tag and publishes the verified package to npm. CI uploads package artifacts but never publishes automatically.
+7. A maintainer pushes a `vX.Y.Z` tag matching the `ui/package.json` version. [`release.yml`](.github/workflows/release.yml) runs the tests, publishes to npm with provenance through npm trusted publishing (gated by the `npm` GitHub environment), and creates the GitHub release.

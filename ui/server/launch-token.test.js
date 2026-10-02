@@ -16,8 +16,8 @@ async function serve(t, token = createLaunchToken()) {
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)) })
   const port = server.address().port
-  const request = async (target, headers = {}) => {
-    const req = http.request({ host: '127.0.0.1', port, path: target, headers })
+  const request = async (target, headers = {}, method = 'GET') => {
+    const req = http.request({ host: '127.0.0.1', port, path: target, headers, method })
     const response = once(req, 'response'); req.end()
     const [res] = await response
     let body = ''; for await (const chunk of res) body += chunk
@@ -97,6 +97,31 @@ test('WebSocket upgrades to the API require the launch cookie', async t => {
   assert.match(await upgrade('/vite-hmr'), /^HTTP\/1\.1 101 /)
 })
 
+test('targets the URL parser would rewrite are rejected before any handler', async t => {
+  const { token, port, request, upgrade } = await serve(t)
+  const cookie = tokenCookie(port, token)
+  const rewritten = ['/api/os/../../abcdef/connections', '/api/os/%2e%2e/%2e%2e/abcdef/connections', '/api/os/%2E%2E/%2E%2E/abcdef/connections', '/api/os/./connections', '/api/os/%2e/connections', '/api/os/connections/..', '/x/../api/os/connections', '/assets/../index.html']
+  for (const target of rewritten) {
+    for (const headers of [{}, { cookie }]) {
+      const response = await request(target, headers)
+      assert.equal(response.status, 400, target)
+      assert.equal(JSON.parse(response.body).error, 'Invalid request target')
+      assert.equal((await request(`${target.replace('/connections', '/connections/disconnect')}?x=1`, headers, 'POST')).status, 400, target)
+    }
+  }
+  for (const target of ['/api/os/../../abcdef/terminal?ticket=x', '/api/os/%2e%2e/%2e%2e/abcdef/terminal?ticket=x', '/api/os/./terminal?ticket=x', '/vite-hmr/..']) {
+    assert.match(await upgrade(target), /^HTTP\/1\.1 400 /, target)
+    assert.match(await upgrade(target, cookie), /^HTTP\/1\.1 400 /, target)
+  }
+  assert.equal((await request('/api/os/connections')).status, 401)
+  assert.equal((await request('/api/os/connections/disconnect', {}, 'POST')).status, 401)
+  assert.equal((await request('/api/os/connections', { cookie })).status, 200)
+  assert.equal((await request('/api/os/connections/disconnect?x=a/../b', { cookie }, 'POST')).status, 200)
+  assert.equal((await request('/assets/index-a1b2c3d4.js?v=1')).status, 200)
+  assert.equal((await request('/.well-known/x')).status, 200)
+  assert.equal((await request(`/sandboxes/a%20b?token=${token}`)).headers.location, '/sandboxes/a%20b')
+})
+
 test('the local console API enforces the launch cookie on HTTP and terminal upgrades', { timeout: 15000 }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-launch-token-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
@@ -129,14 +154,54 @@ test('the local console API enforces the launch cookie on HTTP and terminal upgr
   const rebound = http.request({ host: '127.0.0.1', port, path: '/api/os/context', headers: { cookie, host: 'evil.example' } }); rebound.end()
   const [rebinding] = await once(rebound, 'response'); rebinding.resume()
   assert.equal(rebinding.statusCode, 403)
+  // fetch() would normalize these targets before sending them.
+  const raw = (target, headers = {}, method = 'GET') => new Promise((resolve, reject) => http.request({ host: '127.0.0.1', port, path: target, headers, method }, res => { res.resume(); resolve(res.statusCode) }).on('error', reject).end(method === 'POST' ? '{}' : undefined))
+  const mutation = { 'content-type': 'application/json', 'x-openshell-console': '1', origin }
+  for (const target of ['/api/os/../../abcdef/connections', '/api/os/%2e%2e/%2e%2e/abcdef/connections', '/api/os/./connections']) {
+    assert.equal(await raw(target), 400, target)
+    assert.equal(await raw(`${target}/disconnect`, mutation, 'POST'), 400, target)
+  }
+  assert.equal(await raw('/api/os/connections/disconnect', mutation, 'POST'), 401)
+  assert.equal(await raw('/api/os/connections'), 401)
+  assert.equal(await raw('/api/os/connections', { cookie }), 200)
   const redirect = await fetch(`${origin}/?token=${token}`, { redirect: 'manual' })
   assert.equal(redirect.status, 302)
   assert.equal(redirect.headers.get('location'), '/')
   assert.match(redirect.headers.get('set-cookie'), new RegExp(`^openrod_token_${port}=`))
-  const reply = await new Promise((resolve, reject) => {
-    const socket = net.connect(port, '127.0.0.1', () => socket.write(`GET /api/os/terminal?ticket=x HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: ${origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${Buffer.from('a'.repeat(16)).toString('base64')}\r\nSec-WebSocket-Version: 13\r\n\r\n`))
+  const reply = target => new Promise((resolve, reject) => {
+    const socket = net.connect(port, '127.0.0.1', () => socket.write(`GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: ${origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${Buffer.from('a'.repeat(16)).toString('base64')}\r\nSec-WebSocket-Version: 13\r\n\r\n`))
     let data = ''
     socket.on('data', chunk => { data += chunk }).on('end', () => resolve(data)).on('error', reject)
   })
-  assert.match(reply, /^HTTP\/1\.1 401 /)
+  assert.match(await reply('/api/os/terminal?ticket=x'), /^HTTP\/1\.1 401 /)
+  for (const target of ['/api/os/../../abcdef/terminal?ticket=x', '/api/os/%2e%2e/os/terminal?ticket=x']) assert.match(await reply(target), /^HTTP\/1\.1 400 /, target)
+})
+
+test('the API router matches /api/os on the normalized path, as the gates do', { timeout: 15000 }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-route-path-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const env = { ...process.env, XDG_CONFIG_HOME: path.join(root, 'config'), OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '' }
+  // A pass-through boundary isolates the router from the local-only token gate.
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { createServer } from 'node:http'
+    import { createOpenShellApi } from ${JSON.stringify(new URL('./api.js', import.meta.url).href)}
+    const api = createOpenShellApi({ security: { config: { mode: 'worker' }, isAllowed: () => true, middleware: (req, res, next) => next() } })
+    const server = createServer((request, response) => api.middleware(request, response, () => response.writeHead(404).end('next')))
+    server.listen(0, '127.0.0.1', () => console.log('READY ' + server.address().port))
+  `], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const stopped = new Promise(resolve => child.once('close', resolve))
+  t.after(() => { child.kill('SIGKILL'); return stopped })
+  let stderr = ''
+  child.stderr.on('data', chunk => { stderr += chunk })
+  const port = await new Promise((resolve, reject) => {
+    let output = ''
+    child.once('exit', code => reject(new Error(`Console exited ${code}: ${stderr}`)))
+    child.stdout.on('data', chunk => { output += chunk; const match = /READY (\d+)/.exec(output); if (match) resolve(Number(match[1])) })
+  })
+  for (const target of ['/api/os/../../abcdef/connections', '/api/os/%2e%2e/%2e%2e/abcdef/connections']) {
+    const req = http.request({ host: '127.0.0.1', port, path: target }); req.end()
+    const [res] = await once(req, 'response')
+    let body = ''; for await (const chunk of res) body += chunk
+    assert.deepEqual([res.statusCode, body], [404, 'next'], target)
+  }
 })

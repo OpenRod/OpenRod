@@ -6,6 +6,41 @@ OpenRod is licensed under Apache-2.0. It ships third-party software that keeps i
 
 `@nvidia/openshell-sdk` is redistributed unchanged from `vendor/nvidia-openshell-sdk-0.0.0.tgz` (built from NVIDIA OpenShell v0.1.2) under Apache-2.0. Upstream: https://github.com/NVIDIA/OpenShell. Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. The complete upstream license and notice are in `vendor/OPENSHELL-LICENSE`.
 
+## Copied UI components
+
+These files in `src/components/ui` are copied from Magic UI: animated-beam, animated-shiny-text, blur-fade, border-beam, dot-pattern, flickering-grid, interactive-hover-button, magic-card, number-ticker, shimmer-button, shine-border. The ones in use are compiled into dist/.
+
+### Magic UI
+
+License: MIT  
+Source: https://github.com/magicuidesign/magicui
+
+LICENSE.md:
+
+```text
+MIT License
+
+Copyright (c) Magic UI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Bundled into the web interface (dist/)
 
 32 packages compiled into the browser bundle, including fonts. Packages that are also runtime dependencies are listed in the next section.

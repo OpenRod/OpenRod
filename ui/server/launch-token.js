@@ -22,10 +22,13 @@ export function createTokenGate(token) {
     return (req.headers.cookie ?? '').split(';').map(part => part.trim()).filter(part => part.startsWith(prefix)).some(part => valid(part.slice(prefix.length)))
   }
   const denied = res => { res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ error: 'Open the link printed by `openrod` in your terminal.', code: TOKEN_REQUIRED })) }
+  // Handlers downstream also read the raw target, so a path the URL parser rewrites (dot segments, %2e) must never reach them.
+  const rewritten = (req, pathname) => req.url.split('?', 1)[0] !== pathname
   // Returns true when it answered the request itself.
   const http = (req, res) => {
     let pathname
     try { pathname = requestPath(req) } catch { return false }
+    if (rewritten(req, pathname)) { req.resume(); res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ error: 'Invalid request target' })); return true }
     if (isApi(pathname)) { if (allowed(req)) return false; req.resume(); denied(res); return true }
     const url = new URL(req.url, 'http://local')
     if (!url.searchParams.has('token') || !['GET', 'HEAD'].includes(req.method)) return false
@@ -42,9 +45,10 @@ export function createTokenGate(token) {
   const upgrade = (req, socket) => {
     let pathname
     try { pathname = requestPath(req) } catch { return false }
-    if (!isApi(pathname) || allowed(req)) return false
+    const invalid = rewritten(req, pathname)
+    if (!invalid && (!isApi(pathname) || allowed(req))) return false
     socket.on('error', () => {})
-    socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+    socket.end(`HTTP/1.1 ${invalid ? '400 Bad Request' : '401 Unauthorized'}\r\nConnection: close\r\n\r\n`)
     return true
   }
   return { allowed, http, upgrade }

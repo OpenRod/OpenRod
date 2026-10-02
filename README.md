@@ -96,7 +96,7 @@ Every start generates a new random secret. The page stores it in an HttpOnly coo
 | --- | --- |
 | **Browser** | xterm.js session in a new tab |
 | **Terminal** | macOS Terminal or Linux `x-terminal-emulator` over SSH, a new session, or attach |
-| **VS Code** | Requires **VS Code Server** to be chosen at creation |
+| **VS Code** | Shown on every sandbox; the first open allows VS Code's server download for that sandbox |
 | **Cursor** | Shown when Cursor is one of the sandbox's agents |
 
 Details: [docs/opening-sandboxes.md](docs/opening-sandboxes.md)
@@ -150,7 +150,7 @@ Full threat model and vulnerability reporting: [SECURITY.md](SECURITY.md)
 
 ---
 
-## 🧑‍💻 Development
+## 🧰 Development
 
 ```bash
 cd ui
@@ -160,7 +160,7 @@ npm test        # server and library tests
 npm run build   # production frontend
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) · [ui/README.md](ui/README.md) · [ui/SETUPS.md](ui/SETUPS.md)
+See [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/architecture.md](docs/architecture.md) · [ui/SETUPS.md](ui/SETUPS.md)
 
 ---
 
