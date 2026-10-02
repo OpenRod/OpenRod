@@ -6,8 +6,9 @@ import { setupTargetsFor } from '../../shared/setup-targets.js'
 import { SetupPicker } from "@/components/setups-view"
 import * as React from "react"
 import { toast } from "sonner"
-import { Check, ChevronDown, ChevronRight, Laptop, Server, Terminal } from "lucide-react"
-import { LocationStep, StepTrail } from "@/components/location-step"
+import { Check, ChevronDown, Terminal } from "lucide-react"
+import { LocationChip, LocationStep, StepTrail } from "@/components/location-step"
+import { FormSection } from "@/components/form-section"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -38,19 +39,6 @@ const FILE_STARTS = [
   { id: "folder", label: "Local folder" },
   { id: "repo", label: "Git repository" },
 ]
-
-function SetupSection({ title, summary, children, ...props }) {
-  return (
-    <details className="group/setup min-w-0 border-t border-border" {...props}>
-      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-sm py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/setup:rotate-90" aria-hidden="true" />
-        <span className="shrink-0 text-xs font-medium">{title}</span>
-        <span className="ml-auto truncate text-right text-[11px] text-muted-foreground" title={summary}>{summary}</span>
-      </summary>
-      <div className="grid min-w-0 gap-4 pb-4 pt-1">{children}</div>
-    </details>
-  )
-}
 
 // Where the server will clone to; mirrors its naming rule.
 function repoDest(url) {
@@ -339,11 +327,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
             {onChangeLocation && <div className="pr-8"><StepTrail step={2} /></div>}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pr-8">
               <DialogTitle>New sandbox</DialogTitle>
-              {onChangeLocation ? <span className="flex items-center gap-1.5 rounded-full border border-border bg-muted/30 py-0.5 pr-1 pl-2.5 text-[11px] text-muted-foreground">
-                {location?.remote ? <Server aria-hidden="true" className="size-3" /> : <Laptop aria-hidden="true" className="size-3" />}
-                <span className="max-w-40 truncate text-foreground">{location?.remote ? locationLabel(location).replace(/^SSH · /, "") : "This computer"}</span>
-                <Button type="button" variant="ghost" size="sm" className="h-5 rounded-full px-2 text-[11px]" onClick={onChangeLocation}>Change</Button>
-              </span> : !initialImageTemplate && locations.length > 0 ? null : <LocationBadge location={location} />}
+              {onChangeLocation ? <LocationChip location={location} onChange={onChangeLocation} /> : !initialImageTemplate && locations.length > 0 ? null : <LocationBadge location={location} />}
               <TabsList className="ml-auto w-fit" aria-label="Sandbox creation method">
                 <TabsTrigger value="quick" className="px-3 text-xs">Quick setup</TabsTrigger>
                 <TabsTrigger value="template" className="px-3 text-xs">From template</TabsTrigger>
@@ -489,7 +473,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
             </div>}
 
             <div className="grid min-w-0">
-              <SetupSection title="Add project files" summary={filesSummary}>
+              <FormSection title="Add project files" summary={filesSummary}>
                 <div className="grid min-w-0 gap-1.5">
                   <span className="text-xs font-medium">Start with</span>
                   <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
@@ -519,8 +503,8 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                   )}
                 </div>
 
-              </SetupSection>
-                  {agentAccess.profiles.length > 0 && <SetupSection title={agentAccess.profiles.some((profile) => profile.rule.startsWith("tool-")) ? "Agent and tool connections" : "Agent connections"} summary={`${new Set(agentAccess.profiles.flatMap((profile) => profile.endpoints.map((endpoint) => `${endpoint.host}:${endpoint.ports.join(",")}`))).size} destinations`}>
+              </FormSection>
+                  {agentAccess.profiles.length > 0 && <FormSection title={agentAccess.profiles.some((profile) => profile.rule.startsWith("tool-")) ? "Agent and tool connections" : "Agent connections"} summary={`${new Set(agentAccess.profiles.flatMap((profile) => profile.endpoints.map((endpoint) => `${endpoint.host}:${endpoint.ports.join(",")}`))).size} destinations`}>
                     <div className="max-h-52 divide-y overflow-y-auto">
                       {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
                         <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · {profile.rule}</span></summary>
@@ -535,7 +519,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                         <ul className="mt-1 space-y-1 break-all font-mono text-[10px] text-muted-foreground">{profile.binaries.map((binary) => <li key={binary}>{binary}</li>)}</ul>
                       </details>)}
                     </div>
-                  </SetupSection>}
+                  </FormSection>}
 
             </div>
             </motion.aside>
