@@ -64,7 +64,7 @@ echo "downloaders:$d"`
 export async function ensureVscodeAccess(name, { policy = policyRoute, exec } = {}) {
   // Best effort: if the sandbox can't be asked, let the editor try anyway.
   const found = await Promise.resolve(exec?.(prepareScript)).then((out) => /downloaders:(.*)/.exec(String(out ?? ''))?.[1], () => undefined)
-  if (found !== undefined && !found.trim()) throw fail(`${name} has neither curl nor wget, which VS Code needs to install its server in the sandbox. Use an image that includes curl, for example by building the template with the VS Code Server choice.`, 409)
+  if (found !== undefined && !found.trim()) throw fail(`${name} has neither curl nor wget, which VS Code needs to install its server in the sandbox. Use an image that includes curl or wget, such as any template built in OpenRod.`, 409)
   const view = await policy('GET', ['policy', name])
   if (!(view?.effective?.rules ?? []).some((rule) => rule.name === VSCODE_RULE)) {
     const [rule] = agentAccessRules({ source: 'build', agents: [], runtimes: ['vscode'] })

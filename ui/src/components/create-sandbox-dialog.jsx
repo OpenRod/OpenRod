@@ -408,7 +408,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                 <legend className="mb-1.5 text-xs font-medium">Tools</legend>
                 <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
                   {QUICK_TOOLS.map((tool) => (
-                    <label key={tool.id} className="relative min-w-0" title="Lets Open in VS Code download its server from Microsoft's VS Code hosts.">
+                    <label key={tool.id} className="relative min-w-0" title="Allows VS Code's server download from the start. Open in VS Code works without it and allows the download on first open.">
                       <input type="checkbox" checked={toolIds.includes(tool.id)} onChange={() => setToolIds(toolIds.includes(tool.id) ? toolIds.filter((id) => id !== tool.id) : [...toolIds, tool.id])} className="peer sr-only" />
                       <span className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
                         <img src={tool.logo} alt="" className="size-4 shrink-0 object-contain dark:invert" />

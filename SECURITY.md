@@ -32,7 +32,7 @@ On first upgrade from the laptop-hosted topology, the console makes a consistent
 
 The remote creation dialog copies local network templates, Groups and Setup snapshots into new, versioned identities. It does not transfer local sandbox memberships, sandbox-only grants or original-gateway secret values. Rules targeting everyone are scoped to imported groups. Existing remote policies are not rewritten. Imported MCPs needing credentials remain inactive until destination credentials are connected. Prepared artifacts retain digest checks and are rebuilt when CPU architecture differs.
 
-A fresh console with no saved selection or gateway pin does not collect automatically. Saved/environment selections can start background workers on restart, but managed SSH transport requires explicit reconnection. Listing another host does not pause an active context. See the [persistent-effects summary](README.md#what-is-saved-and-what-runs).
+A fresh console with no saved selection or gateway pin does not collect automatically. Saved/environment selections can start background workers on restart, but managed SSH transport requires explicit reconnection. Listing another host does not pause an active context. See the [persistent-effects summary](docs/data-and-state.md).
 
 ## Credentials and connection context
 

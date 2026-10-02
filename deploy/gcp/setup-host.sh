@@ -2,7 +2,7 @@
 # Run on a NEW dedicated Ubuntu 24.04 VM after reviewing the Terraform plan.
 # This initializes only the blank disk named openrod-state and installs host packages.
 set -euo pipefail
-[[ $EUID -eq 0 ]] || { echo 'Run with sudo on the customer VM' >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo 'Run with sudo on the control-plane VM' >&2; exit 1; }
 [[ $(uname -m) == x86_64 ]] || { echo 'This setup expects amd64' >&2; exit 1; }
 [[ ${1:-} =~ ^v24\.[0-9]+\.[0-9]+$ ]] || { echo 'Pass a pinned Node 24 release, e.g. v24.x.y' >&2; exit 1; }
 node_release=$1
@@ -30,7 +30,7 @@ printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download
 apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
 usermod -aG docker openrod
-# Put Docker image/build/sandbox state on the snapshotted customer disk.
+# Put Docker image/build/sandbox state on the snapshotted state disk.
 mkdir -p /etc/docker
 # Accept our previous configuration and upgrade its DNS idempotently.
 # GCE's resolver shares the metadata IP, which Docker workloads must not reach.
