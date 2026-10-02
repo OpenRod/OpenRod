@@ -4,10 +4,18 @@ import {randomBytes,randomUUID,createHash} from 'node:crypto'
 import {isLocalApiRequest,requestPath} from './security.js'
 import {validateLocalConnection} from './cloud-connections.js'
 import {readJson,responseJson,remoteFail,safeWorkspaceTarget} from './remote-http.js'
-const CLOUD='https://cloud.example.com',PREFIX='/api/cloud/local-connect'
-export function createLocalCloud({origin=CLOUD,allowTestHttp=false,native}={}) {
+import {cloudOrigin,CLOUD_SOON} from './cloud-origin.js'
+const PREFIX='/api/cloud/local-connect'
+const cloudPath=req=>{try{const path=requestPath(req);return path.startsWith('/api/local-cloud/')||path.startsWith('/api/remote/')}catch{return false}}
+// Without a configured cloud origin every sign-in, relay and socket route refuses before any cloud request.
+function unavailableLocalCloud(){return {close(){},setNative(){},
+ middleware(req,res,next){if(!cloudPath(req))return next();req.resume();responseJson(res,409,{error:CLOUD_SOON})},
+ upgrade(req,socket){if(!cloudPath(req))return false;socket.on('error',()=>{});socket.end(`HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n${JSON.stringify({error:CLOUD_SOON})}`);return true},
+}}
+export function createLocalCloud({origin=cloudOrigin(),allowTestHttp=false,native}={}) {
+ if(!origin)return unavailableLocalCloud()
  const url=new URL(origin)
- if(url.origin!==origin||url.username||url.password||(!allowTestHttp&&origin!==CLOUD))throw Error('Invalid OpenRod Cloud origin')
+ if(url.origin!==origin||url.username||url.password||(!allowTestHttp&&url.protocol!=='https:'))throw Error('Invalid cloud origin')
  const transport=url.protocol==='https:'?https:http
  let pending,grant,expiry,generation=0
  const active=new Set(),exchanging=new Map()
@@ -66,7 +74,7 @@ export function createLocalCloud({origin=CLOUD,allowTestHttp=false,native}={}) {
      const bound=validateLocalConnection({origin:body.origin,nonce,challenge})
      if(body.origin!==`http://${req.headers.host}`)throw remoteFail('Local origin does not match this OpenRod instance',403)
      pending={...bound,verifier,generation:++generation,expires:Date.now()+300000}
-     return responseJson(res,200,{nonce,challenge,url:`${CLOUD}/?handoff=1#local-connect=${Buffer.from(JSON.stringify(bound)).toString('base64url')}`})
+     return responseJson(res,200,{nonce,challenge,url:`${origin}/?handoff=1#local-connect=${Buffer.from(JSON.stringify(bound)).toString('base64url')}`})
     }
     if(path==='/api/local-cloud/finish'&&req.method==='POST'){
      const body=await readJson(req),current=pending

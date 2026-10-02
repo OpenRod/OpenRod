@@ -28,7 +28,7 @@ export function createMachineStore(db,{maxMachines=10,now=()=>Date.now()}={}) {
   async update(uid,values){return db.runTransaction(async tx=>{const r=ref(uid);await tx.get(r);tx.update(r,values)})},
  }
 }
-export function workerReady(record,address,{port=4600,host=process.env.OPENROD_PUBLIC_ORIGIN?new URL(process.env.OPENROD_PUBLIC_ORIGIN).host:'cloud.example.com',timeoutMs=5000,requestProbe=http.request}={}) {
+export function workerReady(record,address,{port=4600,host=new URL(process.env.OPENROD_PUBLIC_ORIGIN||process.env.OPENROD_CLOUD_ORIGIN||'https://localhost').host,timeoutMs=5000,requestProbe=http.request}={}) {
  const request={method:'GET',url:'/api/os/overview'}
  return new Promise(resolve=>{
   let settled=false,deadline

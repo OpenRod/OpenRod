@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as connect from './local-cloud.js'
 import * as compute from './compute-target.js'
+const CLOUD = 'https://cloud.example.test'
 
 test('connection parser accepts only exact loopback origins and valid nonce/challenge', () => {
   const value = { origin: 'http://localhost:4600', nonce: '12345678-1234-1234-1234-123456789abc', challenge: 'b'.repeat(64) }
@@ -13,9 +14,10 @@ test('connection parser accepts only exact loopback origins and valid nonce/chal
   assert.equal(connect.localConnectFromHash('#local-connect=bad'), null)
 })
 test('exchange messages require exact popup, cloud origin, nonce and short code', () => {
-  const popup = {}, value = { source: popup, origin: 'https://cloud.example.com', data: { type: 'openrod-local-connected', nonce: 'nonce', code: 'a'.repeat(64) + '.' + 'b'.repeat(64) } }
-  assert.equal(connect.isLocalConnectedMessage(value, popup, 'nonce'), true)
-  for (const patch of [{ source: {} }, { origin: 'https://evil.example' }, { data: { ...value.data, nonce: 'other' } }, { data: { ...value.data, code: '' } }]) assert.equal(connect.isLocalConnectedMessage({ ...value, ...patch }, popup, 'nonce'), false)
+  const popup = {}, value = { source: popup, origin: 'https://cloud.example.test', data: { type: 'openrod-local-connected', nonce: 'nonce', code: 'a'.repeat(64) + '.' + 'b'.repeat(64) } }
+  assert.equal(connect.isLocalConnectedMessage(value, popup, 'nonce', CLOUD), true)
+  assert.equal(connect.isLocalConnectedMessage(value, popup, 'nonce'), false)
+  for (const patch of [{ source: {} }, { origin: 'https://evil.example' }, { data: { ...value.data, nonce: 'other' } }, { data: { ...value.data, code: '' } }]) assert.equal(connect.isLocalConnectedMessage({ ...value, ...patch }, popup, 'nonce', CLOUD), false)
 })
 test('compute selection is per tab with explicit URL pins taking precedence', () => {
   const storage = { getItem: () => 'cloud' }
@@ -49,14 +51,14 @@ test('preparation reports capacity and machine errors immediately', async () => 
 
 test('local sign-in exchanges identity and closes the popup without selecting compute or preparing a machine', async () => {
   const calls = [], identity = {connected:true,user:{uid:'google-user',email:'user@example.com'},expires:Date.now()+60000}
-  const flow = signInHarness(async (path,body) => { calls.push({path,body});return path === 'start' ? {nonce:'attempt',url:'https://cloud.example.com/'} : identity })
+  const flow = signInHarness(async (path,body) => { calls.push({path,body});return path === 'start' ? {nonce:'attempt',url:'https://cloud.example.test/'} : identity })
   await flush();flow.receive('attempt')
   assert.equal(await flow.attempt.promise,identity)
   assert.equal(flow.popup.closed,true)
   assert.deepEqual(calls.map(call=>call.path),['start','finish'])
 })
 test('failed local sign-in rejects instead of publishing authenticated identity', async () => {
-  const flow = signInHarness(async path => { if(path==='start')return {nonce:'attempt',url:'https://cloud.example.com/'}; if(path==='finish')throw Error('Code expired');return {connected:false} })
+  const flow = signInHarness(async path => { if(path==='start')return {nonce:'attempt',url:'https://cloud.example.test/'}; if(path==='finish')throw Error('Code expired');return {connected:false} })
   const rejected = assert.rejects(flow.attempt.promise,/Code expired/)
   await flush();flow.receive('attempt')
   await rejected
@@ -104,8 +106,8 @@ function signInHarness(request) {
   const listeners = new Set(), navigated = []
   const popup = {closed:false,close(){this.closed=true},location:{set href(value){navigated.push(value)}}}
   const events = {addEventListener:(_type,listener)=>listeners.add(listener),removeEventListener:(_type,listener)=>listeners.delete(listener)}
-  const attempt = connect.createLocalSignInAttempt({popup,origin:'http://localhost:4600',request,events,focus:()=>{},setTimer:()=>1,clearTimer:()=>{}})
-  const receive = nonce => { for (const listener of listeners) listener({source:popup,origin:connect.CLOUD_ORIGIN,data:{type:'openrod-local-connected',nonce,code:'a'.repeat(64)+'.'+'b'.repeat(64)}}) }
+  const attempt = connect.createLocalSignInAttempt({popup,origin:'http://localhost:4600',cloud:CLOUD,request,events,focus:()=>{},setTimer:()=>1,clearTimer:()=>{}})
+  const receive = nonce => { for (const listener of listeners) listener({source:popup,origin:CLOUD,data:{type:'openrod-local-connected',nonce,code:'a'.repeat(64)+'.'+'b'.repeat(64)}}) }
   return {attempt,popup,navigated,receive,listeners}
 }
 test('cancelling before delayed start suppresses popup navigation and cancels the returned nonce', async () => {
@@ -115,7 +117,7 @@ test('cancelling before delayed start suppresses popup navigation and cancels th
   await flush()
   flow.attempt.cancel('Sign-in cancelled.')
   await rejected
-  start.resolve({nonce:'attempt-a',url:'https://cloud.example.com/authorize-a'})
+  start.resolve({nonce:'attempt-a',url:'https://cloud.example.test/authorize-a'})
   await flush()
   assert.deepEqual(flow.navigated,[])
   assert.equal(flow.listeners.size,0)
@@ -126,7 +128,7 @@ test('late cancelled redemption cannot disconnect a newer successful sign-in', a
   let generation = 0
   const request = async (path,body) => {
     calls.push({path,body})
-    if (path==='start') return {nonce:`attempt-${++generation}`,url:`https://cloud.example.com/authorize-${generation}`}
+    if (path==='start') return {nonce:`attempt-${++generation}`,url:`https://cloud.example.test/authorize-${generation}`}
     if (path==='finish') return body.nonce==='attempt-1'?oldFinish.promise:identity
     return {connected:false}
   }

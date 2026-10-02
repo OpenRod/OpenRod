@@ -1,7 +1,7 @@
 variable "project_id" {
   description = "Existing GCP project with billing enabled."
   type        = string
-  default     = "openshell-viewer"
+  default     = "your-gcp-project-id"
 }
 variable "region" {
   description = "GCP region; use us-east1, not AWS us-east-1."

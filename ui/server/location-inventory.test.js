@@ -127,7 +127,7 @@ test('HTTP explicit owner marker rejects arbitrary locations and does not widen 
       } finally { await api.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
     }
     const local = await run(createSecurity({mode:'local'}))
-    const env = {OPENROD_MODE:'cloud',OPENROD_ORG_ID:'acme',OPENROD_PUBLIC_ORIGIN:'https://acme.example.com',GOOGLE_CLOUD_PROJECT:'openshell-viewer',OPENROD_FIREBASE_API_KEY:'key',OPENROD_FIREBASE_AUTH_DOMAIN:'openshell-viewer.firebaseapp.com'}
+    const env = {OPENROD_MODE:'cloud',OPENROD_ORG_ID:'acme',OPENROD_PUBLIC_ORIGIN:'https://acme.example.com',GOOGLE_CLOUD_PROJECT:'example-project',OPENROD_FIREBASE_API_KEY:'key',OPENROD_FIREBASE_AUTH_DOMAIN:'example-project.firebaseapp.com'}
     const auth = {verifySessionCookie:async()=>({uid:'alice',exp:Math.floor(Date.now()/1000)+3600}),getUser:async()=>({uid:'alice',emailVerified:true,providerData:[{providerId:'google.com'}],customClaims:{}})}
     const cloud = await run(createSecurity(cloudConfig(env),auth), {host:'acme.example.com',cookie:'__Host-openrod_session=session'})
     console.log(JSON.stringify({local,cloud}))

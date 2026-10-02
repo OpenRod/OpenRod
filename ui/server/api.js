@@ -1,6 +1,7 @@
 import {createLocalCloudNative} from './local-cloud-native.js'
 import {cloudSshRoute,cloudSshUpgrade} from './cloud-ssh.js'
 import {createLocalCloud} from './local-cloud.js'
+import { cloudOrigin, CLOUD_SOON } from './cloud-origin.js'
 import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.js'
 import { localTransfer, importTransfer, exportTransfer } from './cloud-transfer.js'
 import path from 'node:path'
@@ -340,6 +341,7 @@ export function openshellApi(security = createSecurity(cloudConfig())) {
 export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(cloudConfig()) } = {}) {
   const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
   const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative() }) : null
+  const cloudOff = security.config.mode === 'local' && !cloudOrigin()
   const initialContext = contextSelection()
   const initialKey = contextKey(initialContext)
   let stopSweeper = null
@@ -452,6 +454,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           const url = new URL(req.url, 'http://local')
           const parts = url.pathname.slice('/api/os'.length).split('/').filter(Boolean)
           assertCloudOperation(parts)
+          if (cloudOff && ['cloud-export', 'cloud-import', 'cloud-transfer'].includes(parts[0])) return send(res, 409, { error: CLOUD_SOON })
           if (security.config.mode !== 'local' && (parts[0] === 'connections' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
           const requestedContext = req.headers['x-openshell-context'] ?? url.searchParams.get('context')
           let owner = contextSelection()

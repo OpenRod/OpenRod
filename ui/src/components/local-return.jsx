@@ -3,6 +3,7 @@ import { createApi } from "@/lib/api"
 import { terminalHref } from "@/lib/sandbox-session"
 import { useTransferGroups } from '@/components/transfer-groups'
 import {CLOUD_ORIGIN} from '@/lib/cloud-transfer'
+import {CLOUD_AVAILABLE} from '@/lib/cloud-origin'
 import { Notice } from '@/components/notice'
 export function LocalReturn({children}) {
  const { chooseGroups, dialog, cancel } = useTransferGroups()
@@ -15,7 +16,7 @@ export function LocalReturn({children}) {
     return () => queueMicrotask(() => { if (generation.current === current) transfer.current.abort() })
   }, [])
  const nonce=React.useRef(/^#cloud-return=([a-f0-9-]{36})$/.exec(window.location.hash)?.[1])
- const [state,setState]=React.useState(nonce.current&&window.opener?'waiting':'normal'),[message,setMessage]=React.useState('')
+ const [state,setState]=React.useState(CLOUD_AVAILABLE&&nonce.current&&window.opener?'waiting':'normal'),[message,setMessage]=React.useState('')
  const accepted=React.useRef(false),detached=React.useRef(false)
  React.useEffect(()=>{
   if(state!=='waiting')return

@@ -2,13 +2,13 @@
 
 OpenRod local remains account-free on localhost. OpenRod Cloud accepts any enabled, verified Google account. There is no waitlist, email allowlist or manual membership approval. To revoke access, disable the account in Identity Platform; current-account checks run on every request and every minute for streams/terminals.
 
-The existing `openrod-openrod-pilot` VM becomes the control plane at `https://cloud.example.com`. It holds Google session verification credentials, the Firestore machine registry and Compute provisioning permission. Customer workspace requests never reach its pilot gateway. Existing pilot files and gateway state are preserved, but are not copied automatically into users' new machines.
+An existing console VM becomes the control plane at your public origin, for example `https://console.example.com`. It holds Google session verification credentials, the Firestore machine registry and Compute provisioning permission. Customer workspace requests never reach its pilot gateway. Existing pilot files and gateway state are preserved, but are not copied automatically into users' new machines.
 
 ## Per-user machines
 
 - Exactly one VM identity per stable Firebase UID, enforced by Firestore transactions and deterministic Compute names. Multiple tabs and concurrent creation requests share the reservation and Compute request ID.
 - Fixed `e2-standard-2` machines in `us-east1-b`, 30 GB boot disk and 100 GB persistent workspace disk, no public IP and no attached service account.
-- Existing shared `10.80.0.0/24` network and Cloud NAT. Each worker has its own kernel, filesystem, OpenShell gateway, Docker engine and state. No separate VPC is created per user.
+- Existing shared private subnet and Cloud NAT. Each worker has its own kernel, filesystem, OpenShell gateway, Docker engine and state. No separate VPC is created per user.
 - The firewall accepts workspace port 4600 only from the control plane's private IP. Workers cannot reach other workers. Operators use IAP for SSH.
 - Each worker requires its own request signature, bound to its owner, HTTP method, full target and a short validity window. The browser receives neither worker addresses nor keys.
 - Fleet capacity defaults to 10 reserved machines (`OPENROD_MAX_MACHINES`, integer 1–100), including failed reservations. No public API frees slots or deletes/recreates VMs. Deletion and capacity changes are operator actions.
@@ -24,7 +24,7 @@ Firestore database `openrod-cloud`, in `us-east1`, stores `machines` owner/VM/le
 
 ## Local and cloud continuity
 
-Local OpenRod has a standalone **Sign in** action. Google authentication runs at `cloud.example.com`, returns the verified account to its originating local tab, focuses that tab and closes the authentication popup automatically. Sign-in does not change the compute target or allocate a VM. Authentication started in the cloud console stays in the console.
+Cloud is off by default: local OpenRod shows its cloud actions as coming soon and its backend refuses cloud routes with HTTP 409. Set `OPENROD_CLOUD_ORIGIN` (for example `https://console.example.com`) when building and running local OpenRod to enable them. Local OpenRod then has a standalone **Sign in** action. Google authentication runs at that origin, returns the verified account to its originating local tab, focuses that tab and closes the authentication popup automatically. Sign-in does not change the compute target or allocate a VM. Authentication started in the cloud console stays in the console.
 
 **Build in cloud** offers new, existing and copied cloud workspaces. **Compute: Local / Cloud** controls which machine the local viewer operates. Terminal sessions and in-flight requests keep their original target; expired cloud access never falls back to local compute. The local backend holds a one-hour authorization in memory, so restarting it requires another sign-in. A second local sign-in for the same account replaces the prior local connection; console logout or account disablement revokes it.
 
@@ -42,24 +42,24 @@ Use the existing protected Terraform state in this directory. Do not copy local 
 
 ```sh
 terraform init
-terraform plan -var='org_id=openrod-pilot' -var='domain=cloud.example.com' -out=customer.tfplan
+terraform plan -var='project_id=YOUR_PROJECT_ID' -var='org_id=your-org' -var='domain=console.example.com' -out=customer.tfplan
 terraform apply customer.tfplan
-firebase deploy --project openshell-viewer --config firebase.cloud.json --only firestore:rules
+firebase deploy --project YOUR_PROJECT_ID --config firebase.cloud.json --only firestore:rules
 ```
 
 Configure the existing root-owned `/etc/openrod/console.env`, retaining the public Firebase identifiers and attached ADC:
 
 ```dotenv
 OPENROD_MODE=cloud
-GOOGLE_CLOUD_PROJECT=openshell-viewer
-OPENROD_ORG_ID=openrod-pilot
-OPENROD_PUBLIC_ORIGIN=https://cloud.example.com
+GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
+OPENROD_ORG_ID=your-org
+OPENROD_PUBLIC_ORIGIN=https://console.example.com
 OPENROD_FIREBASE_API_KEY=YOUR_PUBLIC_WEB_API_KEY
-OPENROD_FIREBASE_AUTH_DOMAIN=openshell-viewer.firebaseapp.com
+OPENROD_FIREBASE_AUTH_DOMAIN=YOUR_PROJECT_ID.firebaseapp.com
 OPENROD_MAX_MACHINES=10
 OPENROD_WORKER_ZONE=us-east1-b
-OPENROD_WORKER_SUBNET=projects/openshell-viewer/regions/us-east1/subnetworks/openrod-openrod-pilot
-OPENROD_WORKER_ARTIFACT_ORIGIN=http://10.80.0.2:8080
+OPENROD_WORKER_SUBNET=projects/YOUR_PROJECT_ID/regions/us-east1/subnetworks/YOUR_SUBNET
+OPENROD_WORKER_ARTIFACT_ORIGIN=http://CONTROL_PLANE_PRIVATE_IP:8080
 OPENROD_WORKER_ARTIFACT=/var/lib/openrod/worker-app.tar.gz
 OPENROD_WORKER_ARTIFACT_SHA256=SHA256_OF_REVIEWED_ARTIFACT
 ```

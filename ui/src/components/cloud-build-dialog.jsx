@@ -8,6 +8,7 @@ import { useCompute } from '@/lib/compute'
 import { useInventory } from '@/lib/inventory'
 import { resourceKey, locationLabel } from '@/lib/locations'
 import { useTransferGroups } from '@/components/transfer-groups'
+import { CLOUD_AVAILABLE, CLOUD_SOON } from '@/lib/cloud-origin'
 import { CLOUD_ORIGIN, copyLocalSandbox, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
 
 export function CloudBuildDialog({ open, onOpenChange }) {
@@ -21,7 +22,7 @@ export function CloudBuildDialog({ open, onOpenChange }) {
   React.useEffect(() => () => preparation.current?.abort(), [])
   React.useEffect(() => { if (open) { setError(''); setName('') } }, [open])
   async function start() {
-    if (busy) return
+    if (busy || !CLOUD_AVAILABLE) return
     const source = sandboxes.find(sandbox => resourceKey(sandbox) === name)
     if (choice === 'copy' && !source) { setError('Choose a connected local sandbox.'); return }
     const controller = new AbortController()
@@ -57,10 +58,11 @@ export function CloudBuildDialog({ open, onOpenChange }) {
     <div className="space-y-2">{[['new', 'New cloud sandbox'], ['existing', 'Open an existing cloud sandbox'], ['copy', 'Continue an existing local sandbox']].map(([id, label]) => <label key={id} className="flex items-center gap-3 rounded-lg border p-3 text-sm"><input type="radio" name="cloud-start" disabled={busy} checked={choice === id} onChange={() => setChoice(id)} />{label}</label>)}</div>
     {choice === 'copy' && <><select aria-label="Local sandbox to copy" value={name} disabled={busy} onChange={e => setName(e.target.value)} className="rounded-md border bg-background p-2 text-sm"><option value="">Choose a local sandbox</option>{sandboxes.map(s => <option key={resourceKey(s)} value={resourceKey(s)}>{s.name} · {locationLabel(s.location)}</option>)}</select><p className="text-xs text-muted-foreground">Copies workspace files and rebuilds saved templates. Your local source stays available. Credential files are excluded; reconnect agents in cloud.</p></>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <Button disabled={busy || (choice === 'copy' && !name)} onClick={start}>{busy && <Spinner />}{busy ? (stage === 'signin' ? 'Sign in with Google…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Preparing cloud machine…') : 'Keep using local OpenRod'}</Button>
+    {!CLOUD_AVAILABLE && <p role="status" className="text-sm text-muted-foreground">{CLOUD_SOON}</p>}
+    <Button disabled={busy || !CLOUD_AVAILABLE || (choice === 'copy' && !name)} onClick={start}>{busy && <Spinner />}{busy ? (stage === 'signin' ? 'Sign in with Google…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Preparing cloud machine…') : 'Keep using local OpenRod'}</Button>
     {busy && stage === 'prepare' && <Button variant="ghost" onClick={() => preparation.current?.abort()}>Cancel preparation</Button>}
     {busy && compute.connecting && <Button variant="ghost" onClick={compute.cancelConnect}>Cancel sign-in</Button>}
-    <a href={CLOUD_ORIGIN} target="_blank" rel="noopener noreferrer" className="text-center text-xs underline">Open cloud console</a>
+    {CLOUD_ORIGIN && <a href={CLOUD_ORIGIN} target="_blank" rel="noopener noreferrer" className="text-center text-xs underline">Open cloud console</a>}
     {dialog}
   </DialogContent></Dialog>
 }

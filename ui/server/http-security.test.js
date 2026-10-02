@@ -4,7 +4,7 @@ import http from 'node:http'
 import net from 'node:net'
 import { once } from 'node:events'
 import { cloudConfig, createSecurity } from './security.js'
-const env = { OPENROD_MODE: 'cloud', OPENROD_ORG_ID: 'acme', OPENROD_PUBLIC_ORIGIN: 'https://acme.example.com', GOOGLE_CLOUD_PROJECT: 'openshell-viewer', OPENROD_FIREBASE_API_KEY: 'key', OPENROD_FIREBASE_AUTH_DOMAIN: 'openshell-viewer.firebaseapp.com' }
+const env = { OPENROD_MODE: 'cloud', OPENROD_ORG_ID: 'acme', OPENROD_PUBLIC_ORIGIN: 'https://acme.example.com', GOOGLE_CLOUD_PROJECT: 'example-project', OPENROD_FIREBASE_API_KEY: 'key', OPENROD_FIREBASE_AUTH_DOMAIN: 'example-project.firebaseapp.com' }
 const user = { uid: 'alice', emailVerified: true, providerData: [{providerId:'google.com'}], customClaims: { openrod_org: 'acme', openrod_role: 'member' } }
 const decoded = { uid: 'alice', exp: Math.floor(Date.now()/1000)+3600, auth_time: Math.floor(Date.now()/1000), email_verified: true, firebase: {sign_in_provider:'google.com'} }
 const fakeAuth = { verifySessionCookie: async () => decoded, getUser: async () => user, verifyIdToken: async token => { if (token !== 'valid') throw Error('bad'); return decoded }, createSessionCookie: async () => 'session' }

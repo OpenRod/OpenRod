@@ -1,9 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cloudHandoffUrl, isCloudReadyMessage, CLOUD_ORIGIN } from './cloud-transfer.js'
+import { cloudHandoffUrl, isCloudReadyMessage, CLOUD_ORIGIN as DEFAULT_ORIGIN } from './cloud-transfer.js'
+const CLOUD_ORIGIN = 'https://cloud.example.test'
+
+test('cloud stays unavailable without a configured origin', () => {
+  assert.equal(DEFAULT_ORIGIN, '')
+  assert.throws(() => cloudHandoffUrl('http://localhost:5173', 'nonce'), /coming soon/)
+})
 
 test('handoff URL contains only local origin and fresh nonce', () => {
-  const url = new URL(cloudHandoffUrl('http://localhost:5173', 'fresh-nonce'))
+  const url = new URL(cloudHandoffUrl('http://localhost:5173', 'fresh-nonce', CLOUD_ORIGIN))
   assert.equal(url.origin, CLOUD_ORIGIN)
   assert.equal(url.searchParams.get('handoff'), '1')
   assert.deepEqual(JSON.parse(Buffer.from(url.hash.slice('#handoff='.length), 'base64url')), { origin: 'http://localhost:5173', nonce: 'fresh-nonce' })
@@ -12,9 +18,9 @@ test('handoff URL contains only local origin and fresh nonce', () => {
 test('ticket messages require exact cloud origin, popup source and nonce', () => {
   const popup = {}
   const event = { origin: CLOUD_ORIGIN, source: popup, data: { type: 'openrod-cloud-ready', nonce: 'nonce', ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) } }
-  assert.equal(isCloudReadyMessage(event, popup, 'nonce'), true)
-  for (const changed of [{ origin: 'https://evil.test' }, { source: {} }, { data: { ...event.data, nonce: 'old' } }, { data: { ...event.data, type: 'other' } }, { data: { ...event.data, ticket: '' } }]) assert.equal(isCloudReadyMessage({ ...event, ...changed }, popup, 'nonce'), false)
-  assert.equal(isCloudReadyMessage(event, null, 'nonce'), false)
+  assert.equal(isCloudReadyMessage(event, popup, 'nonce', CLOUD_ORIGIN), true)
+  for (const changed of [{ origin: 'https://evil.test' }, { source: {} }, { data: { ...event.data, nonce: 'old' } }, { data: { ...event.data, type: 'other' } }, { data: { ...event.data, ticket: '' } }]) assert.equal(isCloudReadyMessage({ ...event, ...changed }, popup, 'nonce', CLOUD_ORIGIN), false)
+  assert.equal(isCloudReadyMessage(event, null, 'nonce', CLOUD_ORIGIN), false)
 })
 
 test('return handoff fixes local destination and binds messages to the opened window', async () => {

@@ -1,5 +1,6 @@
 import { currentCloudOwner } from './compute-target.js'
-export const CLOUD_ORIGIN = 'https://cloud.example.com'
+import { CLOUD_ORIGIN } from './cloud-origin.js'
+export { CLOUD_ORIGIN }
 export function isLoopbackOrigin(value) {
   try {
     const url = new URL(value)
@@ -15,8 +16,8 @@ export function localConnectFromHash(hash) {
     return { origin: value.origin, nonce: value.nonce, challenge: value.challenge }
   } catch { return null }
 }
-export function isLocalConnectedMessage(event, popup, nonce) {
-  return Boolean(popup && event.source === popup && event.origin === CLOUD_ORIGIN && event.data?.type === 'openrod-local-connected' && event.data.nonce === nonce && typeof event.data.code === 'string' && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(event.data.code))
+export function isLocalConnectedMessage(event, popup, nonce, cloud = CLOUD_ORIGIN) {
+  return Boolean(cloud && popup && event.source === popup && event.origin === cloud && event.data?.type === 'openrod-local-connected' && event.data.nonce === nonce && typeof event.data.code === 'string' && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(event.data.code))
 }
 export async function localCloudRequest(path, body, {signal} = {}) {
   const response = await fetch(`/api/local-cloud/${path}`, {
@@ -70,7 +71,7 @@ export async function authorizeLocalConnection(handoff, request = fetch) {
   if (typeof result.code !== 'string' || !/^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(result.code)) throw new Error('Invalid sign-in response.')
   return result
 }
-export function createLocalSignInAttempt({ popup, origin, request = localCloudRequest, events = window, focus = () => window.focus(), setTimer = setInterval, clearTimer = clearInterval, now = Date.now }) {
+export function createLocalSignInAttempt({ popup, origin, cloud = CLOUD_ORIGIN, request = localCloudRequest, events = window, focus = () => window.focus(), setTimer = setInterval, clearTimer = clearInterval, now = Date.now }) {
   let nonce, accepted = false, finished = false, resolve, reject
   const promise = new Promise((yes, no) => { resolve = yes; reject = no })
   const cancelNonce = async () => {
@@ -87,7 +88,7 @@ export function createLocalSignInAttempt({ popup, origin, request = localCloudRe
     return cancelNonce()
   }
   const receive = async event => {
-    if (finished || accepted || !nonce || !isLocalConnectedMessage(event, popup, nonce)) return
+    if (finished || accepted || !nonce || !isLocalConnectedMessage(event, popup, nonce, cloud)) return
     accepted = true
     try {
       const value = await request('finish', { nonce, code: event.data.code })

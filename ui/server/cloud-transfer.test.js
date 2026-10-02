@@ -4,6 +4,7 @@ import { Readable } from 'node:stream'
 import fs from 'node:fs/promises'
 import { transferPathAllowed, validateTransfer, localTransfer, importTransfer as runImportTransfer, CLOUD_TRANSFER_LIMIT } from './cloud-transfer.js'
 
+process.env.OPENROD_CLOUD_ORIGIN = 'https://cloud.example.test'
 const importTransfer = (req, options) => runImportTransfer(req, { resolveGroups: async () => ['destination'], ...options })
 
 const launch = { name: 'my-work', image: 'ubuntu:24.04', session: 'shell' }
@@ -36,14 +37,20 @@ function localClient() {
   }
 }
 
-test('local export sends sanitized data only to the fixed cloud endpoint with one-use ticket', async () => {
+test('local export sends sanitized data only to the configured cloud endpoint with one-use ticket', async () => {
   let sent
   const result = await localTransfer({ name: 'my-work', destinationGroups: ['destination'], ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { connect: async () => ({ client: localClient() }), fetch: async (url, options) => { sent = { url, ...options }; return Response.json({ name: 'my-work' }) } })
-  assert.equal(sent.url, 'https://cloud.example.com/api/cloud/import')
+  assert.equal(sent.url, 'https://cloud.example.test/api/cloud/import')
   assert.equal(sent.headers.authorization, 'Bearer ' + ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)))
   assert.deepEqual(JSON.parse(sent.body).files.map((f) => f.path), ['src/main.js'])
   assert.deepEqual(JSON.parse(sent.body).destinationGroups, ['destination'])
   assert.equal(result.name, 'my-work')
+})
+
+test('local export refuses before reading or uploading when cloud is not configured', async () => {
+  let touched = false
+  await assert.rejects(localTransfer({ name: 'my-work', ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) }, { origin: '', connect: async () => { touched = true }, fetch: async () => { touched = true } }), { status: 409, message: 'Cloud is coming soon.' })
+  assert.equal(touched, false)
 })
 
 test('invalid transfer and cloud rejection do not create or upload a sandbox', async () => {

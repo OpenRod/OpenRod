@@ -10,6 +10,7 @@ import { defaultSession, isSession } from '../src/lib/sandbox-session.js'
 import { IMAGE_TEMPLATE_NAME } from '../src/lib/sandbox-images.js'
 import { groupIds } from '../shared/group-membership.js'
 import { assertSandboxGroup } from '../shared/group-network.js'
+import { cloudOrigin, cloudUnavailable } from './cloud-origin.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { listGroups, planSandbox } from './org.js'
 import { listPolicies } from './egress.js'
@@ -132,12 +133,14 @@ export async function exportTransfer(input, options = {}) {
 }
 
 export async function localTransfer(input, options = {}) {
+  const origin = options.origin ?? cloudOrigin()
+  if (!origin) throw cloudUnavailable()
   if (typeof input?.ticket !== 'string' || !/^openrod-user-[a-f0-9]{24}\.[a-f0-9]{64}$/.test(input.ticket)) throw fail('Invalid cloud transfer request.')
   const { bundle, warning } = await exportTransfer(input, options)
   if (input.destinationGroups !== undefined) {
     try { bundle.destinationGroups = groupIds(input.destinationGroups) } catch (error) { throw fail(error.message) }
   }
-  const response = await (options.fetch ?? fetch)('https://cloud.example.com/api/cloud/import', {
+  const response = await (options.fetch ?? fetch)(`${origin}/api/cloud/import`, {
     method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${input.ticket}` }, body: JSON.stringify(bundle), redirect: 'error', signal: AbortSignal.timeout(35 * 60_000),
   })
   const result = await response.json().catch(() => ({}))

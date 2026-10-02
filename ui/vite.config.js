@@ -11,6 +11,7 @@ if (process.env.OPENROD_MODE && process.env.OPENROD_MODE !== 'local' && process.
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), openshellApi()],
+  define: { __OPENROD_CLOUD_ORIGIN__: JSON.stringify(process.env.OPENROD_CLOUD_ORIGIN ?? '') },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
