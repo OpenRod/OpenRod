@@ -18,6 +18,7 @@ import { PlacementBadge } from '@/components/placement-badge'
 import { AGENTS, STARTS, pendingRecipe, pendingRecipeKey } from '@/lib/image-templates'
 import { SearchInput } from "@/components/ui/search-input"
 import { SelectField } from '@/components/ui/select-field'
+import { LocationStep } from '@/components/location-step'
 
 const locationKey = (location) => location?.id ?? location?.context
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
@@ -41,7 +42,7 @@ export function TemplatesView() {
   const draftKey = editor ? pendingRecipeKey(locationKey(editor.location)) : null
   const [selectedKey, setSelectedKey] = React.useState(null)
   const [chooseLocation, setChooseLocation] = React.useState(false)
-  const [newLocation, setNewLocation] = React.useState('')
+  const [pendingGateway, setPendingGateway] = React.useState(null)
   const restoredDraft = React.useRef(false)
   const [remove, setRemove] = React.useState(null)
   const [launch, setLaunch] = React.useState(null)
@@ -153,24 +154,31 @@ export function TemplatesView() {
     setSelectedKey(null)
     setEditor({ recipe, replace, location: owner(target) })
   }
-  function startTemplate() {
-    const location = locations.find((location) => locationKey(location) === newLocation)
+  function startTemplate(location) {
     if (!location?.connected) return
     const draft = pendingRecipe(pendingRecipeKey(locationKey(location)))
     setEditor({ ...(draft ?? {}), location })
     setChooseLocation(false)
   }
+  // A just-connected host shows up in the inventory a moment later; continue as soon as it does.
+  React.useEffect(() => {
+    if (!pendingGateway) return
+    const found = locations.find((item) => item.gateway === pendingGateway && item.connected)
+    if (found) { setPendingGateway(null); startTemplate(found); return }
+    const timer = setInterval(load, 1500)
+    return () => clearInterval(timer)
+  }, [pendingGateway, locations])
   function closeEditor() { try { sessionStorage.removeItem(draftKey) } catch {} setEditor(null) }
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
-    {editor && <LocationProvider location={owner(editor)}><ImageTemplateBuilder key={JSON.stringify([locationKey(editor.location), editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></LocationProvider>}
+    {editor && <LocationProvider location={owner(editor)}><ImageTemplateBuilder key={JSON.stringify([locationKey(editor.location), editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onChangeLocation={editor.replace ? undefined : () => { setEditor(null); setChooseLocation(true) }} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></LocationProvider>}
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-6">
       <SearchInput aria-label="Search image templates" value={query} onValueChange={setQuery} placeholder="Search…" className="mr-auto min-w-32 flex-1 sm:max-w-60" />
       {multipleLocations && <SelectField aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
         <option value="">All locations</option>
         {locations.map((location) => <option key={locationKey(location)} value={locationKey(location)}>{locationLabel(location)}{locationKey(location) === defaultContext ? ' (default)' : ''}{location.connected === false ? ' · disconnected' : ''}</option>)}
       </SelectField>}
-      <Button size="sm" className={action} disabled={!locations.some((location) => location.connected)} onClick={() => { setNewLocation(''); setChooseLocation(true) }}><Plus />New template</Button>
+      <Button size="sm" className={action} onClick={() => setChooseLocation(true)}><Plus />New template</Button>
     </div>
     {checkedRecords.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-6">
       <span role="status" className="mr-auto text-xs">{checkedRecords.length} selected{checkedRecords.length > matchingChecked && <span className="text-muted-foreground"> · {checkedRecords.length - matchingChecked} outside current filters</span>}</span>
@@ -251,13 +259,11 @@ export function TemplatesView() {
       </div>}
       <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={() => setRemove(null)}>Cancel</Button><Button variant="destructive" disabled={busy || !remove?.some(connected)} onClick={deleteTemplates}>{busy && <Spinner />}{busy ? 'Deleting…' : deleteErrors.length ? 'Retry deletion' : remove?.length === 1 ? 'Delete template' : 'Delete templates'}</Button></div>
     </DialogContent></Dialog>
-    <Dialog open={chooseLocation} onOpenChange={setChooseLocation}><DialogContent>
-      <DialogHeader><DialogTitle>New template</DialogTitle><DialogDescription>Choose where to build and save this template. Its images and saved Setups belong to that location.</DialogDescription></DialogHeader>
-      <label className="space-y-2 text-xs"><span className="block font-medium">Location</span><SelectField aria-label="New template location" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} className="h-9 w-full rounded-md border bg-card px-3">
-        <option value="" disabled>Choose a location…</option>
-        {locations.map((location) => <option key={locationKey(location)} value={locationKey(location)} disabled={!location.connected}>{locationLabel(location)}{location.connected === false ? ' · disconnected' : ''}</option>)}
-      </SelectField></label>
-      <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setChooseLocation(false)}>Cancel</Button><Button className={action} disabled={!locations.some((location) => locationKey(location) === newLocation && location.connected)} onClick={startTemplate}>Continue<ArrowRight /></Button></div>
+    <Dialog open={chooseLocation} onOpenChange={(open) => { setChooseLocation(open); if (!open) setPendingGateway(null) }}><DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-3xl">
+      <LocationStep locations={locations} allowRemote subject="template" connecting={Boolean(pendingGateway)}
+        onPick={(context) => startTemplate(locations.find((location) => locationKey(location) === context))}
+        onConnected={(job) => { setPendingGateway(job.gateway); load() }}
+        onCancel={() => setChooseLocation(false)} />
     </DialogContent></Dialog>
     {launch && <LocationProvider location={owner(launch)}><CreateSandboxDialog open initialImageTemplate={launch} onOpenChange={(open) => { if (!open) setLaunch(null) }} onStarted={() => setLaunch(null)} /></LocationProvider>}
   </div>
