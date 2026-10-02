@@ -1,0 +1,20 @@
+# What is saved and what runs
+
+← [Back to README](../README.md)
+
+Both the OpenShell CLI and OpenRod use `CONFIG_DIR = $XDG_CONFIG_HOME/openshell`, otherwise `~/.config/openshell`. Set `XDG_CONFIG_HOME` before launching either program to use another configuration location. Native and copied commands explicitly preserve this location. `STATE_DIR` means `OPENSHELL_CONSOLE_DATA_DIR`, otherwise `$XDG_STATE_HOME/openshell-console` or `~/.local/state/openshell-console`.
+
+| Action / data | Persistent effect |
+| --- | --- |
+| **This computer** | Reads the existing registration, discovers an accessible workspace, saves `CONFIG_DIR/console-context.json`, and starts activity collection. Does not change the original gateway service. |
+| **Remote machine → Connect** | Probes the selected host. Once runtime images are available, creates isolated state under `STATE_DIR/remote-gateways/console-ssh-<hash>/`, registers a distinct local mTLS endpoint under `CONFIG_DIR/gateways/`, and starts the persistent remote Docker gateway and local SSH tunnels. |
+| Runtime installation | **Download on host** pulls missing runtime images on the host; **Upload** instead loads a trusted Docker-save archive. Uploaded packages are temporary. Docker itself is installed only after explicit approval. |
+| Activity and policies | Stored per gateway/workspace in `STATE_DIR/contexts/<scope-hash>/`: `activity.sqlite`, `activity-delivery.sqlite`, and `policies/` (including organization rules and memberships). SQLite companion files can exist alongside databases. |
+| Remote inventory cache | `STATE_DIR/remote-gateways/last-location.json` remembers local/SSH locations; `last-inventory.json` retains the last remote sandbox/template metadata and recipes. These private snapshots survive disconnect/restart but do not restart SSH or authorize disconnected actions. |
+| Retention and delivery | Activity has no automatic expiry. No webhook destination is created automatically. Previously configured enabled deliveries may resume on activation/restart and continue sending their original context's pending events after switching. Credentials in the delivery database are not encrypted at rest. |
+| Service auto-close | Previously configured deadlines in `STATE_DIR/ingress.json` can resume on activation/restart and close services in their originating context. Switching contexts does not cancel them. |
+| Legacy checkout policies | A one-time copy into scoped state is allowed only for the original local loopback `openshell/default` registration. Other registrations do not inherit them. Legacy `ui/.state` activity databases remain untouched, not reassigned. Installed packages exclude checkout policies and runtime databases. |
+| Organization policy sweep | Off by default. `OPENSHELL_CONSOLE_SWEEP=1` enables background reconciliation only for the startup context; switching does not retarget it. Explicit policy edits still apply immediately. |
+| Native SSH | Private temporary config/directory, normally deleted when SSH exits. Direct SSH does not edit `~/.ssh/config`; the separate editor integration may install managed SSH configuration. |
+
+Switching selection pauses the old activity collector; it does not erase its archive. Stopping the console stops its collectors, delivery workers, deadline enforcement, and local SSH tunnels—not the original gateway or the remote Docker gateway and its workloads. Inspecting another SSH host is not a global pause for an already active console.
