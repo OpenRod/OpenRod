@@ -140,19 +140,34 @@ export function createSshHostStore({ home = os.homedir(), keyscan, now = Date.no
       if (!entry || entry.expires <= now()) { pending.delete(token); throw fail('This confirmation expired. Start again.', 409) }
       const { value, keys } = entry
       await assertFree(value.alias)
+      // The user's ~/.ssh/config is checked and updated before OpenRod's own files,
+      // so a config we cannot edit leaves no half-saved host behind. It is handled
+      // as bytes: it need not be UTF-8 and is kept unchanged after the Include.
+      await fs.mkdir(path.join(home, '.ssh'), { recursive: true, mode: 0o700 })
+      const userConfig = path.join(home, '.ssh/config'), include = `Include ${configQuote(configFile)}`
+      const current = await fs.readFile(userConfig).catch(error => {
+        if (error.code === 'ENOENT') return Buffer.alloc(0)
+        throw fail(`OpenRod can't read ~/.ssh/config (${error.code ?? error.message}).`, 409)
+      })
+      const hasInclude = current.toString('latin1').split('\n').some(line => line.replace(/\r$/, '') === Buffer.from(include).toString('latin1'))
+      if (!hasInclude) {
+        const stat = await fs.lstat(userConfig).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (stat && !stat.isFile()) throw fail(`~/.ssh/config is a symlink or not a regular file, so OpenRod won't edit it. Add this line at the top of the file it points to, then try again: ${include}`, 409)
+      }
       await fs.mkdir(directory, { recursive: true, mode: 0o700 })
       const stat = await fs.lstat(directory)
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw fail('~/.config/openrod must be a regular directory.', 409)
       await fs.chmod(directory, 0o700)
       const hosts = [...await load(), { alias: value.alias, name: value.name, host: value.host, user: value.user, port: value.port, identityFile: value.identityFile }]
       const known = (await readText(hostsFile)).split('\n').filter(line => line && !line.startsWith(`${value.alias} `))
+      // An Include after a Host line would only apply to that Host, so it goes first.
+      // Including a file that does not exist yet is harmless to ssh.
+      if (!hasInclude) await writeText(userConfig, Buffer.concat([Buffer.from(`${include}\n`), current])).catch(error => {
+        throw error.status ? error : fail(`OpenRod can't update ~/.ssh/config (${error.code ?? error.message}). Add this line at its top yourself, then try again: ${include}`, 409)
+      })
       await writeText(hostsFile, [...known, ...keys.map(key => `${value.alias} ${key.type} ${key.blob}`)].join('\n') + '\n')
       await writeText(dataFile, JSON.stringify(hosts, null, 2) + '\n')
       await writeText(configFile, render(hosts))
-      await fs.mkdir(path.join(home, '.ssh'), { recursive: true, mode: 0o700 })
-      const userConfig = path.join(home, '.ssh/config'), old = await readText(userConfig), include = `Include ${configQuote(configFile)}`
-      // An Include after a Host line would only apply to that Host, so it goes first.
-      if (!old.split('\n').includes(include)) await writeText(userConfig, `${include}\n${old}`)
       pending.delete(token)
       return { alias: value.alias, name: value.name }
     }),
