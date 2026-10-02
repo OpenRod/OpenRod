@@ -48,22 +48,24 @@ function run(args, { job, engine, timeout = 30_000, spawnProcess = spawn } = {})
       return child.kill(signal)
     }
     if (job) job.child = { kill }
-    let output = '', stdout = ''
+    let output = '', stdout = '', stderr = ''
     let timedOut = false
     const append = (chunk) => {
       const clean = chunk.toString().replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
       output = (output + clean).slice(-100_000)
       if (job) job.logs = (job.logs + clean).slice(-100_000)
+      return clean
     }
-    child.stdout.on('data', chunk => { stdout = (stdout + chunk.toString()).slice(-100_000); append(chunk) }); child.stderr.on('data', append)
+    child.stdout.on('data', chunk => { stdout = (stdout + chunk.toString()).slice(-100_000); append(chunk) }); child.stderr.on('data', chunk => { stderr = (stderr + append(chunk)).slice(-100_000) })
     const timer = setTimeout(() => { timedOut = true; kill('SIGKILL') }, timeout)
-    child.once('error', (e) => { clearTimeout(timer); reject(fail(e.code === 'ENOENT' ? 'Docker is not installed on this computer.' : e.message)) })
+    child.once('error', (e) => { clearTimeout(timer); reject(Object.assign(fail(e.code === 'ENOENT' ? 'Docker is not installed on this computer.' : e.message), { code: e.code })) })
     child.once('close', (code) => {
       clearTimeout(timer)
       if (job) job.child = null
       if (job?.cancelled) reject(fail('Operation cancelled.'))
       else if (timedOut) reject(fail('Docker timed out. Check the engine and retry.'))
-      else if (code) reject(fail(output.trim().slice(-1600) || `Docker exited with code ${code}.`))
+      // `docker info` prints a JSON dump on stdout even when it fails; the reason is on stderr.
+      else if (code) reject(fail((stderr.trim() || output.trim()).slice(-1600) || `Docker exited with code ${code}.`))
       else resolve(stdout)
     })
   })
@@ -77,7 +79,9 @@ export async function localEngine({ execute = run } = {}) {
     if (info.OSType !== 'linux') throw fail('Switch local Docker to Linux containers, then retry.')
     return { endpoint, architecture: info.Architecture === 'aarch64' ? 'arm64' : info.Architecture === 'x86_64' ? 'amd64' : info.Architecture, engineId: info.ID }
   } catch (e) {
-    throw fail(`Local Docker is required to build images. Install or start Docker on this computer and select a local Docker context. ${e.message}`, e.status ?? 400)
+    if (e.code === 'ENOENT') throw fail('Docker isn’t installed. Install Docker Desktop (macOS: brew install --cask docker-desktop) or Docker Engine (Linux), start it, then try again.')
+    if (/failed to connect to the docker API|Cannot connect to the Docker daemon|connection refused/i.test(e.message)) throw fail('Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.', 503)
+    throw fail(`Local Docker is required to build images. ${e.message}`, e.status ?? 400)
   }
 }
 async function deploymentEngine(target) {

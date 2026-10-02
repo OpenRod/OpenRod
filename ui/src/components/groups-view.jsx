@@ -262,7 +262,7 @@ function GroupSheet({ group, org, sandboxes, onClose, onChanged, onPolicy }) {
             <h3 className="text-[10px] font-bold tracking-widest text-faint uppercase">Network access</h3>
             {aimed.length ? (
               <div className="flex flex-wrap gap-1.5">{aimed.map((p) => <PolicyPill key={p.id} policy={p} onClick={() => onPolicy({ edit: p.id })} />)}</div>
-            ) : <p className="text-[11px] text-muted-foreground">No network rules yet. A sandbox can join if another selected group provides its network policy.</p>}
+            ) : <p className="text-[11px] text-muted-foreground">No network rules yet.</p>}
             {everyone.length > 0 && <p className="text-[11px] text-muted-foreground">Also, like every sandbox: {everyone.map((p) => p.name).join(", ")}.</p>}
             <Button variant="outline" size="sm" className="w-fit" onClick={() => onPolicy({ new: { appliesTo: { groups: [group.id] } } })}><Plus />Add rule for {group.name}</Button>
           </section>
@@ -365,7 +365,7 @@ export function GroupsView({ onNavigate }) {
   const dialog = <NewGroupDialog open={creating} onOpenChange={setCreating} groups={groups} sandboxes={sandboxes} assignments={assignments}
     onCreated={async (group, result, added) => {
       if (result) reportSync(result, `Created ${group.name} with ${plural(added, "sandbox", "sandboxes")}`)
-      else toast.success(`Created ${group.name}`, { description: "Add a network rule, then assign sandboxes to the group." })
+      else toast.success(`Created ${group.name}`, { description: "Add sandboxes and network rules to it in any order." })
       await load()
       setOpen(group.id)
     }} />
@@ -439,7 +439,7 @@ export function GroupsView({ onNavigate }) {
                         <span className="truncate font-mono text-xs">{s.name}</span>
                       </span>
                       <fieldset disabled={busy} aria-label={`Groups for ${s.name}`} className="min-w-0">
-                        <GroupPicker multiple required allowCreate={false} groups={groups} value={current} onChange={(next) => {
+                        <GroupPicker multiple allowCreate={false} groups={groups} value={current} onChange={(next) => {
                           const added = next.filter((id) => !current.includes(id))
                           const removed = current.filter((id) => !next.includes(id))
                           move([s.name], added.length ? added : removed, added.length ? "add" : "remove")

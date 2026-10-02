@@ -26,6 +26,21 @@ plus a running Docker Engine on the remote Linux host. A missing local
 gateway executable is downloaded and checksum-verified on supported platforms.
 `
 
+export function nodeSupported(version = process.versions.node) {
+  const [major, minor] = version.split('.').map(Number)
+  return major > 22 || (major === 22 && minor >= 13)
+}
+
+// node:sqlite prints an ExperimentalWarning on every start. It is expected, so
+// only that one is dropped; every other warning still prints as usual.
+function quietSqliteWarning() {
+  process.removeAllListeners('warning')
+  process.on('warning', (warning) => {
+    if (warning.name === 'ExperimentalWarning' && /SQLite/.test(warning.message)) return
+    console.error(`(node:${process.pid}) ${warning.name}: ${warning.message}`)
+  })
+}
+
 export function parseOptions(args = process.argv.slice(2)) {
   const { values } = parseArgs({ args, options: {
     host: { type: 'string', default: '127.0.0.1' },
@@ -152,6 +167,8 @@ async function main() {
   const options = parseOptions()
   if (options.help) { process.stdout.write(HELP); return }
   if (options.version) { console.log(JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version); return }
+  if (!nodeSupported()) throw new Error(`OpenRod needs Node.js 22.13 or newer, and this is ${process.versions.node}. Install a current release from https://nodejs.org, then run it again.`)
+  quietSqliteWarning()
   const runtime = await startConsole(options)
   let stopping = false
   const shutdown = () => {

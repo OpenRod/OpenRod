@@ -19,10 +19,12 @@ test('network writes require one or more existing groups without bypass scopes',
   ]) assert.throws(() => assertPolicyGroup({ ...policy, appliesTo }, groups))
 })
 
-test('launch and reassignment require a group with its own network policy', () => {
-  for (const group of [null, 'missing', 'data']) assert.throws(() => assertSandboxGroup(group, groups, [policy]))
-  assert.throws(() => assertSandboxGroup('frontend', groups, [{ ...policy, appliesTo: { everyone: true, groups: [], sandboxes: [] } }]))
-  assert.doesNotThrow(() => assertSandboxGroup('frontend', groups, [policy]))
+test('launch and reassignment accept no group or groups without rules, but not unknown groups', () => {
+  for (const group of [null, [], 'data']) assert.doesNotThrow(() => assertSandboxGroup(group, groups, [policy]))
+  assert.throws(() => assertSandboxGroup('missing', groups, [policy]), /Unknown group/)
+  for (const group of [null, 'missing', 'data']) assert.throws(() => assertSandboxGroup(group, groups, [policy], true))
+  assert.throws(() => assertSandboxGroup('frontend', groups, [{ ...policy, appliesTo: { everyone: true, groups: [], sandboxes: [] } }], true))
+  assert.doesNotThrow(() => assertSandboxGroup('frontend', groups, [policy], true))
   assert.ok(compileFor({ name: 'web', group: 'frontend' }, [policy]).egress_npm)
   assert.equal(compileFor({ name: 'etl', group: 'data' }, [policy]).egress_npm, undefined)
 })
@@ -35,8 +37,7 @@ test('deletion and reassignment cannot remove the last policy of an occupied gro
   assert.doesNotThrow(() => assertPolicyCoverage([policy], [policy], ['frontend']))
 })
 
-test('server launch rejects missing and unknown required groups before provisioning', async () => {
-  await assert.rejects(planSandbox({ name: 'invalid', requireGroup: true }), /Choose at least one group/)
+test('server launch rejects unknown groups before provisioning', async () => {
   await assert.rejects(planSandbox({ name: 'invalid', group: 'nonexistent-test-group', requireGroup: true }), /Unknown group/)
 })
 
@@ -61,8 +62,8 @@ test('one network policy reaches every selected group and protects each occupied
 test('a sandbox can inherit from multiple groups but cannot lose its last policy', () => {
   assert.doesNotThrow(() => assertSandboxGroup(['frontend', 'data'], groups, [policy]))
   assert.throws(() => assertSandboxGroup(['frontend', 'unknown'], groups, [policy]), /Unknown group/)
-  assert.throws(() => assertSandboxGroup([], groups, [policy]), /at least one group/)
-  assert.throws(() => assertSandboxGroup(['data'], groups, [policy]), /network rule/)
+  assert.throws(() => assertSandboxGroup([], groups, [policy], true), /at least one group/)
+  assert.throws(() => assertSandboxGroup(['data'], groups, [policy], true), /network rule/)
   const dataRule = { ...policy, id: 'data', appliesTo: { ...policy.appliesTo, groups: ['data'] } }
   assert.doesNotThrow(() => assertPolicyCoverage([policy, dataRule], [dataRule], [['frontend', 'data']]))
   assert.throws(() => assertPolicyCoverage([policy, dataRule], [], [['frontend', 'data']]), /last network rule/)

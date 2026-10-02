@@ -31,8 +31,8 @@ export const selectedAgents = (recipe) => AGENTS.filter((a) => recipe.agents.inc
 export const RUNTIMES = [
   { id: 'node', name: 'Node.js 22', logo: '/logos/templates/nodejs.svg' },
   { id: 'python', name: 'Python 3', logo: '/logos/templates/python.svg' },
-  // Open in VS Code needs this: its network rule lives in shared/agent-access.js.
-  { id: 'vscode', name: 'VS Code Server', logo: '/logos/vscode.svg' },
+  // Retired: Open in VS Code prepares any sandbox. Kept so saved templates stay valid.
+  { id: 'vscode', name: 'VS Code Server', logo: '/logos/vscode.svg', retired: true },
 ]
 // OpenShell intercepts TLS with its own CA. curl and the VS Code CLI read it
 // from CURL_CA_BUNDLE and SSL_CERT_FILE; GNU wget, which Remote-SSH tries

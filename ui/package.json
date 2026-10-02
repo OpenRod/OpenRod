@@ -21,7 +21,7 @@
   ],
   "type": "module",
   "bin": {
-    "openrod": "./server/cli.js"
+    "openrod": "server/cli.js"
   },
   "files": [
     "dist/",

@@ -1,5 +1,5 @@
-import { AGENTS, RUNTIMES, newRecipe, buildFingerprint } from './image-templates.js'
-import { agentAccessFor, TOOL_ACCESS } from '../../shared/agent-access.js'
+import { AGENTS, newRecipe, buildFingerprint } from './image-templates.js'
+import { agentAccessFor } from '../../shared/agent-access.js'
 
 export const QUICK_AGENTS = AGENTS.filter((agent) => !agentAccessFor({ source: 'build', agents: [agent.id] }).unsupported.length)
 export function normalizeQuickAgents(value) {
@@ -16,19 +16,17 @@ export function quickSession(ids, openIn) {
   return agent.command
 }
 
-export const QUICK_TOOLS = RUNTIMES.filter((tool) => TOOL_ACCESS[tool.id])
-export function quickRecipe(agentId, name = '', openIn = 'agent', withSetups = false, setups = [], tools = []) {
+export function quickRecipe(agentId, name = '', openIn = 'agent', withSetups = false, setups = []) {
   if (!['agent', 'shell'].includes(openIn)) throw new Error('Choose Shell or the selected agent.')
-  if (tools.some((id) => !TOOL_ACCESS[id])) throw new Error('Choose a supported tool.')
-  const runtimes = [...((withSetups || setups.length) ? ['python', 'node'] : []), ...QUICK_TOOLS.filter((tool) => tools.includes(tool.id)).map((tool) => tool.id)]
+  const runtimes = (withSetups || setups.length) ? ['python', 'node'] : []
   const agents = normalizeQuickAgents(agentId)
   const agent = QUICK_AGENTS.find((item) => item.id === agents[0])
   // Composed images are independent of which session opens on connection.
   return newRecipe({ name, agents, runtimes, setups: setups.map(s => s.id), setupRevisions: Object.fromEntries(setups.map(s => [s.id, s.revision])), command: Array.isArray(agentId) || openIn === 'shell' ? '' : agent?.command || '' })
 }
 
-export function matchingQuickTemplate(items, agentId, openIn = 'agent', withSetups = false, setups = [], tools = []) {
-  const expected = quickRecipe(agentId, '', openIn, withSetups, setups, tools)
+export function matchingQuickTemplate(items, agentId, openIn = 'agent', withSetups = false, setups = []) {
+  const expected = quickRecipe(agentId, '', openIn, withSetups, setups)
   return items.find((item) => item.managed && item.status === 'ready' && item.image && item.build === buildFingerprint(expected) &&
     JSON.stringify(newRecipe({ ...item.recipe, name: '' })) === JSON.stringify(expected))
 }
@@ -46,18 +44,18 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) cancel()
 })
 
-export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', withSetups = false, setups = [], tools = [], signal, onProgress = () => {}, onBuild = () => {}, onBuildUpdate = () => {}, wait = pause } = {}) {
+export async function prepareQuickTemplate(api, agentId, { openIn = 'agent', withSetups = false, setups = [], signal, onProgress = () => {}, onBuild = () => {}, onBuildUpdate = () => {}, wait = pause } = {}) {
   const check = () => { if (signal?.aborted) throw new DOMException('Preparation cancelled.', 'AbortError') }
   check()
   const items = await api.imageTemplates()
   check()
-  const existing = matchingQuickTemplate(items, agentId, openIn, withSetups, setups, tools)
+  const existing = matchingQuickTemplate(items, agentId, openIn, withSetups, setups)
   if (existing) { onBuildUpdate(existing); return existing }
   const ids = normalizeQuickAgents(agentId)
   const label = ids.length > 1 ? 'agents' : ids[0] || 'terminal'
   const name = `q-${label.slice(0, 9)}-${crypto.randomUUID().slice(0, 6)}`
   onProgress('Preparing environment… First-time setup can take a few minutes.')
-  const job = await api.buildImageTemplate(quickRecipe(agentId, name, openIn, withSetups, setups, tools))
+  const job = await api.buildImageTemplate(quickRecipe(agentId, name, openIn, withSetups, setups))
   onBuild(name)
   onBuildUpdate({ ...job, name })
   check()

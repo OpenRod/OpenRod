@@ -155,6 +155,18 @@ test('actual creation records only the new sandbox identity returned by the gate
   assert.ok(h.setupJobsForSandbox('web').every(job => job.status !== 'waiting'))
 })
 
+test('a first sandbox needs no group or network rule and still gets organization blocks', async t => {
+  const h = await fixture(t, {}), state = h.setupIdentityState
+  await h.write(path.join(h.policyDir, 'org/organization.json'), { blocked: ['blocked.example'] })
+  const { createSandbox } = await import(pathToFileURL(path.join(h.root, 'server/api.js')))
+  await createSandbox({ name: 'web', image: 'test/image', groups: [] })
+  const [spec] = state.created
+  assert.ok(spec.policy.networkPolicies.org_blocked.endpoints.some(e => e.host === 'blocked.example'))
+  assert.deepEqual(Object.keys(spec.policy.networkPolicies).filter(key => key.startsWith('egress_')), [])
+  assert.deepEqual(Object.keys(spec.labels).filter(key => key.startsWith('openshell.console/group')), [])
+  assert.deepEqual((await h.readMembers()).web, [])
+})
+
 test('setup removal reports a failed membership write so the operator can retry revocation', async t => {
   const h = await fixture(t, {}), state = h.setupIdentityState, setup = await saveSkill(h)
   const current = currentIdentity(state)
