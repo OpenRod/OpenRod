@@ -24,7 +24,7 @@ import { LocationBadge } from "@/components/location-badge"
 import { sandboxCreations } from "@/lib/sandbox-creations"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { AGENTS } from "@/lib/image-templates"
-import { QUICK_AGENTS, QUICK_TOOLS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
+import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { agentAccessFor } from "../../shared/agent-access.js"
 
@@ -105,13 +105,12 @@ function GroupField({ org, value, onChange, onCreated, onAddPolicy, invalid = fa
   return (
     <div id="sandbox-groups" className={`-m-3 rounded-lg p-3 transition-colors ${invalid ? "bg-destructive/5 ring-1 ring-destructive/60" : ""}`}>
     <fieldset aria-invalid={invalid || undefined} className="grid min-w-0 gap-2.5">
-      <legend className="mb-2.5 text-xs font-medium">Groups <span className={invalid ? "text-destructive" : "text-muted-foreground"}>· Required</span></legend>
-      <GroupPicker multiple required groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
+      <legend className="mb-2.5 text-xs font-medium">Groups <span className="text-muted-foreground">· Optional</span></legend>
+      <GroupPicker multiple groups={org.groups} counts={counts} value={value} onChange={onChange} onCreated={onCreated} />
       <motion.p key={value.join(",") || "empty"} initial={reducedMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} aria-live="polite" className={`text-[11px] leading-relaxed ${invalid ? "text-destructive" : "text-muted-foreground"}`}>
         {reach.length
           ? <>Gets {reach.length === 1 ? "this network rule" : `these ${reach.length} network rules`}: <span className="text-foreground">{reach.map((p) => p.name).join(", ")}</span>.</>
-          : chosen.length ? <>Add a network rule to at least one selected group before creating a sandbox.</>
-          : invalid ? (org.groups.length ? "Choose at least one group to create a sandbox." : "Create a group to create a sandbox.")
+          : chosen.length ? <>No network rules yet: this sandbox starts locked down. Add a rule to allow more.</>
           : org.groups.length ? null
           : "Create a group to share network access between sandboxes. Network rules can then target the whole group."}
       </motion.p>
@@ -192,7 +191,6 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   const [mode, setMode] = React.useState("quick")
   const [agentIds, setAgentIds] = React.useState([])
   const [openIn, setOpenIn] = React.useState("shell")
-  const [toolIds, setToolIds] = React.useState([])
   const [quickProviders, setQuickProviders] = React.useState({})
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
@@ -225,7 +223,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     }).catch((e) => { if (current) setError(e.message) })
     setName("")
     setMode(initialImageTemplate ? "template" : "quick")
-    setAgentIds([]); setOpenIn("shell"); setToolIds([]); setQuickProviders({})
+    setAgentIds([]); setOpenIn("shell"); setQuickProviders({})
     setSetupIds([])
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
@@ -250,7 +248,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
   const selectedAgents = QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id))
-  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds, "", "agent", false, [], toolIds) : chosenImage?.managed ? chosenImage.recipe : null)
+  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds) : chosenImage?.managed ? chosenImage.recipe : null)
   const attachedProviders = mode === "quick" ? [...new Set(selectedAgents.flatMap((agent) => {
     const chosenProvider = quickProviders[agent.id]
     return compatibleProviders(providers, agent.id).some((provider) => provider.name === chosenProvider) ? [chosenProvider] : []
@@ -283,7 +281,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     return () => { cancelled = true; clearTimeout(timer) }
   }, [start, folder, api])
 
-  const groupReady = group.length > 0 && group.every((id) => org?.groups.some((g) => g.id === id)) && groupNetworkPolicies(org?.policies, group).length > 0
+  const groupReady = group.every((id) => org?.groups.some((g) => g.id === id))
   const cloneDest = start === "repo" ? repoDest(repository) : null
   const startReady = start === "empty" || (start === "folder" ? Boolean(preview?.data && !preview.data.over) : Boolean(cloneDest))
 
@@ -301,7 +299,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
       return
     }
     const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
-    const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, tools = toolIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
+    const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
     const setups = setupIds, accessReview = setupAccessReview, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
     sandboxCreations.start({ name: sandboxName, location, task: async ({ signal, progress, build, creating }) => {
       let environment = template, launchSetupIds = [], launchAccessReview = null, buildName = null
@@ -313,7 +311,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
           launchSetupIds = prepared.setups.map(s => s.id)
           launchAccessReview = prepared.accessReview
           environment = await prepareQuickTemplate(api, agents, {
-            withSetups: setups.length > 0, setups: prepared.setups, tools, signal, onProgress: progress,
+            withSetups: setups.length > 0, setups: prepared.setups, signal, onProgress: progress,
             onBuildUpdate: build,
             onBuild: (value) => { buildName = value; if (signal.aborted) cancelBuild() },
           })
@@ -403,21 +401,6 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </fieldset>
-              <fieldset className="min-w-0">
-                <legend className="mb-1.5 text-xs font-medium">Tools</legend>
-                <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
-                  {QUICK_TOOLS.map((tool) => (
-                    <label key={tool.id} className="relative min-w-0" title="Allows VS Code's server download from the start. Open in VS Code works without it and allows the download on first open.">
-                      <input type="checkbox" checked={toolIds.includes(tool.id)} onChange={() => setToolIds(toolIds.includes(tool.id) ? toolIds.filter((id) => id !== tool.id) : [...toolIds, tool.id])} className="peer sr-only" />
-                      <span className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
-                        <img src={tool.logo} alt="" className="size-4 shrink-0 object-contain dark:invert" />
-                        <span className="min-w-0 flex-1">{tool.name}</span>
-                        {toolIds.includes(tool.id) && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
-                      </span>
-                    </label>
-                  ))}
-                </div>
               </fieldset>
               {selectedAgents.length > 0 && <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-xs font-medium">Open in</legend>

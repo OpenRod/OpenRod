@@ -88,13 +88,13 @@ export async function resolveDestinationGroups({ destinationGroups, name, recipe
     try { selected = groupIds(destinationGroups) } catch (error) { throw fail(error.message) }
   } else {
     const eligible = groups.filter(group => {
-      try { assertSandboxGroup([group.id], groups, policies); return true } catch { return false }
+      try { assertSandboxGroup([group.id], groups, policies, true); return true } catch { return false }
     })
     if (!eligible.length) throw fail('Add a network rule to a destination group before importing this workspace.', 409)
     if (eligible.length !== 1) throw fail('Choose a destination group before importing this workspace.', 409)
     selected = [eligible[0].id]
   }
-  try { assertSandboxGroup(selected, groups, policies) } catch (error) { throw fail(error.message) }
+  try { assertSandboxGroup(selected, groups, policies, true) } catch (error) { throw fail(error.message) }
   const plan = await (dependencies.planSandbox ?? planSandbox)({ name, groups: selected, requireGroup: true, agentRules: recipe ? agentAccessRules(recipe) : [] })
   return plan.groups
 }

@@ -208,18 +208,11 @@ test('build updates expose initial, growing, and failed logs before rejecting la
   assert.ok(updates.every((value) => value.name === name))
 })
 
-test('the VS Code Server tool joins the quick recipe, its access rules and template reuse', async () => {
-  const recipe = quickRecipe('claude', 'code', 'agent', false, [], ['vscode'])
-  assert.deepEqual(recipe.runtimes, ['vscode'])
-  assert.deepEqual(recipeErrors(recipe), {})
-  assert.match(dockerfileFor(recipe), /\/etc\/wgetrc/)
-  assert.deepEqual(agentAccessRules(recipe).map(r => r.name), ['agent-claude', 'tool-vscode-server'])
-  assert.deepEqual(quickRecipe([], '', 'shell', true, [], ['vscode']).runtimes, ['python', 'node', 'vscode'])
-  assert.throws(() => quickRecipe('claude', '', 'agent', false, [], ['emacs']), /supported tool/)
-  const saved = withBuild({ name: 'saved', managed: true, image: 'local:test', status: 'ready', recipe: quickRecipe('claude', 'saved', 'agent', false, [], ['vscode']) })
-  assert.equal(matchingQuickTemplate([saved], 'claude', 'agent', false, [], ['vscode']), saved)
-  assert.equal(matchingQuickTemplate([saved], 'claude'), undefined)
-  let built
-  await prepareQuickTemplate({ imageTemplates: async () => [], buildImageTemplate: async (r) => { built = r; return { status: 'failed', error: 'stop' } } }, 'claude', { tools: ['vscode'] }).catch(() => {})
-  assert.deepEqual(built.runtimes, ['vscode'])
+test('Quick setup offers no tools and emits no wgetrc line', async () => {
+  assert.equal((await import('./quick-setup.js')).QUICK_TOOLS, undefined)
+  for (const recipe of [quickRecipe('claude', 'code'), quickRecipe([], '', 'shell', true), quickRecipe('claude', 'code', 'agent', false, [], ['vscode'])]) {
+    assert.ok(!recipe.runtimes.includes('vscode'))
+    assert.doesNotMatch(dockerfileFor(recipe), /wgetrc/)
+    assert.ok(!agentAccessRules(recipe).some((rule) => rule.name.startsWith('tool-')))
+  }
 })

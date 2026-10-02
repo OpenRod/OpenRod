@@ -79,7 +79,8 @@ test('transfer groups use destination policy and reject ambiguity or invalid pol
       await fs.writeFile(path.join(policyRoot, 'org/organization.json'), JSON.stringify({ blocked: ['api.anthropic.com'] }))
       await assert.rejects(importTransfer(request({ destinationGroups: ['one'] }), operations), /organization blocks/)
       assert.deepEqual(effects, [])
-      await assert.rejects(planSandbox({ name: 'ordinary', requireGroup: true }), /Choose at least one group/)
+      // Ordinary launches may skip groups; organization blocks still apply.
+      assert.ok((await planSandbox({ name: 'ordinary', requireGroup: true })).policy.networkPolicies.org_blocked)
     })
     await runWithContext({ gateway: 'other-destination', workspace: 'team' }, async () => {
       await assert.rejects(resolveDestinationGroups({ name: 'imported', destinationGroups: ['one'] }), /Unknown group/)

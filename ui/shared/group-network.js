@@ -13,11 +13,13 @@ export function assertPolicyGroup(policy, groups) {
   if (to.groups.some((id) => !groups.some((g) => g.id === id))) throw new Error('Unknown group.')
 }
 
-export function assertSandboxGroup(group, groups, policies) {
+// Groups are optional; a sandbox without group rules starts locked down.
+// Cloud transfers still ask for a group with a network rule.
+export function assertSandboxGroup(group, groups, policies, requireRule = false) {
   const ids = groupIds(group)
-  if (!ids.length) throw new Error('Choose at least one group for this sandbox.')
+  if (requireRule && !ids.length) throw new Error('Choose at least one group for this sandbox.')
   if (ids.some((id) => !groups.some((g) => g.id === id))) throw new Error('Unknown group.')
-  if (!groupNetworkPolicies(policies, group).length) throw new Error('Add a network rule to at least one selected group before creating or updating a sandbox.')
+  if (requireRule && !groupNetworkPolicies(policies, group).length) throw new Error('Add a network rule to at least one selected group before creating or updating a sandbox.')
 }
 
 export function assertPolicyCoverage(before, after, memberships) {

@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto'
 import { MAX_RECIPE_BYTES, RECIPE_ANNOTATION, newRecipe, pendingRecipe, pendingRecipeKey, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
 import { imageTemplateRoute, localEngine, publishImageTemplate, templateView } from './image-templates.js'
 import { contextKey, runWithContext } from './gateway.js'
+import { agentAccessRules } from '../shared/agent-access.js'
 import { scopedStateDirectory } from './paths.js'
 
 test('draft recovery isolates gateway and workspace drafts and ignores unscoped drafts', () => {
@@ -654,4 +655,10 @@ test('VS Code Server is a validated, stored recipe choice that keeps curl and tr
   assert(dockerfile.indexOf('/etc/wgetrc') < dockerfile.indexOf('USER sandbox'))
   assert.doesNotMatch(dockerfileFor(newRecipe({ name: 'plain' })), /wgetrc/)
   assert.equal(recipeErrors(newRecipe({ name: 'bad', runtimes: ['vscode-insiders'] })).runtimes, 'Choose a supported runtime.')
+  // No longer offered, but a saved VS Code Server template stays managed and launchable.
+  const saved = storedRecipe(newRecipe({ name: 'code', agents: ['claude'], runtimes: ['vscode'], command: 'claude' }))
+  const view = templateView({ metadata: { name: 'code', annotations: { [RECIPE_ANNOTATION]: JSON.stringify(saved) } }, spec: { workload: { image: 'openshell-template/code:1' } } })
+  assert.equal(view.managed, true)
+  assert.deepEqual([view.recipe.agents, view.recipe.command, view.recipe.runtimes], [['claude'], 'claude', ['vscode']])
+  assert.deepEqual(agentAccessRules(view.recipe).map((rule) => rule.name), ['agent-claude', 'tool-vscode-server'])
 })
