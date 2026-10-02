@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎣 OpenRod
+# <img src="docs/images/openrod-logo.png" alt="" height="48" align="absmiddle"> OpenRod
 
 **A web console for [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell).**
 Create sandboxes, edit policy, and open agent sessions from one place, running on your own machine.
