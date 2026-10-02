@@ -9,8 +9,6 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 [![npm](https://img.shields.io/npm/v/openrod)](https://www.npmjs.com/package/openrod)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-[Quick start](#-quick-start) · [Remote hosts](docs/remote-hosts.md) · [Security](#-security) · [Development](#-development)
-
 </div>
 
 ---
