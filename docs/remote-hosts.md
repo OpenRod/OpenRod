@@ -51,7 +51,7 @@ Your original local gateway continues independently. Selecting it does not stop 
 | No SSH hosts | Add a concrete `Host my-host` entry to the console account's `~/.ssh/config`, then refresh. |
 | Host key or authentication rejected | Run `ssh my-host` yourself, verify the host's identity, and configure a usable key or agent. The console does not accept unknown keys or prompt for passwords. |
 | Docker missing or inaccessible | Install/start Docker Engine on the Linux host and grant the SSH user socket access. Docker access is effectively host-administrator authority. |
-| Runtime still missing after upload | Supply both exact version tags for the detected architecture, using a trusted `docker save` archive. |
+| Runtime still missing after upload | Supply all three exact version tags (sandbox, supervisor and gateway) for the detected architecture, using a trusted `docker save` archive. |
 | SSH forwarding failed | Enable TCP and Unix-socket forwarding for this SSH account. Ensure the reported remote loopback port is not already in use. |
 | Another console owns the connection | Disconnect or stop that console before connecting here. |
 | Local gateway missing | Start and register your existing local gateway using the OpenShell CLI, then refresh. Only HTTPS/mTLS registrations are offered. |
