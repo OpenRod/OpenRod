@@ -1,5 +1,7 @@
 # Contributing
 
+OpenRod takes **issues from everyone** and **pull requests only from the OpenRod team** for now. Pull requests from outside the team are closed automatically; please [open an issue](https://github.com/OpenRod/OpenRod/issues/new/choose) instead.
+
 Thanks for helping improve OpenRod. Bug reports, fixes and focused features are welcome; for larger changes, open an issue first to agree on the approach.
 
 ## License and sign-off

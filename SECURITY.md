@@ -62,6 +62,6 @@ Legacy checkout policy migration is a one-time copy only for the original local 
 
 ## Reporting vulnerabilities
 
-Report vulnerabilities privately through GitHub: open this repository's **Security** tab and choose **Report a vulnerability**. Do not open a public issue, and do not post credentials, exploit details, or real sandbox logs anywhere public. Include the affected version, a minimal reproduction, the impact, and redacted evidence.
+Report vulnerabilities privately through GitHub: open this repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/OpenRod/OpenRod/security/advisories/new)). Do not open a public issue, and do not post credentials, exploit details, or real sandbox logs anywhere public. Include the affected version, a minimal reproduction, the impact, and redacted evidence.
 
 Fixes go to the main branch and the latest release. There is no security SLA and no claim of an independent security audit. Report vulnerabilities in the OpenShell gateway or runtime itself to the upstream [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) project.
