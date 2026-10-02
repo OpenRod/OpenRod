@@ -40,7 +40,7 @@ async function certificates(root) {
     if (result.code !== 0 || result.timedOut || result.outputExceeded) throw fail(`Could not generate gateway certificates: ${result.stderr.trim()}`, 502)
   }
   try {
-    await privateWrite(path.join(staging, 'ca.cnf'), '[req]\nprompt=no\ndistinguished_name=dn\nx509_extensions=ca\n[dn]\nCN=OpenShell Console Remote CA\n[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n')
+    await privateWrite(path.join(staging, 'ca.cnf'), '[req]\nprompt=no\ndistinguished_name=dn\nx509_extensions=ca\n[dn]\nCN=OpenRod Remote CA\n[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n')
     await run(['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '3650', '-keyout', 'ca.key', '-out', 'ca.crt', '-config', 'ca.cnf'])
     for (const kind of ['server', 'client', 'supervisor']) {
       await privateWrite(path.join(staging, `${kind}.ext`), `basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nauthorityKeyIdentifier=keyid,issuer\nextendedKeyUsage=${kind === 'server' ? 'serverAuth' : 'clientAuth'}\n${kind === 'server' ? 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' : ''}`)

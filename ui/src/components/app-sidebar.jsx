@@ -58,7 +58,7 @@ export function AppSidebar({ view, onNavigate }) {
           </span>
           <span className="flex flex-col leading-none">
             <span className="sidebar-wordmark text-lg font-normal tracking-tight whitespace-nowrap">OpenRod</span>
-            <span className="mt-0.5 text-[10px] whitespace-nowrap text-muted-foreground">openshell-console</span>
+            <span className="mt-0.5 text-[10px] whitespace-nowrap text-muted-foreground">for OpenShell</span>
           </span>
         </div>
       </SidebarHeader>

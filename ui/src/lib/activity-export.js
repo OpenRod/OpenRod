@@ -17,7 +17,7 @@ export function toOCSF(event) {
     time: Number.isFinite(sourceTime) ? sourceTime : receivedTime,
     metadata: {
       version: OCSF_VERSION,
-      product: { name: 'OpenShell Console', vendor_name: 'OpenShell' },
+      product: { name: 'OpenRod', vendor_name: 'OpenRod' },
       ...(event.id ? { uid: event.id } : {}),
       ...(Number.isFinite(receivedTime) ? { logged_time: receivedTime } : {}),
       ...(event.correlationId ? { correlation_uid: event.correlationId } : {}),

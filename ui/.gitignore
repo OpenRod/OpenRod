@@ -1,6 +1,6 @@
 node_modules
 dist
 .state
-openshell-console-*.tgz
+openrod-*.tgz
 # Operator-authored policy data never belongs in the repo
 /policies/

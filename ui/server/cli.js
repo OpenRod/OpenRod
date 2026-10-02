@@ -7,9 +7,9 @@ import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 import { parseArgs } from 'node:util'
 
-const HELP = `Usage: openshell-console [--host 127.0.0.1] [--port 4600] [--open | --no-open]
+const HELP = `Usage: openrod [--host 127.0.0.1] [--port 4600] [--open | --no-open]
 
-Serve the OpenShell Console locally for local sandboxes or configured SSH hosts.
+Serve OpenRod locally for local sandboxes or configured SSH hosts.
 Open the printed link: it carries a secret that changes on every start.
 
   --host <host>  Loopback only: 127.0.0.1, localhost, or ::1
@@ -164,5 +164,5 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(await fs.realpath(process.argv[1])).href) {
-  main().catch((error) => { console.error(`openshell-console: ${error.message}`); process.exitCode = 1 })
+  main().catch((error) => { console.error(`openrod: ${error.message}`); process.exitCode = 1 })
 }
