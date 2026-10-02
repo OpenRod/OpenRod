@@ -530,7 +530,7 @@ export function SetupPicker(props) {
 
 const NO_INHERITED_SETUPS = []
 
-function ScopedSetupPicker({ value = [], onChange, inherited = NO_INHERITED_SETUPS, accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox', localCatalog }) {
+function ScopedSetupPicker({ value = [], onChange, inherited = NO_INHERITED_SETUPS, accessReview, onAccessReview, automaticAccess = false, autoPrepare = false, preparationContext = 'sandbox', localCatalog, retained = NO_INHERITED_SETUPS }) {
   const api = useApi()
   const [items, setItems] = React.useState([])
   const [error, setError] = React.useState('')
@@ -539,9 +539,9 @@ function ScopedSetupPicker({ value = [], onChange, inherited = NO_INHERITED_SETU
   const reviewsAccess = Boolean(onAccessReview)
   React.useEffect(() => {
     let current = true
-    api.setups().then((value) => { if (current) setItems(value.filter(s => !localCatalog?.available || !s.localSource || localCatalog.setups.includes(s.id) || inherited.includes(s.id))) }).catch((e) => { if (current) setError(e.message) })
+    api.setups().then((value) => { if (current) setItems(value.filter(s => !localCatalog?.available || !s.localSource || localCatalog.setups.includes(s.id) || inherited.includes(s.id) || retained.includes(s.id))) }).catch((e) => { if (current) setError(e.message) })
     return () => { current = false }
-  }, [api, localCatalog, inherited])
+  }, [api, localCatalog, inherited, retained])
   React.useEffect(() => {
     if (!reviewsAccess) return
     let current = true
