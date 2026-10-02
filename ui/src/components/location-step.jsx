@@ -1,6 +1,6 @@
 import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ArrowLeft, ArrowUpRight, Loader2 } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, Laptop, Loader2, Server } from "lucide-react"
 
 import { RemoteConnect } from "@/components/remote-connect"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -9,9 +9,9 @@ import { DotPattern } from "@/components/ui/dot-pattern"
 import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
 
-export function StepTrail({ step }) {
+export function StepTrail({ step, subject = "sandbox" }) {
   return <ol aria-label="Steps" className="flex items-center gap-2 text-[11px] text-muted-foreground">
-    {["Location", "Sandbox"].map((label, index) => {
+    {["Location", subject === "template" ? "Template" : "Sandbox"].map((label, index) => {
       const current = index + 1 === step
       const finished = index + 1 < step
       return <React.Fragment key={label}>
@@ -23,6 +23,15 @@ export function StepTrail({ step }) {
       </React.Fragment>
     })}
   </ol>
+}
+
+// The chosen location in a form header, with a way back to the location step.
+export function LocationChip({ location, onChange }) {
+  return <span className="flex items-center gap-1.5 rounded-full border border-border bg-muted/30 py-0.5 pr-1 pl-2.5 text-[11px] text-muted-foreground">
+    {location?.remote ? <Server aria-hidden="true" className="size-3" /> : <Laptop aria-hidden="true" className="size-3" />}
+    <span className="max-w-40 truncate text-foreground">{location?.remote ? hostOf(location) : "This computer"}</span>
+    <Button type="button" variant="ghost" size="sm" className="h-5 rounded-full px-2 text-[11px]" onClick={onChange}>Change</Button>
+  </span>
 }
 
 const hostOf = (location) => location?.label?.replace(/^SSH · /, "") ?? location?.gateway
@@ -118,7 +127,7 @@ function Place({ index, scene, live, title, caption, tone = "idle", disabled, on
   </motion.button>
 }
 
-export function LocationStep({ locations, allowRemote, onPick, onConnected, onCancel, connecting }) {
+export function LocationStep({ locations, allowRemote, onPick, onConnected, onCancel, connecting, subject = "sandbox" }) {
   const reduce = useReducedMotion()
   const [view, setView] = React.useState("choose")
   const [locals, setLocals] = React.useState(null)
@@ -148,12 +157,12 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
 
   return <div className="flex min-h-0 flex-col gap-6 rounded-xl bg-popover p-7 ring-1 ring-foreground/10">
     <DialogHeader className="gap-3">
-      <StepTrail step={1} />
+      <StepTrail step={1} subject={subject} />
       <div className="flex items-center gap-2">
         {view === "remote" && <Button type="button" variant="ghost" size="icon-sm" aria-label="Back to locations" onClick={() => setView("choose")}><ArrowLeft /></Button>}
         <DialogTitle>{view === "remote" ? "Connect a machine" : "Where should it run?"}</DialogTitle>
       </div>
-      <DialogDescription className={view === "remote" ? "sr-only" : "text-xs"}>{view === "remote" ? "Connect an SSH host to run sandboxes on." : "Pick a location for this sandbox."}</DialogDescription>
+      <DialogDescription className={view === "remote" ? "sr-only" : "text-xs"}>{view === "remote" ? `Connect an SSH host to ${subject === "sandbox" ? "run sandboxes on" : "build templates on"}.` : `Pick a location for this ${subject}.`}</DialogDescription>
     </DialogHeader>
 
     <div className="-m-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
@@ -175,7 +184,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
           </div>
         </motion.div> : <motion.div key="remote" {...slide}>
           {connecting ? <div role="status" className="grid place-items-center gap-3 py-16 text-xs text-muted-foreground">
-            <Loader2 className="size-5 animate-spin" />Connected. Opening the sandbox form…
+            <Loader2 className="size-5 animate-spin" />Connected. Opening the {subject} form…
           </div> : <RemoteConnect initialHost={remote ? hostOf(remote) : undefined} connectedHost={remote?.connected ? hostOf(remote) : null} onUseConnected={() => onPick(remote.id ?? remote.context)} onConnected={onConnected} onBack={() => setView("choose")} />}
         </motion.div>}
       </AnimatePresence>
