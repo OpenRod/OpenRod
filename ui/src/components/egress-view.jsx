@@ -231,7 +231,7 @@ function RuleSelection({ label, checked, mixed = false, disabled, onChange }) {
     className="block size-4 cursor-pointer rounded border-border accent-[var(--action)] focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed" />
 }
 
-function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, selected, onSelect, onSelectAll, onDelete, deleting }) {
+function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, onClearBlocked, selected, onSelect, onSelectAll, onDelete, deleting }) {
   const blocked = org?.org?.blocked ?? []
   const matchingSelected = policies.filter((p) => selected.has(p.id)).length
   const allSelected = policies.length > 0 && matchingSelected === policies.length
@@ -240,15 +240,16 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMember
       <ColumnHead className={POLICY_COLS}><RuleSelection label="Select all matching network rules" checked={allSelected} mixed={matchingSelected > 0 && !allSelected} disabled={deleting || !policies.length} onChange={onSelectAll} /><span>Rule</span><span>Action</span><span>Destinations</span><span>Groups</span><span>Enforced</span><span className="text-right">Actions</span></ColumnHead>
       <ul className="divide-y divide-border/60">
         {blocked.length > 0 && (
-          <li>
-            <button onClick={onEditBlocked} className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", POLICY_COLS)}>
-              <span /><span className="flex min-w-0 items-center gap-2.5"><ShieldOff aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">Blocked everywhere</span></span>
+          <li className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", POLICY_COLS)}>
+            <span />
+            <button onClick={onEditBlocked} aria-label="Edit blocked everywhere" className="col-span-5 grid grid-cols-subgrid items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <span className="flex min-w-0 items-center gap-2.5"><ShieldOff aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">Blocked everywhere</span></span>
               <ActionPill action="block" />
               <Hosts hosts={blocked} />
               <span className="truncate text-xs text-muted-foreground">Every sandbox · beats every rule</span>
               <span className="text-[12px] text-faint">Always</span>
-              <ChevronRight className="size-3.5 text-faint" aria-hidden="true" />
             </button>
+            <Button variant="ghost" size="sm" className="h-7 justify-self-end px-2 text-xs text-muted-foreground hover:text-destructive" aria-label="Clear blocked everywhere" disabled={deleting} onClick={onClearBlocked}><Trash2 className="size-3.5" />Delete</Button>
           </li>
         )}
         {policies.map((p) => {
@@ -273,7 +274,7 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMember
   )
 }
 
-function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, forSandbox, onClearSandbox }) {
+function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, onClearBlocked, forSandbox, onClearSandbox }) {
   const api = useApi()
   const [selected, setSelected] = React.useState(() => new Set())
   const [deleteTargets, setDeleteTargets] = React.useState(null)
@@ -450,7 +451,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {count === 0 && !(view === "rules" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
-            {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} setupMembers={org?.setupMembers} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
+            {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} setupMembers={org?.setupMembers} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} onClearBlocked={onClearBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
             {view === "destinations" && <>
               <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
               <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
@@ -938,6 +939,8 @@ function ScopedEgressView({ onNavigate: navigate }) {
   const [editor, setEditor] = React.useState(null)
   const [policyEditor, setPolicyEditor] = React.useState(null)
   const [editingBlocked, setEditingBlocked] = React.useState(false)
+  const [clearingBlocked, setClearingBlocked] = React.useState(false)
+  const [busyBlocked, setBusyBlocked] = React.useState(false)
   const [pending, setPending] = React.useState(null)
   const [signal, setSignal] = React.useState(0)
   const scroller = React.useRef(null)
@@ -1006,6 +1009,15 @@ function ScopedEgressView({ onNavigate: navigate }) {
     setSignal((n) => n + 1)
   }
 
+  async function clearBlocked() {
+    setBusyBlocked(true)
+    try {
+      const current = org ?? (await api.org())
+      reportSync(await api.saveOrg({ ...current.org, blocked: [] }), "Cleared blocked hosts")
+      setClearingBlocked(false)
+    } catch (e) { toast.error(e.message) } finally { setBusyBlocked(false) }
+  }
+
   async function confirmDecision() {
     const { b } = pending
     try {
@@ -1027,7 +1039,7 @@ function ScopedEgressView({ onNavigate: navigate }) {
         ) : !fleet ? <p role="status" className="py-24 text-center text-sm text-muted-foreground">Loading…</p>
         : fleet.error ? <p role="alert" className="py-24 text-center text-sm text-muted-foreground">{fleet.error}</p>
         : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onOpenGlobal={openGlobal} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
-            onEditPolicy={(p) => setPolicyEditor({ initial: p })} onEditBlocked={() => setEditingBlocked(true)}
+            onEditPolicy={(p) => setPolicyEditor({ initial: p })} onEditBlocked={() => setEditingBlocked(true)} onClearBlocked={() => setClearingBlocked(true)}
             onAddPolicy={() => setPolicyEditor({ initial: newPolicy(forSandbox ? { appliesTo: { everyone: false, groups: groupFor(org, forSandbox), sandboxes: [] } } : {}) })}
             forSandbox={forSandbox} onClearSandbox={() => setForSandbox(null)} />}
 
@@ -1035,6 +1047,18 @@ function ScopedEgressView({ onNavigate: navigate }) {
         groups={org?.groups ?? []} sandboxes={(fleet?.sandboxes ?? live.sandboxes ?? []).map((s) => s.name)} assignments={org?.assignments ?? {}} setupMembers={org?.setupMembers ?? {}} knownPrograms={knownPrograms}
         onGroupCreated={() => api.org().then(setOrg).catch(() => {})}
         onSaved={(result, policy) => reportSync(result, `${result.deleted ? "Deleted" : "Saved"} ${policy.name}`)} />
+      <AlertDialog open={clearingBlocked} onOpenChange={(o) => { if (!o && !busyBlocked) setClearingBlocked(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unblock {plural(org?.org?.blocked?.length ?? 0, "host")} everywhere?</AlertDialogTitle>
+            <AlertDialogDescription>Removes the shared blocked list and updates every sandbox. These hosts can then be reached if another rule allows them.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busyBlocked}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={busyBlocked} onClick={clearBlocked}>{busyBlocked ? "Removing…" : "Unblock all"}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <BlockedHostsDialog open={editingBlocked} onOpenChange={setEditingBlocked} org={org?.org} onSaved={(result) => reportSync(result, "Saved blocked hosts")} />
 
       <RuleEditor open={Boolean(editor)} onOpenChange={(o) => { if (!o) setEditor(null) }} initial={editor?.initial} knownPrograms={knownPrograms}
