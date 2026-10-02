@@ -63,7 +63,7 @@ function useEditors() {
 }
 
 // Cloud sandboxes have no local SSH or editors, so only the browser terminal applies.
-function OpenIn({ name, editors, cloud, context }) {
+function OpenIn({ name, editors, cloud, context, cursorAgent = false }) {
   const api = useApi()
   const [connection, setConnection] = React.useState(null)
   const [error, setError] = React.useState(null)
@@ -133,7 +133,8 @@ function OpenIn({ name, editors, cloud, context }) {
           <Button variant="outline" size="sm" className="justify-start text-xs" disabled={!connection?.canOpenTerminal || opening} title={unavailable ?? actionLabel} onClick={open}>
             {opening ? <Spinner className="size-3.5" /> : <SquareTerminal className="size-3.5" />}Terminal
           </Button>
-          {[{ id: "cursor", label: "Cursor" }, { id: "vscode", label: "VS Code" }].map((editor) => {
+          {/* Cursor's remote session needs the Cursor agent in the sandbox image, so offer it only when Cursor was chosen. */}
+          {[...(cursorAgent ? [{ id: "cursor", label: "Cursor" }] : []), { id: "vscode", label: "VS Code" }].map((editor) => {
             const installed = editors.some((item) => item.id === editor.id)
             return <Button key={editor.id} variant="outline" size="sm" className="justify-start text-xs" disabled={!installed || opening} title={!installed ? `${editor.label} is not installed.` : "Connects over SSH through OpenShell. The first time, OpenShell adds one Include line to ~/.ssh/config."} onClick={() => openEditor(editor)}>
               <img src={`/logos/${editor.id}.svg`} alt="" className="size-3.5 dark:invert" />{editor.label}
@@ -319,7 +320,7 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
 
                   </div>
                   <aside aria-label="Sandbox summary" className="space-y-5 border-t border-border bg-muted/20 p-5 lg:border-t-0 lg:border-l">
-                    {phase === "ready" && !live.demo && location?.connected !== false && <OpenIn key={name} name={name} editors={editors} cloud={!nativeActions} context={location ? { name: location.gateway, workspace: location.workspace, target: location.target } : { ...live.overview?.gateway, target: compute?.target }} />}
+                    {phase === "ready" && !live.demo && location?.connected !== false && <OpenIn key={name} name={name} editors={editors} cursorAgent={agents.some((agent) => agent.name === "Cursor")} cloud={!nativeActions} context={location ? { name: location.gateway, workspace: location.workspace, target: location.target } : { ...live.overview?.gateway, target: compute?.target }} />}
                     {!live.demo && phase === "ready" && location?.connected !== false && (cloud ? <ContinueLocally key={name} name={name} sandbox={sandbox} /> : <ContinueInCloud key={name} name={name} sandbox={sandbox} />)}
                     <Section title="At a glance">
                       {sandbox.setupJobs?.filter(job => ['waiting', 'failed', 'blocked'].includes(job.status)).map(job => <p key={job.setup} role="status" className="mb-3 text-xs text-muted-foreground">
