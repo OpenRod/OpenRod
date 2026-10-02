@@ -2,7 +2,13 @@ import { CloudComputeProvider, LocalComputeProvider, useCompute } from '@/lib/co
 import { LocalConnect } from './local-connect'
 import { LocalReturn } from './local-return'
 import { CloudMachine } from './cloud-machine'
+import { CloudBuildDialog } from './cloud-build-dialog'
+import { CloudSoon } from './cloud-soon'
 import * as React from 'react'
+import { Cloud } from 'lucide-react'
+import { toast } from 'sonner'
+import { buttonVariants } from '@/components/ui/button'
+import { CLOUD_AVAILABLE, CLOUD_SOON } from '@/lib/cloud-origin'
 
 async function authRequest(path, body) {
   const response = await fetch(`/api/auth/${path}`, {
@@ -17,10 +23,21 @@ async function authRequest(path, body) {
 export const useCloudMode = () => useCompute()?.target === 'cloud'
 export function CloudAccount() {
   const compute = useCompute()
-  // Cloud sign-in, the compute selector and Build in cloud stay hidden in the
-  // local console until cloud is ready to expose.
-  if (compute?.localViewer) return null
-  return <div className="ml-auto flex items-center gap-3 text-xs"><span className="max-w-40 truncate text-muted-foreground">{compute?.user?.email}</span><button className="underline underline-offset-4" onClick={compute?.logout}>Sign out</button></div>
+  const [open, setOpen] = React.useState(false)
+  if (!compute?.localViewer) return <div className="ml-auto flex items-center gap-3 text-xs"><span className="max-w-40 truncate text-muted-foreground">{compute?.user?.email}</span><button className="underline underline-offset-4" onClick={compute?.logout}>Sign out</button></div>
+  // Until a cloud origin is configured, cloud controls stay visible but inert.
+  if (!CLOUD_AVAILABLE) return <div className="ml-auto flex items-center gap-3 text-xs">
+    <label className="flex cursor-not-allowed items-center gap-2 opacity-50" title={CLOUD_SOON}><span className="text-muted-foreground">Compute</span><select aria-label={`Compute target. ${CLOUD_SOON}`} disabled className="cursor-not-allowed rounded-md border bg-background px-2 py-1.5 text-foreground" value="local"><option value="local">Local</option><option value="cloud">Cloud (coming soon)</option></select></label>
+    <CloudSoon>Sign in</CloudSoon>
+    <CloudSoon variant="default" className="gap-2"><Cloud aria-hidden="true" />Build in cloud</CloudSoon>
+  </div>
+  return <div className="ml-auto flex items-center gap-3 text-xs">
+    <label className="flex items-center gap-2"><span className="text-muted-foreground">Compute</span><select aria-label="Compute target" className="rounded-md border bg-background px-2 py-1.5 text-foreground" value={compute.target} onChange={e => e.target.value === 'cloud' && !compute.connected ? setOpen(true) : compute.selectTarget(e.target.value)}><option value="local">Local</option><option value="cloud">Cloud</option></select></label>
+    {compute.connected && <><span className="hidden max-w-40 truncate text-muted-foreground sm:block">{compute.user?.email}</span><button className="underline underline-offset-4" onClick={compute.disconnect}>Sign out</button></>}
+    {!compute.connected && <button disabled={compute.connecting} onClick={() => compute.connect().catch(e => toast.error('Couldn’t sign in', {description:e.message}))} className={buttonVariants({ size: 'sm', variant: 'outline' })}>{compute.connecting ? 'Signing in…' : 'Sign in'}</button>}
+    <button onClick={() => setOpen(true)} className={buttonVariants({ size: 'sm', className: 'gap-2' })}><Cloud aria-hidden="true" />Build in cloud</button>
+    <CloudBuildDialog open={open} onOpenChange={setOpen} />
+  </div>
 }
 export function AuthGate({ children }) {
   const [config, setConfig] = React.useState(null)

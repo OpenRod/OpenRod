@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Cloud, Laptop } from 'lucide-react'
+import { Cloud, Info, Laptop } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -11,6 +11,8 @@ import { useInventory } from '@/lib/inventory'
 import { copyLocalSandbox, copyCloudSandboxToLocal, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
 import { useTransferGroups } from '@/components/transfer-groups'
 import { LOCAL_ORIGIN, localHandoffUrl, isLocalHandoffMessage } from '@/lib/cloud-transfer'
+import { CLOUD_AVAILABLE } from '@/lib/cloud-origin'
+import { CloudSoon } from '@/components/cloud-soon'
 
 export function ContinueInCloud({ name, sandbox }) {
   const api = useApi()
@@ -48,6 +50,7 @@ export function ContinueInCloud({ name, sandbox }) {
     finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
   if (sandbox?.phase !== 'ready') return null
+  if (!CLOUD_AVAILABLE) return <CloudSoon className="w-full justify-start text-xs"><Cloud className="size-3.5" aria-hidden="true" />Continue in cloud</CloudSoon>
   return <div className="flex items-center gap-1">
     {dialog}
     <Button variant="outline" size="sm" className="flex-1 justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={copy}>
@@ -140,6 +143,7 @@ export function ContinueLocally({ name, sandbox }) {
       if(error.name !== 'AbortError') toast.error('Couldn’t import locally', {description:error.message})
     } finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
+  if (compute?.localViewer && !CLOUD_AVAILABLE) return <CloudSoon className="w-full justify-start text-xs"><Laptop className="size-3.5" aria-hidden="true" />Import and run locally</CloudSoon>
   return (
     <div className="flex items-center gap-1">
       {dialog}

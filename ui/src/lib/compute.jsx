@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { createApi } from './api.js'
 import { COMPUTE_KEY, initialComputeTarget, setComputeTarget, advanceComputeOwner, setCloudOwner } from './compute-target.js'
+import { CLOUD_AVAILABLE, CLOUD_SOON } from './cloud-origin.js'
 import { CLOUD_ORIGIN, localCloudRequest, waitForCloudReady, createLocalSignInAttempt } from './local-cloud.js'
 
 const ComputeContext = React.createContext(null)
@@ -52,12 +53,12 @@ function CloudReadyGate({ children, status, onStatus, onCancel }) {
     <p role="status" className="mt-3 text-sm text-muted-foreground">{machine?.message || 'Your account has one dedicated machine. Its first start can take several minutes.'}</p>
     {error && <><p role="alert" className="mt-4 text-sm text-destructive">{error}</p><button className="mt-4 text-sm underline" onClick={() => setRetry(n => n + 1)}>Try again</button></>}
     <button className="mt-6 block w-full text-xs underline" onClick={onCancel}>Use local compute</button>
-    <a href={CLOUD_ORIGIN} target="_blank" rel="noopener noreferrer" className="mt-4 block text-xs underline">Open cloud console</a>
+    {CLOUD_ORIGIN && <a href={CLOUD_ORIGIN} target="_blank" rel="noopener noreferrer" className="mt-4 block text-xs underline">Open cloud console</a>}
   </section></main>
 }
 export function LocalComputeProvider({ children }) {
   const [target, setTarget] = React.useState(() => initialComputeTarget(window.location.href, window.sessionStorage))
-  const [status, setStatus] = React.useState(null)
+  const [status, setStatus] = React.useState(() => CLOUD_AVAILABLE ? null : { connected: false })
   const [error, setError] = React.useState('')
   const [connecting, setConnecting] = React.useState(false)
   const [createRequested, requestCreate] = React.useState(false)
@@ -67,6 +68,7 @@ export function LocalComputeProvider({ children }) {
   setCloudOwner(status?.connected ? status.owner : null)
   React.useEffect(() => {
     let alive = true
+    if (!CLOUD_AVAILABLE) return
     localCloudRequest('status').then(value => { if (alive) setStatus(value) }).catch(e => { if (alive) { setError(e.message); setStatus({ connected: false }) } })
     const expired = () => { setStatus({ connected: false }); setError('Your cloud connection expired. Connect again to continue.') }
     window.addEventListener('openrod-session-expired', expired)
@@ -91,6 +93,7 @@ export function LocalComputeProvider({ children }) {
   }
   async function connect() {
     if (status?.connected) return status
+    if (!CLOUD_AVAILABLE) throw new Error(CLOUD_SOON)
     if (pending.current) throw new Error('A cloud sign-in is already open.')
     const popup = window.open('about:blank', '_blank', 'popup,width=520,height=720')
     if (!popup) throw new Error('Allow popups to connect your local OpenRod to cloud.')
@@ -133,7 +136,8 @@ export function LocalComputeProvider({ children }) {
       <h1 className="text-2xl font-semibold">Connect your cloud workspace</h1>
       <p className="mt-3 text-sm text-muted-foreground">Sign in with Google to control your private cloud machine from local OpenRod.</p>
       {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
-      <button disabled={status === null || connecting} className="mt-6 rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground disabled:opacity-50" onClick={() => connect().catch(() => {})}>{status === null ? 'Checking connection…' : connecting ? 'Connecting…' : 'Continue with Google'}</button>
+      {CLOUD_AVAILABLE ? <button disabled={status === null || connecting} className="mt-6 rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground disabled:opacity-50" onClick={() => connect().catch(() => {})}>{status === null ? 'Checking connection…' : connecting ? 'Connecting…' : 'Continue with Google'}</button>
+        : <><button disabled aria-disabled="true" title={CLOUD_SOON} className="mt-6 cursor-not-allowed rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground opacity-50">Continue with Google</button><p role="status" className="mt-3 text-xs text-muted-foreground">{CLOUD_SOON}</p></>}
       <button className="mt-4 block w-full text-xs underline" onClick={() => { cancelConnect(); selectTarget('local') }}>Use local compute</button>
     </section></main> : target === 'cloud' ? <CloudReadyGate key="cloud" status={status} onStatus={setStatus} onCancel={() => selectTarget('local')}><ComputeSession key={sessionKey} target={target} ownerScope={ownerScope}>{children}</ComputeSession></CloudReadyGate> : <ComputeSession key={sessionKey} target={target} ownerScope={ownerScope}>{children}</ComputeSession>}
   </ComputeContext.Provider>

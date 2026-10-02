@@ -9,6 +9,7 @@ import { findExecutable, sshBinary, shellQuote, fail } from './openshell-cli.js'
 import { projectOf } from '../src/lib/sandbox-session.js'
 import { readJson, responseJson } from './remote-http.js'
 import { validateHostKeys } from './cloud-ssh.js'
+import { cloudOrigin } from './cloud-origin.js'
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const EDITORS = { cursor: { label: 'Cursor', binary: 'cursor', app: 'Cursor.app' }, vscode: { label: 'VS Code', binary: 'code', app: 'Visual Studio Code.app' } }
@@ -121,7 +122,7 @@ export function createLocalCloudNative(dependencies = {}) {
     if (!/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?$/.test(origin)) throw fail('Invalid local origin.', 403)
     let alias = aliasFor(connection.user.uid, name, context)
     if (action === 'ssh') {
-      const view = connectionView(sandbox, { name: 'openrod-cloud', endpoint: 'https://cloud.example.com', remote: true }, { env, platform })
+      const view = connectionView(sandbox, { name: 'openrod-cloud', endpoint: dependencies.origin ?? cloudOrigin(), remote: true }, { env, platform })
       const ready = sandbox.phase === 'ready'
       if (ready) alias = (await install(name, origin, services, connection, context)).alias
       assertActive(services, connection)

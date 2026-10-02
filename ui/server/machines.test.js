@@ -57,10 +57,10 @@ test('readiness probe preserves the public Host and signed worker identity',asyn
  const {verifyWorkerRequest}=await import('./worker-auth.js')
  const key='a'.repeat(64)
  const server=http.createServer((req,res)=>{
-  assert.equal(req.headers.host,'cloud.example.com')
+  assert.equal(req.headers.host,'cloud.example.test')
   assert.equal(verifyWorkerRequest(key,'alice',req).uid,'alice')
   res.end('{}')
  })
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
- try{assert.equal(await workerReady({uid:'alice',key},'127.0.0.1',{port:server.address().port,host:'cloud.example.com'}),true)}finally{await new Promise(resolve=>server.close(resolve))}
+ try{assert.equal(await workerReady({uid:'alice',key},'127.0.0.1',{port:server.address().port,host:'cloud.example.test'}),true)}finally{await new Promise(resolve=>server.close(resolve))}
 })
