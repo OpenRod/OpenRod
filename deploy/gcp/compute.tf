@@ -1,8 +1,8 @@
-# Customer VMs cannot assign claims, provision machines or change IAM.
+# The control-plane VM cannot assign claims or change IAM.
 resource "google_project_iam_custom_role" "session_verifier" {
   role_id     = "openrod_${replace(var.org_id, "-", "_")}_sessions"
   title       = "OpenRod ${var.org_id} session verifier"
-  description = "Read accounts for membership/revocation checks and issue verified-user session cookies."
+  description = "Read accounts for disabled/revocation checks and issue verified-user session cookies."
   permissions = ["firebaseauth.users.get", "firebaseauth.users.createSession"]
   depends_on  = [google_project_service.required]
 }
