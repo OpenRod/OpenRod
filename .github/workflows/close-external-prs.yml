@@ -1,0 +1,24 @@
+name: Close external pull requests
+
+# OpenRod takes issues from everyone and pull requests only from the team.
+# pull_request_target runs this file from main, never the pull request's code,
+# and the job only comments and closes; it checks nothing out.
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    if: ${{ !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const { owner, repo } = context.repo
+            const number = context.payload.pull_request.number
+            await github.rest.issues.createComment({ owner, repo, issue_number: number, body: 'Thanks for your interest in OpenRod! We are not accepting pull requests from outside the team yet. Please open an issue describing the bug or idea instead: https://github.com/OpenRod/OpenRod/issues/new/choose' })
+            await github.rest.pulls.update({ owner, repo, pull_number: number, state: 'closed' })
