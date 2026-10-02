@@ -17,6 +17,7 @@
     "src/lib/*.js",
     "vendor/",
     "LICENSE",
+    "NOTICE",
     "THIRD_PARTY_NOTICES.md",
     "SETUPS.md",
     "!**/*.test.js"
@@ -28,6 +29,7 @@
     "start:local": "node ./server/cli.js",
     "preview": "node ./server/cli.js",
     "test": "node --test server/*.test.js src/lib/*.test.js",
+    "notices": "node scripts/third-party-notices.js",
     "prepack": "npm run build"
   },
   "dependencies": {
