@@ -1,44 +1,31 @@
-# OpenShell Console
+# OpenRod console internals
 
-A local control plane UI for OpenShell sandboxes. Start with the [project getting-started guide](../README.md#set-up-a-connection) for SSH hosts, runtime installation, source or locally built tarball installation, and troubleshooting. No published npm package is assumed.
+Feature and architecture reference for the OpenRod console in this directory: a React + Vite frontend (`src/`) and a Node server (`server/`) that holds the gateway credentials. For installation, prerequisites and the quick start, see the [project README](../README.md).
 
 ```bash
 npm ci
 npm run dev        # prints http://127.0.0.1:4600/?token=…; open that link
-# Local production: npm run build && npm run start:local -- --open
+npm test           # server and library tests
+npm run build && npm run start:local -- --open   # built console, as the installed CLI runs it
 ```
-
-## Local and OpenRod Cloud modes
-
-Local use stays account-free and bound to localhost. For a built local server:
-
-```bash
-npm ci
-npm run build
-npm start
-```
-
-Cloud mode uses Google Identity Platform sign-in and backend-enforced organization membership. Each organization runs a dedicated console/gateway VM. Missing cloud configuration stops startup. Use `npm start` behind the configured HTTPS proxy; the development server is not a cloud deployment server.
-
-See [the GCP deployment guide](../deploy/gcp/README.md) and [.env.example](.env.example). Run `npm test` for the console and authentication regression suite.
 
 ## First connection
 
-1. On **Sandboxes**, click **Connect machine** beside **New sandbox**. Choose a concrete alias from `~/.ssh/config` (including `Include` files), or switch to your existing local gateway.
+1. On **Sandboxes**, click **New sandbox**. In **Where should it run?**, choose **This computer** for your existing local gateway, or **Remote machine** and a concrete alias from `~/.ssh/config` (including `Include` files).
 2. For SSH, use trusted key-based access to a native Linux amd64/arm64 host with a rootful Docker Engine accessible to the SSH user. OpenShell need not already be installed.
-3. Click **Connect**. Matching installed sandbox/supervisor images are reused; missing images download automatically. Choose **Upload package** before connecting to supply a trusted `docker save` `.tar` instead. See [package preparation](../README.md#uploading-a-runtime-package).
+3. Click **Connect**. Matching installed sandbox/supervisor images are reused; missing images can be pulled with **Download on host**, or supplied with **Upload** as a trusted `docker save` `.tar`. See [package preparation](../README.md#uploading-a-runtime-package).
 4. The console starts a persistent Docker gateway **on the remote host**, with isolated state and certificates. It binds to remote loopback and uses host-local Docker; SSH forwards its authenticated API to your computer. The original local gateway is not reconfigured or stopped.
 5. Successful activation selects an accessible workspace and reloads. Sandboxes and Templates retain the local inventory alongside the SSH inventory, with **Local** / **SSH · alias** badges and an **All locations** filter. New sandbox chooses a location explicitly; Use template inherits its owner.
 
-Remote connections require local OpenSSH and OpenSSL. An existing `openshell-gateway` is reused; if absent, gateway 0.1.2 is downloaded automatically on Apple Silicon macOS or arm64/x64 Linux, checksum-verified, and installed under the console data directory (`tools/openshell-gateway-0.1.2/`) without sudo. Extraction requires `tar`. A pinned Docker gateway is created on the remote host; no cloud cluster is provisioned. Python 3 must be installed on the remote host. When Docker is genuinely missing on Ubuntu/Debian with systemd, the dialog asks for **Install Docker and continue** approval before any privileged installation. Approval authorizes installing `docker.io` and dependencies, enabling its service, and granting the SSH user root-equivalent Docker group access; root or passwordless sudo is required. Existing installations are reused, never automatically replaced or repaired. A fresh SSH login verifies access, then the chosen runtime download/upload mode continues. Partial installation changes can remain after failure. A local Docker daemon is unnecessary unless you build images or prepare an upload package locally.
+Remote connections require local OpenSSH and OpenSSL. An existing `openshell-gateway` is reused; if absent, gateway 0.1.2 is downloaded automatically on Apple Silicon macOS or arm64/x64 Linux, checksum-verified, and installed under the console data directory (`tools/openshell-gateway-0.1.2/`) without sudo. Extraction requires `tar`. A pinned Docker gateway is created on the remote host. Python 3 must be installed on the remote host. When Docker is genuinely missing on Ubuntu/Debian with systemd, the dialog asks for **Install Docker and continue** approval before any privileged installation. Approval authorizes installing `docker.io` and dependencies, enabling its service, and granting the SSH user root-equivalent Docker group access; root or passwordless sudo is required. Existing installations are reused, never automatically replaced or repaired. A fresh SSH login verifies access, then the chosen runtime download/upload mode continues. Partial installation changes can remain after failure. A local Docker daemon is unnecessary unless you build images or prepare an upload package locally.
 
-One remote host is connected at a time. Disconnecting, switching remote hosts, or stopping the console server stops that managed gateway and its tunnels without deleting remote containers or persisted gateway state. Reconnect explicitly after restarting the console. Gateway databases, policies and providers are separate; they are not automatically synchronized.
+One remote host is connected at a time. Disconnecting, switching remote hosts, or stopping the console server closes only the local SSH tunnels; the remote gateway container, its state and tmux sessions keep running. Reconnect explicitly after restarting the console. Gateway databases, policies and providers are separate; they are not automatically synchronized.
 
 Resource actions—including details, files, terminals, policy changes, template builds and bulk deletion—are bound to the row's gateway/workspace. Same names on independent gateways remain separate. For SSH creation, local network-policy templates, Groups, and MCPs & Skills are offered automatically as versioned destination snapshots. Existing remote settings remain available. Workload-image templates and provider credentials remain location-specific. Disconnect retains the last remote inventory, marked **Disconnected** with actions disabled, while local resources stay usable. The private remote metadata cache survives console restart; reconnect explicitly to restore live state. Remote gateway and tmux sessions keep running while the viewer is disconnected, including laptop sleep. Console-built images include tmux; old/custom images need tmux and explicit PTY filesystem grants.
 
 ## Pages
 
-- **Sandboxes**: a compact virtualized inventory table with sticky sortable columns, status counts, image and group filters, and search across the entire loaded fleet. Rows show name, status, owner, image, group, uptime, and creation age. Only viewport rows plus overscan are mounted; filtering and sorting are memoized separately from live traffic updates. A single click opens a centered popup with the access graph and a compact summary shown first. Rules, Activity, and Details tabs separate the longer content; navigation and lifecycle actions remain visible while each panel scrolls independently. The development-only `?fleet=1000` and `?fleet=10000` previews exercise large inventories without creating real sandboxes. This is client-side windowing over the loaded inventory, not server-side pagination. Owner comes from the owner field or labels; uptime requires a reported start time, and missing data is shown as “Not reported” instead of using creation age. A ready sandbox has **Open in Cursor** and **Open in VS Code** buttons (only for editors installed on this machine). They run `openshell sandbox connect <name> --editor …`, so OpenShell adds its managed SSH config (one `Include` line in `~/.ssh/config`, Host blocks in `~/.config/openshell/ssh_config`) and the editor connects over Remote-SSH. **Open in browser** runs the sandbox's session (its agent, or a shell) in a new browser tab: xterm.js in the page, a WebSocket to the console, and the gateway's interactive exec behind it (the RPC `openshell sandbox exec --tty` uses). The tab's menu starts another session as a shell or any installed agent. Each tab is one session, and it ends when the tab closes.
+- **Sandboxes**: a compact virtualized inventory table with sticky sortable columns, status counts, image and group filters, and search across the entire loaded fleet. Rows show name, status, owner, image, group, uptime, and creation age. Only viewport rows plus overscan are mounted; filtering and sorting are memoized separately from live traffic updates. A single click opens a centered popup with the access graph and a compact summary shown first. Rules, Activity, and Details tabs separate the longer content; navigation and lifecycle actions remain visible while each panel scrolls independently. The development-only `?fleet=1000` and `?fleet=10000` previews exercise large inventories without creating real sandboxes. This is client-side windowing over the loaded inventory, not server-side pagination. Owner comes from the owner field or labels; uptime requires a reported start time, and missing data is shown as “Not reported” instead of using creation age. A ready sandbox's **Open in** section has **VS Code** and **Cursor** buttons (enabled only for editors installed on this machine; **Cursor** appears only when Cursor is one of the sandbox's agents, since Cursor's remote connection needs Cursor in the sandbox). They run `openshell sandbox connect <name> --editor …`, so OpenShell adds its managed SSH config (one `Include` line in `~/.ssh/config`, Host blocks in `~/.config/openshell/ssh_config`) and the editor connects over Remote-SSH. **Browser** runs the sandbox's session (its agent, or a shell) in a new browser tab: xterm.js in the page, a WebSocket to the console, and the gateway's interactive exec behind it (the RPC `openshell sandbox exec --tty` uses). The tab's menu starts another session as a shell or any installed agent. Each tab is one session, and it ends when the tab closes.
 - **Approvals**: requests the gateway blocked and drafted rules for. Allow, reject with a reason, or revoke an earlier approval.
 - **Activity**: retained, searchable logs and platform events with collection coverage, separate policy decisions and outcomes, evidence details, investigation pivots, saved views, and JSON export.
 - **Gateway**: health, runtime, auth, providers, and a live traffic map.
@@ -110,8 +97,8 @@ missing attribution displays “Not reported”.
 The browser talks only to `/api/os/*` on the local console server, in both
 development and production. `server/` holds an `@nvidia/openshell-sdk` client
 (built from OpenShell v0.1.2, vendored in `vendor/`) authenticated with the
-selected CLI registration's mTLS bundle. **Connect machine** beside **New sandbox**
-selects an existing local gateway or connects to the persistent gateway on an SSH host.
+selected CLI registration's mTLS bundle. **New sandbox → Where should it run?**
+selects the existing local gateway or connects to the persistent gateway on an SSH host.
 Workspace selection is automatic. Operator credentials never reach the browser,
 and provider credential values are never returned.
 
@@ -131,22 +118,24 @@ second gateway binds loopback with TLS and has an isolated database and signing
 keys. OpenShell 0.1.2 receives a separate supervisor mTLS key in its remote
 supervisor-only volume, never either gateway's operator key.
 
-Remote template builds are refused rather than using the workstation's Docker
-engine accidentally. Use a remote-engine or registry workload image.
+Template builds for an SSH host run on the workstation's Docker engine for the
+host's architecture, then load the image through the SSH Docker tunnel and verify
+the engine identity, image ID and platform. **Use an existing image** checks or
+pulls the reference on the remote engine instead.
 
 The sandbox popup's **Connect** section uses the selected gateway and workspace.
 Every generated CLI command includes both `--gateway <name>` and
 `--workspace <name>`. Browser requests from stale selections are rejected;
 already-open terminal sessions keep their original target.
 
-- **Open in browser** keeps an SDK-backed `execInteractive` xterm session inside the console. This is not an OpenSSH connection and does not prove native SSH works.
-- **Native SSH → SSH shell → Open SSH in terminal** launches actual OpenSSH
+- **Open in → Browser** keeps an SDK-backed `execInteractive` xterm session inside the console. This is not an OpenSSH connection and does not prove native SSH works.
+- **Open in → Terminal** with **Connection options → SSH shell** launches actual OpenSSH
   using an owner-only temporary config, removed when SSH exits.
-- **Native SSH → Exec new** opens the sandbox's configured shell or agent in
+- **Connection options → New session** opens the sandbox's configured shell or agent in
   the project directory with `openshell sandbox exec --tty`.
-- **Native SSH → Attach** uses `openshell sandbox connect` for sandboxes whose
+- **Connection options → Attach** uses `openshell sandbox connect` for sandboxes whose
   canonical process owns a TTY. It is omitted otherwise.
-- **Show SSH config** runs `openshell sandbox ssh-config` and displays the Host
+- **SSH configuration** runs `openshell sandbox ssh-config` and displays the Host
   block for review and copying. It never changes `~/.ssh/config`. The existing
   editor action follows OpenShell's `sandbox connect --editor` behavior, which
   may install OpenShell's managed SSH config.
@@ -187,7 +176,7 @@ flowchart LR
     UI -->|"/api/os/*"| Server
     Credentials -->|"server-side only"| Server
 
-    UI -->|"Open in browser"| XTerm
+    UI -->|"Open in Browser"| XTerm
     XTerm -->|"WebSocket + one-use ticket"| Server
     Server -->|"SDK execInteractive over mTLS"| API
 
@@ -215,12 +204,12 @@ There are three connection paths:
 2. **Native OpenSSH:** the console generates an SSH config and opens
    `ssh -F <private-config> <alias>` in the system terminal. Its wrapper removes
    the config after exit. **Copy command** generates its own temporary config.
-3. **Exec new or canonical attach:** `sandbox exec --tty` starts the configured
+3. **New session or canonical attach:** `sandbox exec --tty` starts the configured
    program; `sandbox connect` attaches to a canonical TTY. Direct SSH uses
    `openshell ssh-proxy`, which authenticates to the selected gateway and
    requests an ephemeral relay session. Sandbox port 22 is never exposed.
 
-**Show SSH config** asks the CLI to render the Host block and returns it to the
+**SSH configuration** asks the CLI to render the Host block and returns it to the
 browser. The browser receives the gateway name, host alias, and command, but no
 certificate private key or ephemeral relay token. The action does not write the
 Host block; the operator may save it or use it as a temporary config:
@@ -309,14 +298,14 @@ Opaque event fingerprints and cursor aliases remain to prevent deleted events be
 
 **Setups → Bring my setup** discovers user-level Codex, Claude Code and Cursor configuration on the computer running the console. Discovery is explicitly requested, does not change the source files, and has no background watcher. Only selected skill folders are read in full for review. Project configurations and plugin-managed sources are not included.
 
-The review excludes MCP environment values, auth headers and tokens, shows portable configuration and build/runtime requirements, and provides text-only previews of selected skill files. Secret detection is best-effort: inspect the files before saving. Unsupported launchers, credential-dependent configurations, binary assets and unsafe links remain visibly blocked. Saving stores a reviewed snapshot in `ui/.state/setups/` with private file permissions. Deleting an MCP or Skill row saves a new revision; deleting an entire Setup removes its catalog snapshot. Both operations preserve source files and tools already deployed to sandboxes or built images. Templates referencing a deleted Setup need their selection updated before reuse. Changed source files require another import.
+The review excludes MCP environment values, auth headers and tokens, shows portable configuration and build/runtime requirements, and provides text-only previews of selected skill files. Secret detection is best-effort: inspect the files before saving. Unsupported launchers, credential-dependent configurations, binary assets and unsafe links remain visibly blocked. Saving stores a reviewed snapshot in the scoped state directory (`contexts/<scope-hash>/setups/`) with private file permissions. Deleting an MCP or Skill row saves a new revision; deleting an entire Setup removes its catalog snapshot. Both operations preserve source files and tools already deployed to sandboxes or built images. Templates referencing a deleted Setup need their selection updated before reuse. Changed source files require another import.
 
 - **Existing sandboxes:** select agents and check requirements. Enabling writes namespaced MCP entries and skill folders, preserves unrelated settings, and records an ownership manifest. Reapplying is idempotent; removal refuses to overwrite modified managed files. Python 3.11+ and the selected agents must already be installed. Restart the agents after changes.
 - **Image templates:** select saved Setups to bake inactive JSON bundles into `/sandbox/.openshell/bundles/`. Imported commands and scripts are not executed during the build. Wrapping an existing image uses `--network=none`; normal base-image/agent installation still follows the existing image builder. Destination-specific build-egress enforcement is not implemented.
 - **New sandboxes:** both Quick setup and From template show the MCPs & Skills picker. Quick setup targets all selected supported agents and prepares Python for the installer. From template lets you choose the target agent; the image must already include that agent and Python 3.11+. Blocked imports expose their reasons in the picker. Inherited and explicitly selected Setups start in Shell, then install after readiness and a fresh policy check. Missing executables or blocked destinations leave an actionable blocked status in Setups. A missing catalog snapshot fails launch instead of silently substituting another revision.
-- **Network:** importing, enabling and removing Setups never change network policy. A remote MCP needs matching existing host, port and executable permissions. Constrained policies or unverified script callers require review in Egress; organization and scoped restrictions still apply. Skills and local servers can have unknown downstream destinations, which remain subject to the sandbox policy.
+- **Network:** saving a Setup creates or updates a managed egress allow policy named "MCPs & Skills: <name>" for the sandboxes that use it, listing the hosts its active MCPs reach at runtime; enabling or removing the Setup on a sandbox adds it to or takes it out of that policy. Hosts that receive credentials are approved per sandbox instead. Organization blocks still apply. See [SETUPS.md](SETUPS.md#network-access). Skills and local servers can have unknown downstream destinations, which remain subject to the sandbox policy.
 
-This version is a private local-operator catalog, not organization/group distribution. Credential binding, automatic dependency packaging, remote endpoint upload, background synchronization and live MCP handshake/tool testing are not implemented. “Installed” verifies configuration and file contents; it does not mean authenticated, reachable or tool-call verified. Pending launch jobs live in the console process; after a restart, check and enable from the sandbox's Setups tab.
+This version is a private local-operator catalog, not organization/group distribution. Background synchronization with the source files and MCP tool-call testing are not implemented. “Installed” verifies configuration and file contents; it does not mean authenticated, reachable or tool-call verified. Pending launch jobs live in the console process; after a restart, check and enable from the sandbox's Setups tab.
 
 Run regression checks with `node --test ui/server/*.test.js ui/src/lib/*.test.js` from the repository root and `npm --prefix ui run build`. Setup tests cover snapshot pinning, secret exclusion, invalid/expired selections, file limits, links, configuration preservation, executable permissions, drift-safe removal, network preflight and image recipes. Live verification additionally exercised discovery/review/save in the browser, install/reapply/remove in an isolated sandbox, blocked runtime access without policy changes, and image-to-new-sandbox inheritance.
 

@@ -23,7 +23,7 @@ Each saved Setup whose MCPs reach the network gets one managed allow policy, `po
 
 - It lists the hosts the Setup's active MCPs reach at runtime and each remote MCP's own sign-in host, on their ports (normally 443). Package-build hosts such as the npm registry are never included; only the isolated builder reaches them. Hosts the organization blocks are left out and reported in the import popup.
 - Hosts an MCP sends credentials to, and sign-in services named by an MCP's sign-in metadata, are not in the policy: each sandbox approves them when the Setup is enabled there. The import popup lists them.
-- It applies to the sandboxes that use the Setup (`appliesTo.setups`), not to everyone. Gateway labels are fixed at creation, so the console records membership in `.state/setup-members.json`: at sandbox creation (selected and template Setups), on enable, on remove and on sandbox deletion. A Quick-setup `(prepared)` snapshot is recorded with the Setup it was prepared from and uses that Setup's policy. The policy is in the sandbox's policy from creation, and the 15-second policy sync keeps it current.
+- It applies to the sandboxes that use the Setup (`appliesTo.setups`), not to everyone. Gateway labels are fixed at creation, so the console records membership in `setup-members.json` in the gateway/workspace's scoped state directory: at sandbox creation (selected and template Setups), on enable, on remove and on sandbox deletion. A Quick-setup `(prepared)` snapshot is recorded with the Setup it was prepared from and uses that Setup's policy. The policy is in the sandbox's policy from creation, and the 15-second policy sync keeps it current.
 - Hosts and ports added to the policy in Egress are kept when the Setup's hosts are recomputed (on import and when an item is deleted); ports only a removed MCP needed close. A policy switched to Block in Egress is left unchanged. The policy is removed when the Setup is deleted, or when it would have no hosts left.
 - A program inside a member sandbox can reach the listed hosts, as with any allow policy. Credential-bound destinations still use per-sandbox grants that inject the secret for the listed executable only.
 
@@ -40,12 +40,7 @@ Each saved Setup whose MCPs reach the network gets one managed allow policy, `po
 
 ## Verification
 
-Automated tests: `node --test ui/server/*.test.js ui/src/lib/*.test.js`.
-Production build: `npm --prefix ui run build`.
-
-A live Quick setup test also covered unprepared shadcn → pinned snapshot → baked image → sandbox install, seven discovered tools, an HTTP 200 registry request, and reuse of the pinned image.
-
-Live disposable-sandbox checks covered Magic UI and shadcn initialization/tool discovery, package install/removal, gateway credential substitution and denial of an unrelated destination. Native Codex/Figma login reached the authorization step; account authorization must be completed by the user. No MCP tool actions were invoked during these checks.
+From `ui/`: `npm test` runs the automated tests and `npm run build` builds the production frontend. Live checks in disposable sandboxes have covered Quick setup from an unprepared npm MCP to a baked image and a working sandbox, MCP initialization and tool discovery, package install and removal, gateway credential substitution, and denial of an unrelated destination. Native OAuth logins reach the authorization step; account authorization is completed by the user. No MCP tool actions are invoked by these checks.
 
 ## Destination agents
 
