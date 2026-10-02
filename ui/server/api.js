@@ -454,7 +454,8 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
   if (httpServer?.listening) start()
   else httpServer?.once('listening', start)
   const route = (req, res, next = () => res.writeHead(404).end()) => {
-    const pathname = (req.url ?? '/').split('?', 1)[0]
+    let pathname
+    try { pathname = requestPath(req) } catch { res.writeHead(400).end(); return }
     if (pathname !== '/api/os' && !pathname.startsWith('/api/os/')) return next()
     if (!security.isAllowed(req)) { res.writeHead(403).end(); return }
     if (closed) { res.writeHead(503).end(); return }
