@@ -91,3 +91,24 @@ test('ordinary sandboxes retain their selected policy; agent requirements expose
     assert(policy.networkPolicies[`agent-${agent.id}`], agent.name)
   }
 })
+
+test('VS Code Server adds a GET-only download rule for its two Microsoft hosts, scoped to its downloaders', async () => {
+  const rules = agentAccessRules({ source: 'build', agents: ['claude'], runtimes: ['node', 'vscode'] })
+  assert.deepEqual(rules.map(r => r.name), ['agent-claude', 'tool-vscode-server'])
+  assert.deepEqual(agentAccessRules({ source: 'build', agents: [], runtimes: ['node'] }), [])
+  assert.deepEqual(agentAccessRules({ source: 'image', runtimes: ['vscode'] }), [])
+  assert.equal(agentAccessFor({ source: 'build', agents: [], runtimes: ['vscode'] }).profiles[0].rule, 'tool-vscode-server')
+  const { policy } = await planSandbox({ template: 'locked-down', agentRules: agentAccessRules({ source: 'build', agents: [], runtimes: ['vscode'] }) })
+  const rule = policy.networkPolicies['tool-vscode-server']
+  assert.deepEqual(rule.binaries.map(b => b.path), ['/usr/bin/curl', '/usr/bin/wget', '/sandbox/.vscode-server/**'])
+  assert.deepEqual(rule.endpoints.map(e => e.host), ['update.code.visualstudio.com', 'vscode.download.prss.microsoft.com'])
+  for (const endpoint of rule.endpoints) {
+    assert.equal(endpoint.port, 443)
+    assert.equal(endpoint.protocol, 'rest')
+    assert.equal(endpoint.enforcement, 1)
+    assert.equal(endpoint.access, 0)
+    assert(!endpoint.tls)
+    assert.deepEqual(endpoint.rules, [{ allow: { method: 'GET', path: '/**' } }])
+  }
+  assert.throws(() => addAgentAccess({ networkPolicies: {} }, agentAccessRules({ source: 'build', agents: [], runtimes: ['vscode'] }), { blocked: ['update.code.visualstudio.com'] }), /organization blocks/)
+})

@@ -24,7 +24,7 @@ import { LocationBadge } from "@/components/location-badge"
 import { sandboxCreations } from "@/lib/sandbox-creations"
 import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { AGENTS } from "@/lib/image-templates"
-import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
+import { QUICK_AGENTS, QUICK_TOOLS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { agentAccessFor } from "../../shared/agent-access.js"
 
@@ -192,6 +192,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   const [mode, setMode] = React.useState("quick")
   const [agentIds, setAgentIds] = React.useState([])
   const [openIn, setOpenIn] = React.useState("shell")
+  const [toolIds, setToolIds] = React.useState([])
   const [quickProviders, setQuickProviders] = React.useState({})
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
@@ -224,7 +225,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     }).catch((e) => { if (current) setError(e.message) })
     setName("")
     setMode(initialImageTemplate ? "template" : "quick")
-    setAgentIds([]); setOpenIn("shell"); setQuickProviders({})
+    setAgentIds([]); setOpenIn("shell"); setToolIds([]); setQuickProviders({})
     setSetupIds([])
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
@@ -250,7 +251,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
   const selectedAgents = QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id))
-  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds) : chosenImage?.managed ? chosenImage.recipe : null)
+  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds, "", "agent", false, [], toolIds) : chosenImage?.managed ? chosenImage.recipe : null)
   const attachedProviders = mode === "quick" ? [...new Set(selectedAgents.flatMap((agent) => {
     const chosenProvider = quickProviders[agent.id]
     return compatibleProviders(providers, agent.id).some((provider) => provider.name === chosenProvider) ? [chosenProvider] : []
@@ -301,7 +302,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
       return
     }
     const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
-    const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
+    const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, tools = toolIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
     const setups = setupIds, accessReview = setupAccessReview, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
     sandboxCreations.start({ name: sandboxName, location, task: async ({ signal, progress, build, creating }) => {
       let environment = template, launchSetupIds = [], launchAccessReview = null, buildName = null
@@ -313,7 +314,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
           launchSetupIds = prepared.setups.map(s => s.id)
           launchAccessReview = prepared.accessReview
           environment = await prepareQuickTemplate(api, agents, {
-            withSetups: setups.length > 0, setups: prepared.setups, signal, onProgress: progress,
+            withSetups: setups.length > 0, setups: prepared.setups, tools, signal, onProgress: progress,
             onBuildUpdate: build,
             onBuild: (value) => { buildName = value; if (signal.aborted) cancelBuild() },
           })
@@ -403,6 +404,21 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
+              </fieldset>
+              <fieldset className="min-w-0">
+                <legend className="mb-1.5 text-xs font-medium">Tools</legend>
+                <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
+                  {QUICK_TOOLS.map((tool) => (
+                    <label key={tool.id} className="relative min-w-0" title="Lets Open in VS Code download its server from Microsoft's VS Code hosts.">
+                      <input type="checkbox" checked={toolIds.includes(tool.id)} onChange={() => setToolIds(toolIds.includes(tool.id) ? toolIds.filter((id) => id !== tool.id) : [...toolIds, tool.id])} className="peer sr-only" />
+                      <span className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2 text-xs transition-colors hover:bg-muted/50 peer-checked:border-foreground/40 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+                        <img src={tool.logo} alt="" className="size-4 shrink-0 object-contain dark:invert" />
+                        <span className="min-w-0 flex-1">{tool.name}</span>
+                        {toolIds.includes(tool.id) && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </fieldset>
               {selectedAgents.length > 0 && <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-xs font-medium">Open in</legend>
@@ -522,14 +538,14 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                 </div>
 
               </SetupSection>
-                  {agentAccess.profiles.length > 0 && <SetupSection title="Agent connections" summary={`${new Set(agentAccess.profiles.flatMap((profile) => profile.endpoints.map((endpoint) => `${endpoint.host}:${endpoint.ports.join(",")}`))).size} destinations`}>
+                  {agentAccess.profiles.length > 0 && <SetupSection title={agentAccess.profiles.some((profile) => profile.rule.startsWith("tool-")) ? "Agent and tool connections" : "Agent connections"} summary={`${new Set(agentAccess.profiles.flatMap((profile) => profile.endpoints.map((endpoint) => `${endpoint.host}:${endpoint.ports.join(",")}`))).size} destinations`}>
                     <div className="max-h-52 divide-y overflow-y-auto">
                       {agentAccess.profiles.map((profile) => <details key={profile.id} className="px-3 py-2">
-                        <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · agent-{profile.id}</span></summary>
+                        <summary className="cursor-pointer text-xs">{profile.name}<span className="ml-2 text-[11px] text-muted-foreground">{profile.endpoints.length} destinations · {profile.rule}</span></summary>
                         <ul className="mt-2 space-y-1">
                           {profile.endpoints.map((endpoint) => <li key={endpoint.host} className="flex flex-wrap items-baseline justify-between gap-x-3 text-[11px]">
                             <span className="break-all font-mono">{endpoint.host}:{endpoint.ports.join(",")}</span>
-                            <span className="text-muted-foreground">{endpoint.tlsSkip ? "TLS passthrough" : endpoint.access === "read-only" ? "Read only" : "Read & write"}</span>
+                            <span className="text-muted-foreground">{endpoint.tlsSkip ? "TLS passthrough" : endpoint.allow?.length ? `${endpoint.allow.map((a) => a.method).join(", ")} only` : endpoint.access === "read-only" ? "Read only" : "Read & write"}</span>
                           </li>)}
                         </ul>
                         {profile.authentication && <p className="mt-2 text-[11px]">{profile.authentication}</p>}

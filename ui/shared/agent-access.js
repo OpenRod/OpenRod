@@ -70,7 +70,19 @@ export const AGENT_ACCESS = {
   },
   kiro: profile('Kiro', ['/sandbox/.local/bin/kiro-cli', '/sandbox/.local/bin/kiro-cli-chat', '/usr/local/bin/kiro-cli'], ['app.kiro.dev', 'prod.us-east-1.auth.desktop.kiro.dev', 'runtime.us-east-1.kiro.dev', 'runtime.eu-central-1.kiro.dev', 'management.us-east-1.kiro.dev', 'management.eu-central-1.kiro.dev', 'q.us-east-1.amazonaws.com', 'q.eu-central-1.amazonaws.com', 'oidc.us-east-1.amazonaws.com', 'oidc.eu-central-1.amazonaws.com', 'cognito-identity.us-east-1.amazonaws.com', 'view.awsapps.com']),
   droid: profile('Factory Droid', ['/sandbox/.local/bin/droid', '/sandbox/.factory/bin/**', '/usr/local/bin/droid'], ['factory.ai', '*.factory.ai', ...modelProviders]),
+}
 
+// Image tools chosen as recipe runtimes. VS Code Remote-SSH downloads a server
+// matching the user's VS Code version when it connects, so the image cannot
+// ship it: the sandbox fetches it with curl (or wget), then the server's CLI.
+const download = (host) => ({ host, ports: [443], protocol: 'rest', enforcement: 'enforce', allow: [{ method: 'GET', path: '/**' }] })
+export const TOOL_ACCESS = {
+  vscode: {
+    name: 'VS Code Server',
+    rule: 'tool-vscode-server',
+    binaries: ['/usr/bin/curl', '/usr/bin/wget', '/sandbox/.vscode-server/**'],
+    endpoints: ['update.code.visualstudio.com', 'vscode.download.prss.microsoft.com'].map(download),
+  },
 }
 
 export function agentAccessFor(recipe) {
@@ -79,7 +91,7 @@ export function agentAccessFor(recipe) {
   if (recipe?.source !== 'build') return { profiles: [], unsupported: [] }
   const ids = [...new Set(recipe.agents ?? [])]
   return {
-    profiles: ids.filter(id => AGENT_ACCESS[id]).map(id => ({ id, ...AGENT_ACCESS[id] })),
+    profiles: [...ids.filter(id => AGENT_ACCESS[id]).map(id => ({ id, rule: `agent-${id}`, ...AGENT_ACCESS[id] })), ...[...new Set(recipe.runtimes ?? [])].filter(id => TOOL_ACCESS[id]).map(id => ({ id, ...TOOL_ACCESS[id] }))],
     unsupported: ids.filter(id => !AGENT_ACCESS[id]),
   }
 }
@@ -87,5 +99,5 @@ export function agentAccessFor(recipe) {
 export function agentAccessRules(recipe) {
   const { profiles, unsupported } = agentAccessFor(recipe)
   if (unsupported.length) throw new Error(`Automatic network access is not configured for: ${unsupported.join(', ')}. Add a reviewed agent access profile before launching this template.`)
-  return profiles.map(({ id, binaries, endpoints }) => ({ name: `agent-${id}`, binaries, endpoints }))
+  return profiles.map(({ rule, binaries, endpoints }) => ({ name: rule, binaries, endpoints }))
 }

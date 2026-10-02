@@ -63,7 +63,7 @@ Open that exact link (`--open` does it for you). The page stores the secret in a
 
 On **Sandboxes**, click **New sandbox**. In **Where should it run?**, choose **This computer**; it shows the name of your registered local gateway (or *No local gateway running* if OpenRod cannot find one). OpenRod connects it, picks an accessible workspace (your previous one, otherwise `default`), saves the selection in `~/.config/openshell/console-context.json` (separately from the CLI's active gateway) and starts collecting activity. A fresh console never connects or collects on its own.
 
-From here, **New sandbox** creates a sandbox, and a ready sandbox can be opened in the browser terminal, in your own terminal over SSH, or in VS Code (and Cursor, when Cursor is one of the sandbox's agents).
+From here, **New sandbox** creates a sandbox, and a ready sandbox can be opened in the browser terminal, in your own terminal over SSH, or in VS Code (when **VS Code Server** was chosen at creation) and Cursor (when Cursor is one of the sandbox's agents).
 
 ## Remote SSH hosts
 
@@ -114,7 +114,7 @@ Your original local gateway continues independently. Selecting it does not stop 
 A ready sandbox's **Open in** section offers:
 
 - **Terminal**: opens your system terminal (macOS Terminal or Linux `x-terminal-emulator`). Under **Connection options**, **SSH shell** uses real OpenSSH through the gateway's authenticated relay with an owner-only temporary config, **New session** starts a separate shell or agent with `openshell sandbox exec --tty`, and **Attach** reconnects to the sandbox's running terminal when it has one.
-- **VS Code** and **Cursor**: run `openshell sandbox connect <name> --editor …`, which adds OpenShell's managed SSH config (one `Include` line in `~/.ssh/config`) and opens the editor over Remote-SSH. The editor must be installed on your computer. **Cursor** is shown only when Cursor is one of the sandbox's agents, because Cursor's remote connection needs Cursor inside the sandbox.
+- **VS Code** and **Cursor**: run `openshell sandbox connect <name> --editor …`, which adds OpenShell's managed SSH config (one `Include` line in `~/.ssh/config`) and opens the editor over Remote-SSH. The editor must be installed on your computer. **Cursor** is shown only when Cursor is one of the sandbox's agents, because Cursor's remote connection needs Cursor inside the sandbox. **VS Code** is shown only when **VS Code Server** was chosen under **Tools** (Quick setup) or as a template technology: VS Code installs its version-matched server from inside the sandbox when it connects, so that choice allows GET downloads from `update.code.visualstudio.com` and `vscode.download.prss.microsoft.com` (rule `tool-vscode-server`) and makes `wget` trust OpenShell's CA. Without it, VS Code stops at "Setting up SSH host".
 - **Browser**: an xterm.js session in a new tab, backed by the gateway's interactive exec rather than OpenSSH.
 
 Commands and terminal tickets stay pinned to the sandbox's gateway and workspace; switching connections never retargets an open session.
