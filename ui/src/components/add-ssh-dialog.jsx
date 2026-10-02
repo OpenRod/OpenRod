@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { api } from "@/lib/api"
+import { VmSetupPromptButton } from "@/components/vm-setup-prompt"
 
 const EMPTY = { name: "", hostname: "", port: "", auth: "default", identityFile: "" }
 const AUTH = [["default", "SSH agent / default keys"], ["identity", "Key file"]]
@@ -60,6 +61,7 @@ export function AddSshDialog({ open, onOpenChange, onAdded }) {
         </div>
         {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 break-words whitespace-pre-wrap text-destructive">{error}</p>}
         <DialogFooter>
+          <VmSetupPromptButton className="sm:mr-auto" />
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button type="submit" disabled={!ready || busy} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">{busy && <Spinner aria-hidden="true" />}{busy ? "Checking…" : "Continue"}</Button>
         </DialogFooter>
