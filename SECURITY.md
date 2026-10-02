@@ -2,7 +2,7 @@
 
 ## Supported deployment
 
-For the local operator console, bind to loopback on the operator's machine. This mode is not a hosted dashboard, identity provider, SSH server, or multi-user authorization boundary. Other processes running as the operator's account must be trusted. The separate authenticated OpenRod Cloud deployment uses the environment-configured server and has additional requirements in the [cloud deployment guide](deploy/gcp/README.md); do not expose the local CLI as a substitute.
+OpenRod is a local operator console: run it bound to loopback on the operator's machine. It is not a hosted dashboard, identity provider, SSH server, or multi-user authorization boundary. Other processes running as the operator's account must be trusted.
 
 The console can exercise the authority of the configured OpenShell gateway credentials: creating and deleting sandboxes, executing commands, transferring files, and changing policy. SSH-host connections also exercise the operator's SSH and remote Docker authority. Do not expose the console through a public reverse proxy, container port mapping, or LAN bind. The production executable rejects non-loopback addresses. The API checks peer address, Host, Origin, and fetch-site metadata; mutations require a same-origin POST and custom header, with JSON or an explicitly supported binary-upload content type. These checks mitigate cross-origin browser attacks, not malicious software running locally.
 
@@ -12,11 +12,11 @@ Loopback is reachable by other users on a shared machine and by containers (for 
 
 ## Setup and activation boundary
 
-**Connect machine** beside **New sandbox** selects an existing local gateway or an SSH host from the operator's configuration. Host enumeration does not open SSH connections. **Connect** probes a native Linux Docker host using noninteractive, strict-host-key OpenSSH; unknown keys and authentication failures are not silently bypassed. SSH configuration, including trusted ProxyCommand/Match directives, remains operator-controlled executable configuration. Agent forwarding and local SSH commands are disabled.
+**New sandbox → Where should it run?** selects the existing local gateway (**This computer**) or an SSH host from the operator's configuration (**Remote machine**). Host enumeration does not open SSH connections. **Connect** probes a native Linux Docker host using noninteractive, strict-host-key OpenSSH; unknown keys and authentication failures are not silently bypassed. SSH configuration, including trusted ProxyCommand/Match directives, remains operator-controlled executable configuration. Agent forwarding and local SSH commands are disabled.
 
-If the local gateway executable is absent, **Connect** downloads the platform-specific NVIDIA/OpenShell 0.1.2 gateway archive over HTTPS. Its SHA-256 digest is pinned in the console; mismatches are rejected before extraction or execution. The executable is installed under the private console data directory, without sudo or replacement of a system-installed gateway. Connection discovery alone never installs software.
+If the local gateway executable is absent, connecting an SSH host downloads the platform-specific NVIDIA/OpenShell 0.1.2 gateway archive over HTTPS. Its SHA-256 digest is pinned in the console; mismatches are rejected before extraction or execution. The executable is installed under the private console data directory, without sudo or replacement of a system-installed gateway. Connection discovery alone never installs software.
 
-With **Download automatically** selected (the default), **Connect** installs missing version-pinned OpenShell runtime images remotely after probing the host. Existing matching images are reused. **Upload package** instead waits for a trusted Docker-save archive (maximum 4 GiB) for `docker load`. Tags and architecture are checked, not publisher signatures or arbitrary archive contents. A supplied archive must be trusted as executable runtime code. No archive installer scripts, remote gateway, or cloud provisioning are executed.
+After probing the host, **Download on host** installs missing version-pinned OpenShell runtime images remotely. Existing matching images are reused. **Upload** instead accepts a trusted Docker-save archive (maximum 4 GiB) for `docker load`. Tags and architecture are checked, not publisher signatures or arbitrary archive contents. A supplied archive must be trusted as executable runtime code. No installer scripts from the archive are executed.
 
 Docker Engine installation is a separate, explicit approval bound to the current connection job. Only genuine absence on supported Ubuntu/Debian systemd hosts exposes **Install Docker and continue**. It uses root or noninteractive sudo to install the distribution `docker.io` package and dependencies without removing conflicting packages, enable/start the service, and add the SSH user to the root-equivalent `docker` group. Existing, inaccessible, or broken installations require manual repair. Installation rechecks absence before package changes and verifies access through a fresh, non-multiplexed SSH session. Failure or cancellation does not undo package, service, or group changes already made.
 
@@ -38,19 +38,17 @@ A fresh console with no saved selection or gateway pin does not collect automati
 
 - Gateway TLS keys stay under `$XDG_CONFIG_HOME/openshell` (otherwise `~/.config/openshell`) in `gateways/NAME/mtls/{ca.crt,tls.crt,tls.key}` and are loaded only by the server. The CLI and console share this path convention. Metadata is in the adjacent `metadata.json`. Do not commit these files or place them in the frontend/public directory. Keep credential directories at mode 0700 and files at 0600.
 - Browser terminal tickets are one-use, short-lived, and pinned to the gateway/workspace captured at issuance.
-- Browser requests carry a context identifier. Default selected-context requests reject stale contexts. Explicit resource-location requests are validated against the original local gateway/workspace and connected managed SSH location before routing; arbitrary or disconnected owners are rejected. OpenRod Cloud retains selected-context-only authorization.
+- Browser requests carry a context identifier. Default selected-context requests reject stale contexts. Explicit resource-location requests are validated against the original local gateway/workspace and connected managed SSH location before routing; arbitrary or disconnected owners are rejected.
 - Native SSH uses OpenShell's generated ProxyCommand and session authentication. The console does not expose pod port 22 or implement its own SSH authentication.
 - OpenShell-generated SSH configs disable conventional host-key persistence/checking; gateway TLS and the OpenShell relay are the trust path. Review the generated config before use outside this console.
 - Temporary SSH configs use owner-only permissions and are removed on normal session exit or terminal-launch failure. Process termination with SIGKILL, an abandoned terminal launch, or a machine crash can leave files under the OS temporary directory. They must not contain private keys or relay tokens.
-- Direct **SSH shell** uses real OpenSSH and does not edit `~/.ssh/config`. The separate editor integration may install OpenShell-managed SSH configuration. **Open in browser** is SDK-backed exec, not OpenSSH.
+- Direct **SSH shell** uses real OpenSSH and does not edit `~/.ssh/config`. The separate editor integration may install OpenShell-managed SSH configuration. **Open in → Browser** is SDK-backed exec, not OpenSSH.
 - `console-context.json` in the configuration directory stores the console selection, separately from the CLI's `active_gateway`. Gateway precedence is environment pin, saved selection, then CLI/default suggestions; workspace precedence is environment pin, saved workspace, then `default`. `OPENSHELL_WORKSPACE` alone does not activate a fresh console.
 - Combined inventories retain remote sandbox/template metadata and recipes in private `remote-gateways/last-inventory.json`, alongside `last-location.json`, under the console state directory. Snapshots are not proof of current remote availability: disconnected or failed remote inventory sources disable actions, and reconnect/polling revalidates the owner. These files do not contain gateway TLS keys; protect them as potentially sensitive workload metadata.
 
-## Remote Kubernetes authentication
+## Remote Kubernetes gateways
 
 Kubernetes gateway mTLS transport does not by itself supply production user authentication and authorization. Configure upstream OIDC or a trusted access proxy for shared deployments, following [OpenShell access control](https://docs.nvidia.com/openshell/kubernetes/access-control). The console currently supports HTTPS mTLS registrations only; OIDC, edge authentication, and plaintext HTTP are unsupported. Do not weaken a deployment's authentication to make it compatible.
-
-The [AWS verification deployment](deploy/aws/README.md) is an optional isolated evaluation, not the default onboarding or a production quickstart. It keeps a ClusterIP gateway behind a loopback-only `kubectl port-forward` and enables OpenShell's development unauthenticated-user option inside the trusted cluster. Do not expose that gateway publicly or run untrusted workloads with access to it. `--local` describes the tunnel endpoint, not local compute. Upstream network policies must be enforced by the CNI, not merely accepted by the Kubernetes API.
 
 ## Local state
 
@@ -64,6 +62,6 @@ Legacy checkout policy migration is a one-time copy only for the original local 
 
 ## Reporting vulnerabilities
 
-Do not post credentials, exploit details, or real sandbox logs in public issues. Use this repository's GitHub **Security → Report a vulnerability** when private reporting is enabled. If it is unavailable, open a non-sensitive issue requesting a private reporting channel from a maintainer. Include affected versions, a minimal reproduction, impact, and redacted evidence through the private channel.
+Report vulnerabilities privately through GitHub: open this repository's **Security** tab and choose **Report a vulnerability**. Do not open a public issue, and do not post credentials, exploit details, or real sandbox logs anywhere public. Include the affected version, a minimal reproduction, the impact, and redacted evidence.
 
-Only the current source branch and subsequently maintained tagged releases receive fixes. There is no security SLA or claim of an independent security audit. Report OpenShell gateway/runtime vulnerabilities to the upstream NVIDIA OpenShell project rather than only to this console.
+Fixes go to the main branch and the latest release. There is no security SLA and no claim of an independent security audit. Report vulnerabilities in the OpenShell gateway or runtime itself to the upstream [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) project.
