@@ -126,7 +126,7 @@ test('the local console API enforces the launch cookie on HTTP and terminal upgr
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-launch-token-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const token = createLaunchToken()
-  const env = { ...process.env, XDG_CONFIG_HOME: path.join(root, 'config'), OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '', OPENROD_MODE: 'local' }
+  const env = { ...process.env, HOME: root, XDG_CONFIG_HOME: path.join(root, 'config'), OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '', OPENROD_MODE: 'local' }
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
     import { createServer } from 'node:http'
     import { createOpenShellApi } from ${JSON.stringify(new URL('./api.js', import.meta.url).href)}
@@ -180,7 +180,7 @@ test('the local console API enforces the launch cookie on HTTP and terminal upgr
 test('the API router matches /api/os on the normalized path, as the gates do', { timeout: 15000 }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-route-path-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
-  const env = { ...process.env, XDG_CONFIG_HOME: path.join(root, 'config'), OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '' }
+  const env = { ...process.env, HOME: root, XDG_CONFIG_HOME: path.join(root, 'config'), OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '' }
   // A pass-through boundary isolates the router from the local-only token gate.
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
     import { createServer } from 'node:http'

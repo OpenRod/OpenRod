@@ -9,12 +9,12 @@ variable "region" {
   default     = "us-east1"
 }
 variable "zone" {
-  description = "Zone for the single organization VM."
+  description = "Zone for the control-plane VM."
   type        = string
   default     = "us-east1-b"
 }
 variable "org_id" {
-  description = "Unique organization ID; must match the openrod_org custom claim. Use a separate state per organization."
+  description = "Unique organization ID. Use a separate state per organization."
   type        = string
   validation {
     condition     = can(regex("^[a-z][a-z0-9-]{1,24}$", var.org_id))
@@ -22,7 +22,7 @@ variable "org_id" {
   }
 }
 variable "domain" {
-  description = "Customer console DNS name; point its A record to the load balancer output."
+  description = "Console DNS name; point its A record to the load balancer output."
   type        = string
   validation {
     condition     = can(regex("^[a-z0-9][a-z0-9.-]+\\.[a-z]{2,}$", var.domain))

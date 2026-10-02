@@ -1,24 +1,34 @@
 #!/usr/bin/env node
-// Fails when a commit in <base>..<head> uses a non-noreply email or adds a blocked term.
+// Fails when a commit in <base>..<head> uses a non-noreply email (author, committer or a *-by: trailer) or adds a blocked term.
 // Blocked terms come from the IDENTITY_BLOCKLIST secret (one per line), so this public file never lists them.
 'use strict'
 const { execFileSync } = require('node:child_process')
 
-const BLOCKED = new Set((process.env.IDENTITY_BLOCKLIST || '').split(/[\n,]/).map(term => term.trim().toLowerCase()).filter(Boolean))
+const TERMS = (process.env.IDENTITY_BLOCKLIST || '').split(/[\n,]/).map(term => term.trim().toLowerCase()).filter(Boolean)
+// blocked() compares whole tokens, so any other entry would silently never match. The entry itself stays secret.
+TERMS.forEach((term, i) => {
+  if (/^[a-z0-9]+$/.test(term) || /^[a-z0-9._%+-]+@[a-z0-9.-]*[a-z0-9]$/.test(term)) return
+  console.error(`IDENTITY_BLOCKLIST: blocklist entry #${i + 1} can never match; use one word of letters and digits, or an email address.`)
+  process.exit(2)
+})
+const BLOCKED = new Set(TERMS)
 // Generated files whose hashes could contain a blocked word by chance.
 const GENERATED = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/
 const EMAIL_HINT = "set git config user.email to your <id>+<login>@users.noreply.github.com address and enable 'Block command line pushes that expose my email' in GitHub email settings; then amend/rebase."
-const TERM_HINT = 'remove the term from the commit message, file name or change; then amend/rebase.'
+const TERM_HINT = 'remove the term from the commit message, author or committer name or email, file name or change; then amend/rebase.'
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 30 })
-const isNoreply = email => /@users\.noreply\.github\.com$/i.test(email) || /^noreply@/i.test(email)
+// Service addresses that GitHub (web merges), Dependabot sign-offs and Claude Code co-authors use.
+const SERVICE_EMAILS = new Set(['noreply@github.com', 'support@github.com', 'noreply@anthropic.com'])
+const isNoreply = email => /^(\d+\+)?[A-Za-z0-9-]+(\[bot\])?@users\.noreply\.github\.com$/i.test(email) || SERVICE_EMAILS.has(email.toLowerCase())
 
-// Blocked terms in text: whole email-like tokens, words, and the parts of camelCase words.
+// Blocked terms in text: whole email-like tokens, words, and the camelCase and letter/digit parts of words.
 function blocked(text) {
   if (!BLOCKED.size) return false
   const emails = (text.toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9.-]+/g) || []).map(email => email.replace(/[.-]+$/, ''))
-  const words = text.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/)
-  return [...emails, ...words].some(token => BLOCKED.has(token))
+  const words = text.toLowerCase().split(/[^a-z0-9]+/)
+  const parts = text.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2').replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/(\d)([A-Za-z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/)
+  return [...emails, ...words, ...parts].some(token => BLOCKED.has(token))
 }
 
 // Added lines of a unified (or combined, for merges) diff, with their path and new line number.
@@ -27,7 +37,7 @@ function addedLines(diff) {
   let file = '', width = 0, line = 0
   for (const text of diff.split('\n')) {
     if (text.startsWith('diff ')) width = 0
-    else if (!width && text.startsWith('+++ ')) file = text.slice(4)
+    else if (!width && text.startsWith('+++ ')) file = text.slice(4).replace(/\t$/, '')
     else if (text.startsWith('@@')) [width, line] = [text.match(/^@+/)[0].length - 1, Number(text.match(/\+(\d+)(?:,\d+)? @/)[1])]
     else if (width && !text.startsWith('\\')) {
       const prefix = text.slice(0, width)
@@ -62,19 +72,23 @@ let emailProblems = 0, termProblems = 0
 const commits = git('rev-list', '--reverse', ...revs).split('\n').filter(Boolean)
 for (const sha of commits) {
   const short = sha.slice(0, 12)
-  const [author, committer, message, ...rest] = git('show', '--format=%ae%x00%ce%x00%B%x00', '--unified=0', '--no-prefix', '--no-color', '--no-ext-diff', '--no-textconv', '--no-show-signature', sha).split('\0')
+  const [authorName, committerName, author, committer, message, ...rest] = git('show', '--format=%an%x00%cn%x00%ae%x00%ce%x00%B%x00', '--unified=0', '--no-prefix', '--no-color', '--no-ext-diff', '--no-textconv', '--no-show-signature', sha).split('\0')
   const emails = [['author email', author], ['committer email', committer]]
-  for (const [, value] of message.matchAll(/^co-authored-by:(.*)$/gim)) for (const email of value.match(/[^\s<>]+@[^\s<>]+/g) || []) emails.push(['Co-authored-by trailer email', email])
+  for (const [, key, value] of message.matchAll(/^([a-z][a-z0-9-]*-by)\s*:(.*)$/gim)) for (const email of value.match(/[^\s<>]+@[^\s<>]+/g) || []) emails.push([`${blocked(key) ? 'A *-by' : key} trailer email`, email])
   for (const [field, email] of emails) if (!isNoreply(email)) {
     emailProblems++
     console.log(`${short}: ${field} is not a noreply address`)
   }
   if (!BLOCKED.size) continue
+  for (const [field, value] of [['author name', authorName], ['committer name', committerName], ['author email', author], ['committer email', committer]]) if (blocked(value)) {
+    termProblems++
+    console.log(`${short}: blocked term in the ${field}`)
+  }
   if (blocked(message)) {
     termProblems++
     console.log(`${short}: blocked term in the commit message`)
   }
-  const paths = git('show', '--format=', '--name-only', '-M', sha).split('\n').filter(Boolean)
+  const paths = git('show', '--format=', '--name-only', '-M', '--diff-filter=d', sha).split('\n').filter(Boolean)
   if (paths.some(blocked)) {
     termProblems++
     console.log(`${short}: blocked term in a changed file name`)

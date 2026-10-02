@@ -11,12 +11,12 @@ OpenRod is licensed under the [Apache License 2.0](LICENSE). Contributions are a
 Every commit must carry a [Developer Certificate of Origin](https://developercertificate.org/) sign-off, certifying that you wrote the change or otherwise have the right to submit it under the project's license. Add it with `git commit -s`, which appends:
 
 ```text
-Signed-off-by: Your Name <you@example.com>
+Signed-off-by: Your Name <12345678+your-login@users.noreply.github.com>
 ```
 
 Use your real name and your GitHub noreply email (`<id>+<login>@users.noreply.github.com`). To sign off commits you already made, run `git rebase --signoff main` (or `git commit --amend -s` for the last commit) and force-push your branch.
 
-The `identity` check fails a pull request when a commit's author, committer or `Co-authored-by` email is not a GitHub noreply address, or when a commit message, file name or added line contains a term from a blocklist kept outside the repository. Set `git config user.email` to your noreply address and enable **Block command line pushes that expose my email** in your GitHub email settings, then amend or rebase the flagged commits.
+The `identity` check fails a pull request when a commit's author, committer or trailer email (such as `Signed-off-by` or `Co-authored-by`) is not a GitHub noreply address, or when a commit message, author or committer name or email, file name or added line contains a term from a blocklist kept outside the repository. Set `git config user.email` to your noreply address and enable **Block command line pushes that expose my email** in your GitHub email settings, then amend or rebase the flagged commits.
 
 Do not include credentials, real policy data, runtime databases, or unlicensed assets in pull requests. Report security issues privately as described in [SECURITY.md](SECURITY.md), not in issues or pull requests.
 
