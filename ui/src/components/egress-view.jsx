@@ -731,7 +731,7 @@ function GlobalPanel({ onBack }) {
 
 const FILTERS = [{ id: "all", label: "All" }, ...SOURCE_ORDER.map((s) => ({ id: s, label: SOURCE[s].label }))]
 
-function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, onOpenGlobal, reloadSignal }) {
+function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onEditPolicy, onEditBlocked, onOpenGlobal, reloadSignal }) {
   const api = useApi()
   const location = useLocation()
   const [policy, setPolicy] = React.useState(null)
@@ -866,8 +866,8 @@ function SandboxDetail({ name, sandbox, events, onBack, onNavigate, onDraft, onE
                   return (
                     <RuleRow key={rule.key} rule={rule} busy={busy} locked={!["own", "agent"].includes(source) || globalActive}
                       onOp={(op) => apply([op])} onDelete={["own", "agent"].includes(source) ? () => setDeleting(rule.key) : null}
-                      managedBy={source === "secret" ? "Secrets" : source === "policy" ? "Network rules" : ["org", "group"].includes(source) ? "Organization" : null}
-                      onManage={source === "secret" ? () => onNavigate("secrets") : source === "policy" ? () => onEditPolicy(rule.key.replace(/^egress_/, "")) : undefined} />
+                      managedBy={source === "secret" ? "Secrets" : source === "policy" ? "Network rules" : source === "org" ? "Blocked everywhere" : source === "group" ? "Groups" : null}
+                      onManage={source === "secret" ? () => onNavigate("secrets") : source === "policy" ? () => onEditPolicy(rule.key.replace(/^egress_/, "")) : source === "org" ? onEditBlocked : source === "group" ? () => onNavigate("groups") : undefined} />
                   )
                 })}
               </Card>
@@ -1035,7 +1035,7 @@ function ScopedEgressView({ onNavigate: navigate }) {
         : scope ? (
           <SandboxDetail key={scope} name={scope} sandbox={fleet?.sandboxes?.find((s) => s.name === scope) ?? live.sandboxes?.find((s) => s.name === scope)}
             events={live.events} onBack={back} onNavigate={onNavigate} onOpenGlobal={openGlobal} reloadSignal={signal}
-            onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} onEditPolicy={editPolicy} />
+            onDraft={(initial, after) => setEditor({ sandbox: scope, initial, after })} onEditPolicy={editPolicy} onEditBlocked={() => setEditingBlocked(true)} />
         ) : !fleet ? <p role="status" className="py-24 text-center text-sm text-muted-foreground">Loading…</p>
         : fleet.error ? <p role="alert" className="py-24 text-center text-sm text-muted-foreground">{fleet.error}</p>
         : <FleetSummary fleet={fleet} org={org} events={live.events} onOpen={open} onOpenGlobal={openGlobal} onDecide={decide} onNavigate={onNavigate} onRefresh={loadFleet}
