@@ -2,6 +2,26 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## 0.1.1
+
+### Added
+
+- The New template screen now matches New sandbox.
+- Creating a template on an SSH host offers your local MCPs & Skills, as sandbox creation does.
+- **Need a VM? Copy agent prompt** in Add SSH connection copies a prompt for your AI agent to create a VM that meets the SSH host requirements.
+
+### Fixed
+
+- First run: Network rules, Groups and Secrets no longer need a sandbox first. The setup screen has a **Use this computer** button that connects the local gateway directly, and a failed connection is shown instead of a silent reload.
+- Creating a sandbox no longer requires a group or a network rule. A sandbox without rules starts locked down.
+- Docker is listed as a requirement, and Docker problems are reported in one clear sentence instead of a raw `docker info` dump.
+- The redundant **VS Code Server** tool choice is gone: Open in VS Code prepares any sandbox. Templates saved with it keep working.
+- The `openrod` command explains when Node.js is older than 22.13, and no longer prints the SQLite experimental warning on start.
+
+### Changed
+
+- Firebase is no longer a dependency, so installs are about 3× smaller (115 packages instead of 298) with no audit warnings. Cloud mode returns in a later release.
+
 ## 0.1.0 - initial public release
 
 First public release of OpenRod, a local web console for NVIDIA OpenShell 0.1.2.
