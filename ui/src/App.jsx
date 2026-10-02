@@ -10,6 +10,7 @@ import { GroupsView } from "@/components/groups-view"
 import { NetworkView } from "@/components/network-view"
 import { SecretsView } from "@/components/secrets-view"
 import { TemplatesView } from "@/components/image-templates-view"
+import { ConnectionsView } from "@/components/connections-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { CloudAccount, useCloudMode } from "@/components/auth-gate"
@@ -30,6 +31,7 @@ const TITLES = {
   secrets: "Secrets",
   templates: "Templates",
   setups: "MCPs & Skills",
+  connections: "Connections",
 }
 
 // One page failing to render must not take the console down with it.
@@ -159,7 +161,7 @@ export function App() {
           <SandboxCreationNotifications />
           <PageBoundary key={`${view}:${pageLocation?.target ?? ""}:${pageLocation?.context ?? ""}`} view={view}>
           <ScopedPage location={pageLocation}>
-          <ConnectionGate onSetup={view === "sandboxes" || view === "templates" ? undefined : connectMachine}>
+          <ConnectionGate onSetup={view === "sandboxes" || view === "templates" || view === "connections" ? undefined : connectMachine}>
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} allowRemote={!cloud} createRequest={createRequest} onCreateRequestHandled={() => setCreateRequest(0)} />}
           {view === "activity" && <ActivityView />}
           {view === "groups" && <GroupsView onNavigate={navigate} />}
@@ -167,6 +169,7 @@ export function App() {
           {view === "secrets" && <SecretsView />}
           {view === "templates" && <TemplatesView />}
           {view === "setups" && <SetupsView />}
+          {view === "connections" && !cloud && <ConnectionsView onCreateSandbox={connectMachine} />}
           </ConnectionGate>
           </ScopedPage>
           </PageBoundary>

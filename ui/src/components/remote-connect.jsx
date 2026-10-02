@@ -104,7 +104,7 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
   return <div className="grid gap-6 text-xs">
     <div className="grid gap-6 md:grid-cols-2 md:gap-8">
     <div className="grid min-w-0 content-start gap-5">
-    <HostLink host={selection || "Your server"} live={job?.status === "working" || reuse} />
+    <HostLink host={selected?.label ?? (selection || "Your server")} live={job?.status === "working" || reuse} />
     </div>
 
     <div className="grid min-w-0 content-start gap-5">
@@ -114,7 +114,7 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
         <SelectField id={`${prefix}-host`} className="flex-1" value={selected ? selection : ""} disabled={locked || !hosts.length}
           onChange={(event) => { chosen.current = event.target.value; setSelection(event.target.value); setJob(null); setFile(null); setError(null); setPollError(null) }}>
           <option value="" disabled>{hosts.length ? "Choose a host" : "No hosts in ~/.ssh/config"}</option>
-          {hosts.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+          {hosts.map((item) => <option key={item.name} value={item.name}>{item.label ?? item.name}</option>)}
         </SelectField>
         <Button type="button" variant="outline" size="icon" aria-label="Refresh hosts" disabled={Boolean(busy) || refreshing} onClick={refresh}>
           <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`} />
@@ -122,7 +122,7 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
       </div>
       {reuse ? <p className="text-muted-foreground">Connected now. Choose another host to replace this connection.</p>
         : connectedHost && selected && <p className="text-muted-foreground">Connecting {selection} replaces the connection to {connectedHost}.</p>}
-      {selected && !reuse && <p className="text-muted-foreground">First time? Run <code className="rounded bg-muted px-1 font-mono text-foreground">ssh {selection}</code> once to trust the machine.</p>}
+      {selected && !selected.managed && !reuse && <p className="text-muted-foreground">First time? Run <code className="rounded bg-muted px-1 font-mono text-foreground">ssh {selection}</code> once to trust the machine.</p>}
       {missingSsh && <Notice>OpenSSH isn’t installed on this computer. Install it, then refresh.</Notice>}
     </div>
 
