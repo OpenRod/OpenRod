@@ -9,6 +9,7 @@ import { Cloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { buttonVariants } from '@/components/ui/button'
 import { CLOUD_AVAILABLE, CLOUD_SOON } from '@/lib/cloud-origin'
+import { LINK_REQUIRED } from '@/lib/api'
 
 async function authRequest(path, body) {
   const response = await fetch(`/api/auth/${path}`, {
@@ -17,7 +18,8 @@ async function authRequest(path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const value = await response.json()
-  if (!response.ok) throw new Error(value.error ?? 'Sign-in unavailable')
+  if (value.code === LINK_REQUIRED) window.dispatchEvent(new Event(LINK_REQUIRED))
+  if (!response.ok) throw Object.assign(new Error(value.error ?? 'Sign-in unavailable'), { code: value.code })
   return value
 }
 export const useCloudMode = () => useCompute()?.target === 'cloud'
@@ -45,6 +47,7 @@ export function AuthGate({ children }) {
   const [loading, setLoading] = React.useState(true)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState('')
+  const [linkRequired, setLinkRequired] = React.useState(false)
   React.useEffect(() => {
     let alive = true
     async function load() {
@@ -63,8 +66,10 @@ export function AuthGate({ children }) {
     }
     load()
     const expired = () => { setUser(null); setError('Your session expired. Sign in again.') }
+    const locked = () => setLinkRequired(true)
     window.addEventListener('openrod-session-expired', expired)
-    return () => { alive = false; window.removeEventListener('openrod-session-expired', expired) }
+    window.addEventListener(LINK_REQUIRED, locked)
+    return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); window.removeEventListener(LINK_REQUIRED, locked) }
   }, [])
   async function login() {
     setBusy(true); setError('')
@@ -84,6 +89,12 @@ export function AuthGate({ children }) {
     try { await authRequest('logout', {}) } catch (e) { setError(e.message) }
     finally { setUser(null) }
   }
+  if (linkRequired) return <main className="grid min-h-screen place-items-center bg-background px-6">
+    <section className="w-full max-w-md rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+      <h1 className="text-2xl font-semibold tracking-tight">Open the console link</h1>
+      <p className="mt-3 text-sm text-muted-foreground">Open the link printed by <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">openrod</code> in your terminal. It carries a secret that changes every time the console starts, so open the new link after a restart.</p>
+    </section>
+  </main>
   if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading OpenRod…</div>
   if (config?.mode === 'local') return <LocalComputeProvider><LocalReturn>{children}</LocalReturn></LocalComputeProvider>
   if (user) return <LocalConnect user={user} logout={logout}><CloudComputeProvider user={user} logout={logout}><CloudMachine key={user.uid} logout={logout}>{children}</CloudMachine></CloudComputeProvider></LocalConnect>

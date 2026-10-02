@@ -23,7 +23,7 @@ npm run build
 npm run start:local -- --open
 ```
 
-Open http://127.0.0.1:4600. For development, use `npm run dev` instead.
+The console prints a link such as `http://127.0.0.1:4600/?token=…`; open that exact link (`--open` does it for you). For development, use `npm run dev` instead; it prints the same kind of link below Vite's own URLs.
 
 `npm run start:local` runs the loopback-only CLI and accepts `--port`, `--open`,
 and `--no-open`. `npm start` runs the environment-configured local/cloud server;
@@ -53,6 +53,12 @@ openshell-console --open
 ```
 
 Use `OPENSHELL_BIN` if the CLI is not on `PATH`.
+
+### Opening the console
+
+Every start generates a new random secret and prints `OpenRod console (open this link): http://127.0.0.1:<port>/?token=<secret>`. Opening that link stores the secret in an HttpOnly cookie for that port and reloads the page without the token in the address bar. A bookmark of `http://127.0.0.1:<port>/` keeps working until the console restarts.
+
+After a restart, or in another browser or profile, the page says *Open the link printed by `openrod` in your terminal*: copy the new link from the terminal where the console is running. Treat the link like a password; anyone who has it while the console runs can use your gateway credentials.
 
 ## Set up a connection
 

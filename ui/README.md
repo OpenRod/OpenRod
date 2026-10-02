@@ -4,7 +4,7 @@ A local control plane UI for OpenShell sandboxes. Start with the [project gettin
 
 ```bash
 npm ci
-npm run dev        # http://127.0.0.1:4600
+npm run dev        # prints http://127.0.0.1:4600/?token=…; open that link
 # Local production: npm run build && npm run start:local -- --open
 ```
 
@@ -115,7 +115,9 @@ selects an existing local gateway or connects to the persistent gateway on an SS
 Workspace selection is automatic. Operator credentials never reach the browser,
 and provider credential values are never returned.
 
-The server binds to loopback only (127.0.0.1 by default). Every route checks the socket, Host and
+The server binds to loopback only (127.0.0.1 by default). Every API route, the event stream and the
+terminal WebSocket require the per-launch token cookie set by the printed `?token=` link
+(see [SECURITY.md](../SECURITY.md#launch-token)). Every route also checks the socket, Host and
 Origin, and each change additionally requires a same-origin POST with
 an `x-openshell-console` header. Mutations use JSON, except bounded runtime-package and sandbox-file uploads, which stream binary bodies with the same origin/header checks.
 

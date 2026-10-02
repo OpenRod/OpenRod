@@ -106,13 +106,13 @@ test('HTTP explicit owner marker rejects arbitrary locations and does not widen 
     import { contextKey } from ${JSON.stringify(gatewayUrl)}
     const other = JSON.stringify(['arbitrary-gateway', 'default'])
     async function run(security, headers = {}) {
-      const api = createOpenShellApi({security})
+      const api = createOpenShellApi({security, token: 'test-launch-token-' + 'x'.repeat(32)})
       const server = createServer((req,res) => security.middleware(req,res,() => api.middleware(req,res)))
       server.listen(0,'127.0.0.1'); await once(server,'listening')
       const origin = 'http://127.0.0.1:' + server.address().port
       try {
         const request = async (path, context, marker) => {
-          const req = httpRequest(origin + '/api/os/' + path, {headers:{...headers,
+          const req = httpRequest(origin + '/api/os/' + path, {headers:{cookie:'openrod_token_' + server.address().port + '=test-launch-token-' + 'x'.repeat(32), ...headers,
             'x-openshell-context':context, ...(marker ? {'x-openshell-location':'1'} : {})}})
           const response = once(req, 'response'); req.end()
           const [res] = await response

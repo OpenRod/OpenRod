@@ -5,6 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import { tokenCookie } from './launch-token.js'
+const TOKEN = 'test-launch-token-' + 'x'.repeat(32)
 
 async function registration(t, metadata = { gateway_endpoint: 'https://127.0.0.1:1', auth_mode: 'mtls' }) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-onboarding-'))
@@ -25,7 +27,7 @@ test('SSH discovery and a failed local connection never activate a fresh console
     import { createServer } from 'node:http'
     import { createOpenShellApi } from ${JSON.stringify(moduleUrl)}
     const server = createServer((request, response) => api.middleware(request, response))
-    const api = createOpenShellApi({ httpServer: server })
+    const api = createOpenShellApi({ httpServer: server, token: ${JSON.stringify(TOKEN)} })
     server.listen(0, '127.0.0.1', () => console.log('READY http://127.0.0.1:' + server.address().port))
     process.on('SIGTERM', async () => {
       await api.close()
@@ -55,7 +57,8 @@ test('SSH discovery and a failed local connection never activate a fresh console
       if (match) resolve(match[1])
     })
   })
-  const get = async (route) => fetch(`${origin}/api/os/${route}`)
+  const cookie = tokenCookie(new URL(origin).port, TOKEN)
+  const get = async (route) => fetch(`${origin}/api/os/${route}`, { headers: { cookie } })
   const before = await (await get('context')).json()
   assert.equal(before.gateway, 'suggested')
   assert.equal(before.selectionSource, 'cli')
@@ -69,7 +72,7 @@ test('SSH discovery and a failed local connection never activate a fresh console
     assert.equal((await response.json()).setupRequired, true)
   }
   const check = await fetch(`${origin}/api/os/connections/connect`, {
-    method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-openshell-console': '1' }, body: JSON.stringify({ localGateway: 'suggested' }),
+    method: 'POST', headers: { origin, cookie, 'content-type': 'application/json', 'x-openshell-console': '1' }, body: JSON.stringify({ localGateway: 'suggested' }),
   })
   assert.equal(check.status, 200)
   const attempt = await check.json()

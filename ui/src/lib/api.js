@@ -3,6 +3,10 @@
 
 import { computeApiPath, currentComputeTarget, currentCloudOwner } from './compute-target.js'
 
+// The local server answers 401 with this code until the browser opens the
+// tokened link that `openrod` prints; the app then shows how to get back in.
+export const LINK_REQUIRED = 'CONSOLE_TOKEN_REQUIRED'
+
 export function createApi(target, signal, locationContext = null, boundOwner = currentCloudOwner()) {
   const selected = () => target ?? currentComputeTarget()
   const owner = boundOwner
@@ -14,7 +18,8 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     const response = await fetch(path('/context'), { signal, headers: selected() === 'cloud' && owner ? { 'x-openrod-local-owner': owner } : undefined })
     const context = await response.json()
     signal?.throwIfAborted()
-    if (response.status === 401 || context.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
+    if (context.code === LINK_REQUIRED) window.dispatchEvent(new Event(LINK_REQUIRED))
+    else if (response.status === 401 || context.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
     if (!response.ok) throw new Error(context.error ?? 'Could not read gateway registrations.')
     binding ??= JSON.stringify([context.gateway, context.workspace])
     return context
@@ -45,7 +50,8 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     })
     const payload = await response.json().catch(() => ({}))
     currentSignal?.throwIfAborted()
-    if (response.status === 401 || payload.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
+    if (payload.code === LINK_REQUIRED) window.dispatchEvent(new Event(LINK_REQUIRED))
+    else if (response.status === 401 || payload.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
     if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes })
     return payload
   }
