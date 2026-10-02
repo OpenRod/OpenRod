@@ -1,7 +1,0 @@
-{
-  "id": "coding-agents",
-  "name": "Coding agents",
-  "description": "Claude Code working on repos",
-  "template": "claude-github-readonly",
-  "outside": "block"
-}
