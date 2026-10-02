@@ -80,7 +80,7 @@ export async function localEngine({ execute = run } = {}) {
     return { endpoint, architecture: info.Architecture === 'aarch64' ? 'arm64' : info.Architecture === 'x86_64' ? 'amd64' : info.Architecture, engineId: info.ID }
   } catch (e) {
     if (e.code === 'ENOENT') throw fail('Docker isn’t installed. Install Docker Desktop (macOS: brew install --cask docker-desktop) or Docker Engine (Linux), start it, then try again.')
-    if (/failed to connect to the docker API|Cannot connect to the Docker daemon|connection refused|no such file or directory/i.test(e.message)) throw fail('Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.', 503)
+    if (/failed to connect to the docker API|Cannot connect to the Docker daemon|connection refused/i.test(e.message)) throw fail('Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.', 503)
     throw fail(`Local Docker is required to build images. ${e.message}`, e.status ?? 400)
   }
 }

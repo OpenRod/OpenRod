@@ -544,6 +544,8 @@ test('a stopped or missing Docker CLI yields one actionable sentence instead of 
       await assert.rejects(localEngine({ execute: cli(reason) }), { status: 503, message: 'Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.' })
     await assert.rejects(localEngine({ execute: cli('ENOENT') }), { message: 'Docker isn’t installed. Install Docker Desktop (macOS: brew install --cask docker-desktop) or Docker Engine (Linux), start it, then try again.' })
     await assert.rejects(cli('')(['info']), { message: dump })
+    const noContext = 'context "gone": context not found: open /home/u/.docker/contexts/meta/x/meta.json: no such file or directory'
+    await assert.rejects(localEngine({ execute: async () => { throw new Error(noContext) } }), { message: `Local Docker is required to build images. ${noContext}` })
   } finally {
     if (previousHost === undefined) delete process.env.DOCKER_HOST
     else process.env.DOCKER_HOST = previousHost
