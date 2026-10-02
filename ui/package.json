@@ -54,7 +54,6 @@
     "@nvidia/openshell-sdk": "file:vendor/nvidia-openshell-sdk-0.0.0.tgz",
     "connect": "^3.7.0",
     "fflate": "^0.8.3",
-    "firebase-admin": "^14.5.0",
     "serve-static": "^2.2.1",
     "smol-toml": "^1.9.0",
     "ws": "^8.22.0"
@@ -75,7 +74,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.2.5",
-    "firebase": "^12.19.0",
     "lucide-react": "^0.577.0",
     "motion": "^13.2.0",
     "next-themes": "^0.4.6",
@@ -90,9 +88,5 @@
   },
   "engines": {
     "node": ">=22.13.0"
-  },
-  "overrides": {
-    "@grpc/grpc-js": "^1.14.5",
-    "uuid": "^11.1.1"
   }
 }

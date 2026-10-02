@@ -4,15 +4,30 @@ import fs from 'node:fs/promises'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { cloudOrigin } from './cloud-origin.js'
 import { tokenCookie } from './launch-token.js'
+import { CLOUD_UNRELEASED, cloudConfig, releaseConfig } from './security.js'
+import { createConsoleServer } from './start.js'
 const TOKEN = 'test-launch-token-' + 'x'.repeat(32)
 
 test('cloud origin is unset by default and must be an HTTPS origin when configured', () => {
   assert.equal(cloudOrigin({}), null)
   assert.equal(cloudOrigin({ OPENROD_CLOUD_ORIGIN: 'https://cloud.example.test' }), 'https://cloud.example.test')
   for (const value of ['http://cloud.example.test', 'https://cloud.example.test/path', 'https://user@cloud.example.test', 'nope']) assert.throws(() => cloudOrigin({ OPENROD_CLOUD_ORIGIN: value }), /OPENROD_CLOUD_ORIGIN/)
+})
+
+test('cloud and worker modes refuse to start in this release', async () => {
+  assert.equal(releaseConfig({}).mode, 'local')
+  for (const mode of ['cloud', 'worker']) {
+    assert.throws(() => releaseConfig({ OPENROD_MODE: mode }), { message: CLOUD_UNRELEASED })
+    const child = spawnSync(process.execPath, ['--no-warnings', fileURLToPath(new URL('./start.js', import.meta.url))], { env: { ...process.env, OPENROD_MODE: mode }, encoding: 'utf8', timeout: 10000 })
+    assert.equal(child.status, 1, mode)
+    assert.equal(child.stderr.trim(), CLOUD_UNRELEASED, mode)
+  }
+  const config = cloudConfig({ OPENROD_MODE: 'cloud', OPENROD_ORG_ID: 'acme', OPENROD_PUBLIC_ORIGIN: 'https://acme.example.com', GOOGLE_CLOUD_PROJECT: 'example-project', OPENROD_FIREBASE_API_KEY: 'key', OPENROD_FIREBASE_AUTH_DOMAIN: 'example-project.firebaseapp.com' })
+  await assert.rejects(createConsoleServer({ config }), { message: CLOUD_UNRELEASED })
 })
 
 test('local console refuses every cloud endpoint while cloud is unconfigured', { timeout: 15000 }, async (t) => {

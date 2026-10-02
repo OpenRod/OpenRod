@@ -33,10 +33,11 @@ export function cloudConfig(env = process.env) {
   if (env.FIREBASE_AUTH_EMULATOR_HOST) throw Error('Cloud mode cannot use the authentication emulator')
   return { mode, org: env.OPENROD_ORG_ID, origin: origin.origin, host: origin.host, firebase: { apiKey: env.OPENROD_FIREBASE_API_KEY, authDomain: env.OPENROD_FIREBASE_AUTH_DOMAIN, projectId: env.GOOGLE_CLOUD_PROJECT } }
 }
-export async function firebaseAuth(config) {
-  const { initializeApp, getApps, applicationDefault } = await import('firebase-admin/app')
-  const { getAuth } = await import('firebase-admin/auth')
-  return getAuth(getApps()[0] ?? initializeApp({ credential: applicationDefault(), projectId: config.firebase.projectId }))
+export const CLOUD_UNRELEASED = 'OpenRod cloud and worker modes are not part of this release.'
+// Cloud and worker modes return with the cloud release; until then only local mode starts.
+export function releaseConfig(env = process.env) {
+  if (['cloud', 'worker'].includes(env.OPENROD_MODE)) throw Error(CLOUD_UNRELEASED)
+  return cloudConfig(env)
 }
 const COOKIE = '__Host-openrod_session'
 const cookieOf = req => (req.headers.cookie ?? '').split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1)

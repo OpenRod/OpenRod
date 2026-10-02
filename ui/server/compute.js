@@ -1,14 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { getApps } from 'firebase-admin/app'
-export async function createCompute(config) {
+export async function createCompute(config, credential) {
  const project=config.firebase.projectId,zone=process.env.OPENROD_WORKER_ZONE??'us-east1-b',subnet=process.env.OPENROD_WORKER_SUBNET
  const artifactOrigin=process.env.OPENROD_WORKER_ARTIFACT_ORIGIN,artifactHash=process.env.OPENROD_WORKER_ARTIFACT_SHA256
  if(!/^[a-z0-9-]+$/.test(zone)||!subnet?.startsWith(`projects/${project}/regions/`)||!/^http:\/\/10\.80\.0\.\d{1,3}:8080$/.test(artifactOrigin??'')||!/^[a-f0-9]{64}$/.test(artifactHash??''))throw Error('Worker deployment configuration is incomplete')
  const source=fs.readFileSync(path.resolve(import.meta.dirname,'../../deploy/gcp/worker-startup.sh'),'utf8')
  const base=`https://compute.googleapis.com/compute/v1/projects/${project}/zones/${zone}`
  async function request(method,url,body) {
-  const token=await getApps()[0].options.credential.getAccessToken()
+  const token=await credential.getAccessToken()
   const response=await fetch(url,{method,headers:{Authorization:`Bearer ${token.access_token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30000)})
   if(response.status===404)return null
   const value=await response.json()
