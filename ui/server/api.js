@@ -12,7 +12,7 @@ import { createActivityDelivery } from './activity-delivery.js'
 import { exportEvent } from '../src/lib/activity-export.js'
 import { agentInventory } from './agent-inventory.js'
 import { randomUUID } from 'node:crypto'
-import { IMAGE_TEMPLATE_NAME, nameSandboxImages } from '../src/lib/sandbox-images.js'
+import { imageTemplateLabels, nameSandboxImages } from '../src/lib/sandbox-images.js'
 import { PROJECT_LABEL, templateSession, isSession, sessionLaunch, persistentTerminalPolicy, persistentGateway, PERSISTENT_TERMINAL_LABEL } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
@@ -138,7 +138,7 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
   // An image template is an OpenShell sandbox template: the gateway supplies
   // its image and environment; the console adds how the sandbox starts.
   const saved = input.imageTemplate ? await imageTemplateForLaunch(String(input.imageTemplate)) : null
-  const imageLabels = saved ? { [IMAGE_TEMPLATE_NAME]: saved.name } : {}
+  const imageLabels = imageTemplateLabels(saved)
   // A built template's agents get their sign-in and model destinations from
   // the reviewed table in shared/agent-access.js, never from the recipe.
   let agentRules = []
