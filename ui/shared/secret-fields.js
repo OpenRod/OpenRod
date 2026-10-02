@@ -1,6 +1,5 @@
 // Uses the installed gateway profile, including its required flags and aliases.
 export function setupIssue(profile) {
-  if (profile.id === 'aws-bedrock') return 'This profile requires an upstream Bedrock bridge. Direct AWS credential authentication is not implemented by this profile; this form cannot configure the bridge.'
   if ((profile.credentials ?? []).some((c) => c.refresh === true || c.refresh?.strategy)) return 'This profile requires managed credential refresh setup. Configure it with the OpenShell CLI; this form does not yet support its refresh material.'
   if ((profile.credentials ?? []).some((c) => !c.envVars?.length)) return 'This profile has credentials without environment mappings and cannot be configured in this form.'
   return null

@@ -63,9 +63,6 @@ function KeyForm({ service, profile, taken, sandboxes, onBack, onDone }) {
   const creds = credentialFields(profile)
   const issue = setupIssue(profile)
   const oauth = profile.id === "codex" && creds.some((c) => c.key === "CODEX_AUTH_ACCESS_TOKEN")
-  // Some profiles grant network access and carry no credential (PyPI). Say so
-  // instead of showing an empty form.
-  const keyless = creds.length === 0
 
   async function submit(event) {
     event.preventDefault()
@@ -89,7 +86,7 @@ function KeyForm({ service, profile, taken, sandboxes, onBack, onDone }) {
           <p className="text-[14px] font-medium">{service.name}</p>
           <p className="truncate text-[11px] text-muted-foreground">{service.blurb}</p>
         </div>
-        {service.keyUrl && !keyless && !issue && (
+        {service.keyUrl && !issue && (
           <a href={service.keyUrl} target="_blank" rel="noreferrer"
             className="flex shrink-0 items-center gap-0.5 rounded-md px-2 py-1 text-[11px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
             Get a key<ArrowUpRight className="size-3" />
@@ -99,12 +96,6 @@ function KeyForm({ service, profile, taken, sandboxes, onBack, onDone }) {
 
       {oauth && <p className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs leading-relaxed">This profile stores an existing ChatGPT OAuth session: access token, refresh token, and account ID, with an optional ID token. An OpenAI API key does not belong in these fields. Browser sign-in and API-key setup for Codex are not available in this form. <a className="underline" href={service.helpUrl} target="_blank" rel="noreferrer">Authentication guide</a></p>}
       {issue && <p role="status" className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs leading-relaxed">{issue}</p>}
-      {keyless && (
-        <p className="rounded-lg border border-border px-3 py-2.5 text-[11px] leading-relaxed">
-          <span className="font-medium">No key needed.</span>{" "}
-          <span className="text-muted-foreground">This lets a sandbox reach {service.name}'s hosts, but only from the programs below.</span>
-        </p>
-      )}
       <div className="space-y-2.5">
         {!issue && creds.map((c, i) => {
           const key = c.key
@@ -162,7 +153,7 @@ function KeyForm({ service, profile, taken, sandboxes, onBack, onDone }) {
       }
       {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">{error}</p>}
       <Button type="submit" disabled={busy || Boolean(issue)} className="h-9 w-full bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">
-        {busy ? <Spinner /> : <Lock />}{keyless ? `Add ${service.name} access` : `Store ${service.name} secret`}
+        {busy ? <Spinner /> : <Lock />}Store {service.name} secret
       </Button>
     </form>
   )
@@ -200,8 +191,8 @@ export function AddSecretDialog({ open, onOpenChange, profiles, providers, sandb
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-[580px]" aria-describedby={undefined}>
         <div className="border-b border-border px-5 pt-4 pb-3">
-          <DialogTitle className="text-[14px]">{step === "pick" ? "Add secret" : profile?.credentials.length === 0 ? `Add ${service.name}` : "Add credentials"}</DialogTitle>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{step === "pick" ? "Pick the service it's for." : profile?.credentials.length === 0 ? "Access only. Nothing secret is stored." : "Stored by the gateway. Saving does not verify the vendor connection."}</p>
+          <DialogTitle className="text-[14px]">{step === "pick" ? "Add secret" : "Add credentials"}</DialogTitle>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{step === "pick" ? "Pick the service it's for." : "Stored by the gateway. Saving does not verify the vendor connection."}</p>
         </div>
         <div className="max-h-[75svh] overflow-y-auto p-5">
           <AnimatePresence mode="wait" initial={false}>

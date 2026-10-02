@@ -315,11 +315,8 @@ function profileView(p) {
 // `openshell` CLI, which already knows how to turn profile YAML into the
 // gateway's shape; the console only ever passes one of these fixed URLs.
 export const PROFILE_CATALOG = [
-  ['claude-code', 'Claude Code', 'agent'], ['codex', 'Codex', 'agent'], ['copilot', 'GitHub Copilot', 'agent'], ['cursor', 'Cursor', 'agent'],
-  ['anthropic', 'Anthropic', 'inference'], ['openai', 'OpenAI', 'inference'], ['openrouter', 'OpenRouter', 'inference'], ['nvidia', 'NVIDIA', 'inference'],
-  ['deepinfra', 'DeepInfra', 'inference'], ['google-vertex-ai', 'Google Vertex AI', 'inference'], ['aws-bedrock', 'AWS Bedrock', 'inference'],
-  ['github', 'GitHub', 'source_control'], ['pypi', 'PyPI', 'data'],
-  ['aws', 'AWS', 'other'], ['aws-s3', 'AWS S3', 'other'], ['google-cloud', 'Google Cloud', 'other'],
+  ['claude-code', 'Claude Code', 'agent'], ['codex', 'Codex', 'agent'], ['copilot', 'GitHub Copilot', 'agent'],
+  ['github', 'GitHub', 'source_control'],
 ].map(([id, name, category]) => ({ id, name, category }))
 
 async function secrets() {

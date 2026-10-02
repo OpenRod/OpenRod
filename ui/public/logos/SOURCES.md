@@ -6,7 +6,6 @@ Every SVG in this directory is bundled locally so the console never contacts a l
 | --- | --- | --- |
 | Lobe Icons (`@lobehub/icons-static-svg` 1.95.1) | MIT, Copyright (c) 2023 LobeHub | https://github.com/lobehub/lobe-icons |
 | GitHub Octicons (`@primer/octicons` 19.38.0) | MIT, Copyright (c) 2026 GitHub Inc. | https://github.com/primer/octicons |
-| Simple Icons (`simple-icons`) | CC0-1.0 | https://github.com/simple-icons/simple-icons |
 | Devicon (`devicon` 2.17.0) | MIT, Copyright (c) 2015 konpa | https://github.com/devicons/devicon |
 | OpenRod authors | Apache-2.0 (this project) | - |
 
@@ -14,22 +13,11 @@ Every SVG in this directory is bundled locally so the console never contacts a l
 
 | File | Source | Upstream icon |
 | --- | --- | --- |
-| `anthropic.svg` | Simple Icons | `anthropic` |
-| `aws.svg` | Lobe Icons | `aws-color` |
-| `aws-bedrock.svg` | Lobe Icons | `bedrock-color` |
-| `aws-s3.svg` | OpenRod authors | neutral storage icon |
 | `claude-code.svg` | Lobe Icons | `claudecode-color` |
 | `codex.svg` | Lobe Icons | `codex-color` |
 | `copilot.svg` | GitHub Octicons | `copilot-24` |
 | `cursor.svg` | Lobe Icons | `cursor` |
-| `deepinfra.svg` | Lobe Icons | `deepinfra-color` |
 | `github.svg` | GitHub Octicons | `mark-github-24` |
-| `google-cloud.svg` | Simple Icons | `googlecloud` |
-| `google-vertex-ai.svg` | Lobe Icons | `vertexai-color` |
-| `nvidia.svg` | Lobe Icons | `nvidia-color` |
-| `openai.svg` | Lobe Icons | `openai` |
-| `openrouter.svg` | Lobe Icons | `openrouter-color` |
-| `pypi.svg` | Simple Icons | `pypi` |
 | `vscode.svg` | Devicon | `vscode` |
 | `agents/aider.svg` | OpenRod authors | neutral terminal icon |
 | `agents/antigravity.svg` | Lobe Icons | `antigravity-color` |
@@ -127,7 +115,3 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
-
-### Simple Icons
-
-Simple Icons are released under CC0-1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
