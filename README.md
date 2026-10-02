@@ -2,7 +2,7 @@
 
 # <img src="docs/images/openrod-logo.png" alt="" height="48" align="absmiddle"> OpenRod
 
-**A web console for [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell).**
+**One-click sandboxes for AI agents, built on [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell).**
 Create sandboxes, edit policy, and open agent sessions from one place, running on your own machine.
 
 [![CI](https://github.com/OpenRod/OpenRod/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenRod/OpenRod/actions/workflows/ci.yml)
