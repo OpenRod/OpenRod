@@ -28,7 +28,7 @@ npm ci
 npm run dev
 ```
 
-Node.js 22.13+ is required for the SQLite-backed activity archive. See [Prerequisites](README.md#prerequisites): OpenShell CLI/gateway 0.1.2, OpenSSH and OpenSSL locally, and a trusted native Linux/rootful Docker host for remote compute. Use disposable gateway state and an approved host for mutation checks.
+Node.js 22.13+ is required for the SQLite-backed activity archive. See the [Quick start](README.md#-quick-start) requirements: OpenShell CLI/gateway 0.1.2, OpenSSH and OpenSSL locally, and a trusted native Linux/rootful Docker host for remote compute. Use disposable gateway state and an approved host for mutation checks.
 
 First-run development is intentionally unconfigured. A CLI active-gateway suggestion alone must not activate collection. **New sandbox → Where should it run?** selects the local gateway (**This computer**) or probes an SSH alias (**Remote machine**); missing runtime images are downloaded on the host or uploaded as a package. Never reconfigure the original local gateway, install Docker with automatic privilege escalation, or accept TLS keys through browser forms.
 
@@ -53,7 +53,7 @@ For onboarding or connection changes, verify against a real, administrator-appro
 6. Switch contexts while a session is live: it must never retarget another same-named sandbox. Disconnecting the viewer detaches remote tmux sessions; local interactive exec keeps its previous lifecycle. Verify SSH loss closes only the local viewer transport and a tmux worker continues producing remote output, failed connections do not report Ready, and stopped sandboxes cannot launch sessions.
 7. In the disposable context, verify disclosed persistent behavior: collection stops for the old context on a switch, configured deliveries can keep their original target, configured service deadlines retain their original context, and organization reconciliation stays off unless `OPENSHELL_CONSOLE_SWEEP=1`, then remains bound to the startup context. Never configure a real recipient or remote policy merely to exercise setup.
 
-Do not remove or modify an operator's real config to simulate first run. The [local-state reference](ui/README.md#console-data-directory) lists files that must remain separate from a contributor's fixtures. Keep browser screenshots and failure reports free of TLS keys, provider credentials, and real activity evidence.
+Do not remove or modify an operator's real config to simulate first run. The [local-state reference](docs/architecture.md#console-data-directory) lists files that must remain separate from a contributor's fixtures. Keep browser screenshots and failure reports free of TLS keys, provider credentials, and real activity evidence.
 
 ## Packaging and release
 
