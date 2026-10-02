@@ -14,6 +14,7 @@ import { useInventory } from '@/lib/inventory'
 import { LocationProvider, useApi } from '@/lib/location-context'
 import { resourceKey, locationLabel } from '@/lib/locations'
 import { LocationBadge } from '@/components/location-badge'
+import { PlacementBadge } from '@/components/placement-badge'
 import { AGENTS, STARTS, pendingRecipe, pendingRecipeKey } from '@/lib/image-templates'
 import { SearchInput } from "@/components/ui/search-input"
 import { SelectField } from '@/components/ui/select-field'
@@ -194,7 +195,7 @@ export function TemplatesView() {
               <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedKey(resourceKey(t))}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
               </td>
-              {multipleLocations && <td className="px-4 py-2"><LocationBadge location={owner(t)} /></td>}
+              {multipleLocations && <td className="px-4 py-2"><PlacementBadge location={owner(t)} /></td>}
               <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '-' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>
