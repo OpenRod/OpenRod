@@ -14,8 +14,10 @@ import { useInventory } from '@/lib/inventory'
 import { LocationProvider, useApi } from '@/lib/location-context'
 import { resourceKey, locationLabel } from '@/lib/locations'
 import { LocationBadge } from '@/components/location-badge'
+import { PlacementBadge } from '@/components/placement-badge'
 import { AGENTS, STARTS, pendingRecipe, pendingRecipeKey } from '@/lib/image-templates'
 import { SearchInput } from "@/components/ui/search-input"
+import { SelectField } from '@/components/ui/select-field'
 
 const locationKey = (location) => location?.id ?? location?.context
 const action = 'bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90'
@@ -164,10 +166,10 @@ export function TemplatesView() {
     {editor && <LocationProvider location={owner(editor)}><ImageTemplateBuilder key={JSON.stringify([locationKey(editor.location), editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></LocationProvider>}
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-6">
       <SearchInput aria-label="Search image templates" value={query} onValueChange={setQuery} placeholder="Search…" className="mr-auto min-w-32 flex-1 sm:max-w-60" />
-      {multipleLocations && <select aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
+      {multipleLocations && <SelectField aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
         <option value="">All locations</option>
         {locations.map((location) => <option key={locationKey(location)} value={locationKey(location)}>{locationLabel(location)}{locationKey(location) === defaultContext ? ' (default)' : ''}{location.connected === false ? ' · disconnected' : ''}</option>)}
-      </select>}
+      </SelectField>}
       <Button size="sm" className={action} disabled={!locations.some((location) => location.connected)} onClick={() => { setNewLocation(''); setChooseLocation(true) }}><Plus />New template</Button>
     </div>
     {checkedRecords.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b bg-accent/30 px-4 py-2 sm:px-6">
@@ -193,7 +195,7 @@ export function TemplatesView() {
               <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedKey(resourceKey(t))}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
               </td>
-              {multipleLocations && <td className="px-4 py-2"><LocationBadge location={owner(t)} /></td>}
+              {multipleLocations && <td className="px-4 py-2"><PlacementBadge location={owner(t)} /></td>}
               <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '-' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>
@@ -251,10 +253,10 @@ export function TemplatesView() {
     </DialogContent></Dialog>
     <Dialog open={chooseLocation} onOpenChange={setChooseLocation}><DialogContent>
       <DialogHeader><DialogTitle>New template</DialogTitle><DialogDescription>Choose where to build and save this template. Its images and saved Setups belong to that location.</DialogDescription></DialogHeader>
-      <label className="space-y-2 text-xs"><span className="block font-medium">Location</span><select aria-label="New template location" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} className="h-9 w-full rounded-md border bg-card px-3">
+      <label className="space-y-2 text-xs"><span className="block font-medium">Location</span><SelectField aria-label="New template location" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} className="h-9 w-full rounded-md border bg-card px-3">
         <option value="" disabled>Choose a location…</option>
         {locations.map((location) => <option key={locationKey(location)} value={locationKey(location)} disabled={!location.connected}>{locationLabel(location)}{location.connected === false ? ' · disconnected' : ''}</option>)}
-      </select></label>
+      </SelectField></label>
       <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setChooseLocation(false)}>Cancel</Button><Button className={action} disabled={!locations.some((location) => locationKey(location) === newLocation && location.connected)} onClick={startTemplate}>Continue<ArrowRight /></Button></div>
     </DialogContent></Dialog>
     {launch && <LocationProvider location={owner(launch)}><CreateSandboxDialog open initialImageTemplate={launch} onOpenChange={(open) => { if (!open) setLaunch(null) }} onStarted={() => setLaunch(null)} /></LocationProvider>}

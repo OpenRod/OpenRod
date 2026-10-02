@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
+import { SelectField } from '@/components/ui/select-field'
 
 export const PROTOCOLS = [
   { id: "rest", label: "HTTP", hint: "Inspect each request: method and path" },
@@ -112,10 +113,10 @@ export function RequestList({ items, onChange, kind }) {
     <div className="space-y-1.5">
       {items.map((r, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          <select value={r.method} onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))}
+          <SelectField value={r.method} onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))}
             aria-label="Method" className="h-8 rounded-md border border-input bg-transparent px-1.5 font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring">
             {METHODS.map((m) => <option key={m}>{m}</option>)}
-          </select>
+          </SelectField>
           <Input value={r.path} onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, path: e.target.value } : x)))}
             className="h-8 font-mono text-[11px]" placeholder="/repos/**" aria-label="Path pattern" />
           <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${kind} rule`} onClick={() => onChange(items.filter((_, j) => j !== i))}><X className="size-3.5" /></Button>

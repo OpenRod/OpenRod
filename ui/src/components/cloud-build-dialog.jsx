@@ -10,6 +10,7 @@ import { resourceKey, locationLabel } from '@/lib/locations'
 import { useTransferGroups } from '@/components/transfer-groups'
 import { CLOUD_AVAILABLE, CLOUD_SOON } from '@/lib/cloud-origin'
 import { CLOUD_ORIGIN, copyLocalSandbox, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
+import { SelectField } from '@/components/ui/select-field'
 
 export function CloudBuildDialog({ open, onOpenChange }) {
   const compute = useCompute()
@@ -56,7 +57,7 @@ export function CloudBuildDialog({ open, onOpenChange }) {
   return <Dialog open={open} onOpenChange={value => { if (!busy) onOpenChange(value) }}><DialogContent className="sm:max-w-md">
     <DialogHeader><DialogTitle>Build in cloud</DialogTitle><DialogDescription>Keep using local OpenRod, your terminal and editor with your private cloud machine.</DialogDescription></DialogHeader>
     <div className="space-y-2">{[['new', 'New cloud sandbox'], ['existing', 'Open an existing cloud sandbox'], ['copy', 'Continue an existing local sandbox']].map(([id, label]) => <label key={id} className="flex items-center gap-3 rounded-lg border p-3 text-sm"><input type="radio" name="cloud-start" disabled={busy} checked={choice === id} onChange={() => setChoice(id)} />{label}</label>)}</div>
-    {choice === 'copy' && <><select aria-label="Local sandbox to copy" value={name} disabled={busy} onChange={e => setName(e.target.value)} className="rounded-md border bg-background p-2 text-sm"><option value="">Choose a local sandbox</option>{sandboxes.map(s => <option key={resourceKey(s)} value={resourceKey(s)}>{s.name} · {locationLabel(s.location)}</option>)}</select><p className="text-xs text-muted-foreground">Copies workspace files and rebuilds saved templates. Your local source stays available. Credential files are excluded; reconnect agents in cloud.</p></>}
+    {choice === 'copy' && <><SelectField aria-label="Local sandbox to copy" value={name} disabled={busy} onChange={e => setName(e.target.value)} className="rounded-md border bg-background p-2 text-sm"><option value="">Choose a local sandbox</option>{sandboxes.map(s => <option key={resourceKey(s)} value={resourceKey(s)}>{s.name} · {locationLabel(s.location)}</option>)}</SelectField><p className="text-xs text-muted-foreground">Copies workspace files and rebuilds saved templates. Your local source stays available. Credential files are excluded; reconnect agents in cloud.</p></>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {!CLOUD_AVAILABLE && <p role="status" className="text-sm text-muted-foreground">{CLOUD_SOON}</p>}
     <Button disabled={busy || !CLOUD_AVAILABLE || (choice === 'copy' && !name)} onClick={start}>{busy && <Spinner />}{busy ? (stage === 'signin' ? 'Sign in with Google…' : stage === 'groups' ? 'Choose destination group…' : stage === 'transfer' ? 'Copying and rebuilding…' : 'Preparing cloud machine…') : 'Keep using local OpenRod'}</Button>

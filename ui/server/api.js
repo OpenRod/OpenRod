@@ -17,6 +17,7 @@ import { PROJECT_LABEL, templateSession, isSession, sessionLaunch, persistentTer
 import { sandboxIdentityLabels } from './sandbox-identity.js'
 import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
 import { createRemoteConnections } from './remote-gateway.js'
+import { createSshHostStore } from './ssh-hosts.js'
 import { createLocationInventory } from './location-inventory.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, createInGroups, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
@@ -385,6 +386,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     }
     return next
   }
+  const sshHosts = security.config.mode === 'local' ? createSshHostStore() : null
   const remoteConnections = security.config.mode === 'local' ? createRemoteConnections({
     onSelected: activate,
     onDeselected: () => {
@@ -474,7 +476,11 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           // Connection discovery is available before any gateway is selected.
           // Job reads remain available after that job changes the context.
           if (parts[0] === 'connections') {
-            if (req.method === 'GET' && parts.length === 1) return send(res, 200, await remoteConnections.overview())
+            if (req.method === 'GET' && parts.length === 1) {
+              const overview = await remoteConnections.overview()
+              const saved = new Map((await sshHosts.list()).map(host => [host.alias, host]))
+              return send(res, 200, { ...overview, hosts: overview.hosts.map(host => saved.has(host.name) ? { ...host, managed: true, label: saved.get(host.name).name, address: `${saved.get(host.name).user ? saved.get(host.name).user + '@' : ''}${saved.get(host.name).host}${saved.get(host.name).port ? ':' + saved.get(host.name).port : ''}` } : host) })
+            }
             if (req.method === 'GET' && parts.length === 3 && parts[1] === 'jobs') return send(res, 200, remoteConnections.job(parts[2]))
             if (req.method === 'POST' && parts.length === 4 && parts[1] === 'jobs' && parts[3] === 'package') {
               if (req.headers.origin !== security.originFor(req) || req.headers['content-type'] !== 'application/octet-stream' || req.headers['x-openshell-console'] !== '1') return send(res, 403, { error: 'Request rejected' })
@@ -483,7 +489,19 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
             if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
             const input = await body(req)
             if (parts.length === 2 && parts[1] === 'connect') return send(res, 200, remoteConnections.begin(input))
+            if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'scan') return send(res, 200, await sshHosts.scan(input))
+            if (parts.length === 2 && parts[1] === 'hosts') return send(res, 201, await sshHosts.add(input.token))
+            if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'remove') {
+              const current = (await remoteConnections.overview()).active
+              if (current?.host === input.alias && ['connected', 'connecting'].includes(current.status)) throw fail('Disconnect from this machine before removing it.', 409)
+              return send(res, 200, await sshHosts.remove(input.alias))
+            }
             if (parts.length === 2 && parts[1] === 'disconnect') return send(res, 200, await remoteConnections.disconnect())
+            if (parts.length === 2 && parts[1] === 'forget') {
+              const result = await remoteConnections.forget()
+              await inventory.forget()
+              return send(res, 200, result)
+            }
             if (parts.length === 4 && parts[1] === 'jobs' && parts[3] === 'docker') return send(res, 200, remoteConnections.installDocker(parts[2], input.approve))
             if (parts.length === 4 && parts[1] === 'jobs' && parts[3] === 'install') {
               if (input.method !== 'download') throw fail('Choose remote download or upload a runtime package.')
