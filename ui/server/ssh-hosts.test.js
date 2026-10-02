@@ -99,3 +99,44 @@ test('remove deletes the entry, its config block and its trusted keys', async (t
   assert.match(await fs.readFile(store.hostsFile, 'utf8'), /^two /m)
   await assert.rejects(store.remove('one'), /not saved/)
 })
+
+test('adding a host keeps the rest of ~/.ssh/config byte for byte, even when it is not UTF-8', async (t) => {
+  const { home, store } = await setup(t)
+  const userConfig = path.join(home, '.ssh/config')
+  const original = Buffer.concat([Buffer.from('# caf'), Buffer.from([0xe9]), Buffer.from('\r\nHost mine\r\n  HostName 10.0.0.1\r\n')])
+  await fs.writeFile(userConfig, original)
+  await store.add((await store.scan({ name: 'Box', hostname: 'host.example', auth: 'default' })).token)
+  const include = Buffer.from(`Include "${store.configFile}"\n`)
+  assert.deepEqual(await fs.readFile(userConfig), Buffer.concat([include, original]))
+  await store.add((await store.scan({ name: 'Other', hostname: 'host.example', auth: 'default' })).token)
+  assert.deepEqual(await fs.readFile(userConfig), Buffer.concat([include, original]))
+})
+
+test('a symlinked ~/.ssh/config is refused before anything is saved, unless it already includes our config', async (t) => {
+  const { home, store } = await setup(t)
+  const userConfig = path.join(home, '.ssh/config'), target = path.join(home, 'dotfiles-config')
+  await fs.rename(userConfig, target)
+  await fs.symlink(target, userConfig)
+  const scan = await store.scan({ name: 'Box', hostname: 'host.example', auth: 'default' })
+  await assert.rejects(store.add(scan.token), /symlink.*Include "/s)
+  assert.deepEqual(await store.list(), [])
+  await assert.rejects(fs.lstat(store.configFile), { code: 'ENOENT' })
+  await fs.writeFile(target, `Include "${store.configFile}"\r\nHost mine\n  HostName 10.0.0.1\n`)
+  await store.add((await store.scan({ name: 'Box', hostname: 'host.example', auth: 'default' })).token)
+  assert.deepEqual((await store.list()).map(item => item.alias), ['box'])
+  assert.ok((await fs.lstat(userConfig)).isSymbolicLink())
+  assert.equal(await fs.readFile(target, 'utf8'), `Include "${store.configFile}"\r\nHost mine\n  HostName 10.0.0.1\n`)
+})
+
+test('a ~/.ssh directory OpenRod cannot write to is refused before anything is saved', { skip: process.getuid?.() === 0 }, async (t) => {
+  const { home, store } = await setup(t)
+  const sshDir = path.join(home, '.ssh')
+  const scan = await store.scan({ name: 'Box', hostname: 'host.example', auth: 'default' })
+  await fs.chmod(sshDir, 0o500)
+  try {
+    await assert.rejects(store.add(scan.token), error => error.status === 409 && /can't update ~\/\.ssh\/config \(EACCES\).*Include "/s.test(error.message))
+  } finally { await fs.chmod(sshDir, 0o700) }
+  assert.deepEqual(await store.list(), [])
+  await assert.rejects(fs.lstat(store.configFile), { code: 'ENOENT' })
+  assert.equal(await fs.readFile(path.join(sshDir, 'config'), 'utf8'), 'Host mine\n  HostName 10.0.0.1\n')
+})
