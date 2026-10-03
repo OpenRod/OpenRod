@@ -225,7 +225,8 @@ function ScopedIngressView() {
   const visitsFor = (port) => inbound.filter((e) => e.type === "visit" && e.port === port && Date.parse(e.at) > now - 3600000)
   const sessions = inbound.filter((e) => e.type === "session" || e.type === "command")
   const ttl = data?.sessions?.ttlSeconds
-  const error = data?.error ?? live.overview?.error ?? (live.connection === "gateway-down" ? "Gateway is unavailable. Reconnect before continuing." : null)
+  // App-wide signals only matter while there is no sandbox list to show.
+  const error = data?.error ?? (live.sandboxes == null ? live.overview?.error ?? (live.connection === "gateway-down" ? "The gateway is unavailable." : null) : null)
 
   return (
     <div className="flex h-full min-h-0">
