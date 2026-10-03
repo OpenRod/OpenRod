@@ -51,10 +51,10 @@ curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | 
 **3. Run OpenRod**
 
 ```bash
-npx openrod --open
+npx openrod
 ```
 
-**4. Open the link it prints**
+**4. Your browser opens the console.** Over SSH, or anywhere without a display, open the link it prints instead:
 
 ```text
 OpenRod console (open this link): http://127.0.0.1:4600/?token=<secret>
@@ -70,14 +70,14 @@ OpenRod console (open this link): http://127.0.0.1:4600/?token=<secret>
 
 ```bash
 npm install -g openrod
-openrod --open
+openrod
 ```
 
 ```text
 --port <number>  HTTP port, 1–65535 (default: 4600)
 --host <host>    Loopback only: 127.0.0.1 (default), localhost, or ::1
---open           Open the console in your default browser
---no-open        Do not open a browser (default)
+--open           Always open the console in your default browser
+--no-open        Only print the link (the default over SSH, in CI or without a display)
 --help, -h       Show help
 --version, -v    Show the installed version
 ```
@@ -89,7 +89,7 @@ If `openshell` isn't on your `PATH`, set `OPENSHELL_BIN` to its full path. Gatew
 <details>
 <summary><b>How the token link works</b></summary>
 
-Every start generates a new random secret. The page stores it in an HttpOnly cookie and reloads without the token in the URL, so a bookmark of `http://127.0.0.1:4600/` keeps working until the console restarts. After a restart, or in another browser, copy the new link from your terminal.
+Every start generates a new random secret. The page stores it in an HttpOnly cookie and reloads without the token in the URL, so a bookmark of `http://127.0.0.1:4600/` keeps working until the console restarts. After a restart, OpenRod opens the new link for you; for another browser, copy it from your terminal.
 
 </details>
 

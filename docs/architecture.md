@@ -7,7 +7,7 @@ cd ui
 npm ci
 npm run dev        # prints http://127.0.0.1:4600/?token=…; open that link
 npm test           # server and library tests
-npm run build && npm run start:local -- --open   # built console, as the installed CLI runs it
+npm run build && npm run start:local   # built console, as the installed CLI runs it
 ```
 
 ## First connection

@@ -9,13 +9,15 @@ import { parseArgs } from 'node:util'
 
 const HELP = `Usage: openrod [--host 127.0.0.1] [--port 4600] [--open | --no-open]
 
-Serve OpenRod locally for local sandboxes or configured SSH hosts.
-Open the printed link: it carries a secret that changes on every start.
+Serve OpenRod locally for local sandboxes or configured SSH hosts and
+open it in your default browser. The link carries a secret that changes
+on every start. Over SSH, in CI, without a display, or when the output is
+not a terminal, the link is only printed.
 
   --host <host>  Loopback only: 127.0.0.1, localhost, or ::1
   --port <port>  HTTP port from 1 to 65535 (default: 4600)
-  --open         Open the console in your default browser
-  --no-open      Do not open a browser (default)
+  --open         Always open the console in your default browser
+  --no-open      Only print the link
   --help, -h     Show this help
   --version, -v  Show the installed version
 
@@ -51,7 +53,15 @@ export function parseOptions(args = process.argv.slice(2)) {
   if (!['127.0.0.1', 'localhost', '::1'].includes(values.host)) throw new Error('--host must be a loopback address: 127.0.0.1, localhost, or ::1.')
   if (!/^\d+$/.test(values.port) || Number(values.port) < 1 || Number(values.port) > 65535) throw new Error('--port must be an integer from 1 to 65535.')
   if (values.open && values['no-open']) throw new Error('Choose either --open or --no-open, not both.')
-  return { host: values.host, port: Number(values.port), open: Boolean(values.open), help: Boolean(values.help), version: Boolean(values.version) }
+  return { host: values.host, port: Number(values.port), open: values.open ? true : values['no-open'] ? false : undefined, help: Boolean(values.help), version: Boolean(values.version) }
+}
+
+// Opening the page hands over the launch link without copying it, so it is the
+// default. A session with no screen to open on only prints the link.
+export function autoOpen({ env = process.env, platform = process.platform, tty = process.stdout.isTTY } = {}) {
+  const set = (name) => Boolean(env[name]) && !['0', 'false'].includes(env[name].toLowerCase())
+  if (!tty || set('CI') || env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY) return false
+  return ['darwin', 'win32'].includes(platform) || Boolean(env.DISPLAY || env.WAYLAND_DISPLAY)
 }
 
 const TYPES = {
@@ -104,8 +114,8 @@ function openBrowser(url, logger) {
   const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32' : 'xdg-open'
   const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url]
   const child = spawn(command, args, { stdio: 'ignore', detached: true })
-  child.once('error', (error) => logger.warn(`Could not open a browser: ${error.message}. Open ${url} manually.`))
-  child.once('exit', (code) => { if (code) logger.warn(`Browser opener exited with status ${code}. Open ${url} manually.`) })
+  child.once('error', (error) => logger.warn(`Couldn’t open a browser (${error.message}). Open the link above.`))
+  child.once('exit', (code) => { if (code) logger.warn(`Couldn’t open a browser (exit ${code}). Open the link above.`) })
   child.unref()
 }
 
@@ -159,7 +169,7 @@ export async function startConsole(options = parseOptions([]), logger = console)
   // The link carries this launch's secret; it changes on every restart.
   const url = tokenUrl(host, port, token)
   logger.info(`OpenRod console (open this link): ${url}`)
-  if (options.open) openBrowser(url, logger)
+  if (options.open) openBrowser(tokenUrl(host, port, api.launchCode?.() ?? token), logger)
   return { server, url, close }
 }
 
@@ -169,7 +179,7 @@ async function main() {
   if (options.version) { console.log(JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version); return }
   if (!nodeSupported()) throw new Error(`OpenRod needs Node.js 22.13 or newer, and this is ${process.versions.node}. Install a current release from https://nodejs.org, then run it again.`)
   quietSqliteWarning()
-  const runtime = await startConsole(options)
+  const runtime = await startConsole({ ...options, open: options.open ?? autoOpen() })
   let stopping = false
   const shutdown = () => {
     if (stopping) return

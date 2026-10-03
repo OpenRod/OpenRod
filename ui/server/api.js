@@ -347,7 +347,9 @@ export function openshellApi(security = createSecurity(releaseConfig()), token =
 
 // Both Vite and the installed CLI use this exact HTTP/WebSocket lifecycle.
 export function createOpenShellApi({ httpServer, logger = console, security = createSecurity(releaseConfig()), token = createLaunchToken() } = {}) {
-  const gate = security.config.mode === 'local' ? createTokenGate(token) : null
+  const gate = security.config.mode === 'local' ? createTokenGate(token, {
+    onReuse: () => logger.warn('The link OpenRod opened in your browser was used a second time. If that wasn’t you, another program may have opened the console first: stop OpenRod with Ctrl+C and start it again.'),
+  }) : null
   const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
   const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative() }) : null
   const cloudOff = security.config.mode === 'local' && !cloudOrigin()
@@ -644,5 +646,5 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     const authenticate = () => security.middleware(req, res, () => route(req, res, next))
     return localCloud ? localCloud.middleware(req, res, authenticate) : authenticate()
   }
-  return { middleware, close, token }
+  return { middleware, close, token, launchCode: gate?.launchCode }
 }
