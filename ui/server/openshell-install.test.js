@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { INSTALL_COMMAND, INSTALL_SHA256, INSTALL_URL } from '../shared/openshell-release.js'
+import { INSTALL_COMMAND, INSTALL_SHA256, INSTALL_URL, MAC_INSTALL_COMMAND, installCommand } from '../shared/openshell-release.js'
+const CMD = installCommand('darwin')
 
 // Keep gateway.js's import-time config reads away from the real ~/.config.
 const config = await fs.mkdtemp(path.join(os.tmpdir(), 'openshell-install-config-'))
@@ -37,7 +38,7 @@ function setup(overrides = {}) {
       return { code: 0, signal: null }
     },
     // e2fsprogs and gateway.env already there, so macOS preparation does nothing.
-    home: '/stub/home', has: async () => true,
+    home: '/stub/home', has: async () => true, read: async () => 'OPENSHELL_COMPUTE_DRIVER=vm\n', uid: 501,
     log, ...overrides,
   }
   return { options, lines, calls, state }
@@ -47,6 +48,9 @@ test('the pinned installer constants agree with each other', () => {
   assert.equal(INSTALL_URL, 'https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh')
   assert.match(INSTALL_SHA256, /^[0-9a-f]{64}$/)
   assert.equal(INSTALL_COMMAND, `curl -LsSf ${INSTALL_URL} | OPENSHELL_VERSION=v0.1.2 sh`)
+  assert.equal(installCommand('linux'), INSTALL_COMMAND)
+  assert.equal(installCommand('darwin'), MAC_INSTALL_COMMAND)
+  assert.ok(MAC_INSTALL_COMMAND.startsWith('brew install e2fsprogs && ') && MAC_INSTALL_COMMAND.endsWith(` && ${INSTALL_COMMAND}`))
 })
 
 test('an installed CLI with the pinned version and a local gateway stays quiet', async () => {
@@ -132,7 +136,7 @@ test('Linux with only rpm still offers the install', async () => {
 test('a missing curl prints the manual command', async () => {
   const { options, lines, calls } = setup({ find: (bin) => bin === 'curl' ? null : `/stub/bin/${bin}` })
   assert.equal(await offerOpenShellInstall(options), 'skipped')
-  assert.equal(lines.at(-1), `  ${INSTALL_COMMAND}`)
+  assert.equal(lines.at(-1), `  ${CMD}`)
   assert.deepEqual(calls.ask, [])
 })
 
@@ -141,7 +145,7 @@ test('without a terminal the install command is printed and nothing runs', async
     // interactive: undefined falls back to the default, which CI=1 turns off.
     const fixture = setup(options)
     assert.equal(await offerOpenShellInstall(fixture.options), 'skipped')
-    assert.deepEqual(fixture.lines, ["OpenShell isn't installed. To install it, run:", `  ${INSTALL_COMMAND}`])
+    assert.deepEqual(fixture.lines, ["OpenShell isn't installed. To install it, run:", `  ${CMD}`])
     assert.deepEqual([fixture.calls.ask, fixture.calls.fetch, fixture.calls.run], [[], [], []])
   }
 })
@@ -153,14 +157,14 @@ test('the prompt explains the install and warns first when Docker is not running
   assert.equal(question, 'Install OpenShell 0.1.2 now? It uses Homebrew and runs sandboxes in VMs. [Y/n] ')
   assert.deepEqual(before, [
     "OpenShell isn't installed. OpenRod uses it to run sandboxes on this computer.",
-    "Docker isn't running. Start it first, or the OpenShell gateway won't start.",
+    "Docker isn't running. OpenRod needs it to build sandbox images.",
   ])
 })
 
 test('a missing Docker says to install it, not start it', async () => {
   const { options, lines } = setup({ dockerReady: async () => 'missing', ask: async () => 'n' })
   await offerOpenShellInstall(options)
-  assert.equal(lines[1], "Docker isn't installed. Install and start it first, or the OpenShell gateway won't start.")
+  assert.equal(lines[1], "Docker isn't installed. OpenRod needs it to build sandbox images.")
   assert.ok(!lines.some((line) => line.includes("isn't running")))
 })
 
@@ -174,7 +178,7 @@ test('declining prints the command and downloads nothing', async () => {
   for (const answer of ['n', 'no', 'N', 'later']) {
     const { options, lines, calls } = setup({ ask: async () => answer })
     assert.equal(await offerOpenShellInstall(options), 'skipped')
-    assert.deepEqual(lines.slice(-2), ['Skipped. To install it later, run:', `  ${INSTALL_COMMAND}`])
+    assert.deepEqual(lines.slice(-2), ['Skipped. To install it later, run:', `  ${CMD}`])
     assert.deepEqual([calls.fetch, calls.run], [[], []])
   }
 })
@@ -204,7 +208,7 @@ test('a checksum mismatch is a hard stop: nothing is written or run', async () =
     const { options, lines, calls } = setup(overrides)
     assert.equal(await offerOpenShellInstall(options), 'failed', name)
     assert.equal(lines.at(-1), 'The OpenShell installer did not match the pinned release. Nothing was installed.', name)
-    assert.ok(!lines.some((line) => line.includes(INSTALL_COMMAND)), name)
+    assert.ok(!lines.some((line) => line.includes(CMD)), name)
     assert.deepEqual(calls.run, [], name)
     assert.deepEqual(await tempDirs(), before, name)
   }
@@ -219,7 +223,7 @@ test('download failures print the manual command and never run anything', async 
     const { options, lines, calls } = setup({ fetch })
     assert.equal(await offerOpenShellInstall(options), 'failed', name)
     assert.match(lines.at(-2), /^Could not download the OpenShell installer: .+\. To install it yourself, run:$/, name)
-    assert.equal(lines.at(-1), `  ${INSTALL_COMMAND}`)
+    assert.equal(lines.at(-1), `  ${CMD}`)
     assert.deepEqual(calls.run, [], name)
   }
 })
@@ -256,7 +260,7 @@ test('an explicit HOMEBREW_NO_AUTO_UPDATE is kept', () => {
 test('the result comes from a fresh check, not from the installer exit code', async () => {
   const messages = {
     0: 'OpenShell 0.1.2 is ready.',
-    1: "OpenShell 0.1.2 is installed, but its gateway isn't answering yet. Make sure Docker is running, then click Use this computer.",
+    1: "OpenShell 0.1.2 is installed, but its gateway isn't answering yet. Give it a minute, then click Use this computer.",
   }
   for (const [code, message] of Object.entries(messages)) {
     const fixture = setup()
@@ -282,7 +286,7 @@ test('a CLI without a registered gateway prints the platform follow-up commands'
 test('a failed install with no CLI prints the retry command', async () => {
   const { options, lines } = setup({ run: async () => ({ code: 1, signal: null }) })
   assert.equal(await offerOpenShellInstall(options), 'failed')
-  assert.deepEqual(lines.slice(-2), ['OpenShell install failed. The reason is above. To try again, run:', `  ${INSTALL_COMMAND}`])
+  assert.deepEqual(lines.slice(-2), ['OpenShell install failed. The reason is above. To try again, run:', `  ${CMD}`])
 })
 
 test('a runner that cannot start still cleans up and reports failure', async () => {
@@ -361,4 +365,42 @@ test('Linux installs leave e2fsprogs and gateway.env alone', async t => {
   assert.equal(await offerOpenShellInstall(options), 'ready')
   assert.deepEqual(calls.run.map(({ command }) => command), ['/bin/sh'])
   await assert.rejects(fs.access(path.join(home, '.config')))
+})
+
+test('macOS under sudo is told to run without it, and nothing runs', async () => {
+  const { options, lines, calls } = setup({ uid: 0 })
+  assert.equal(await offerOpenShellInstall(options), 'skipped')
+  assert.deepEqual(lines, ['Run npx openrod without sudo to install OpenShell: Homebrew doesn’t run as root.'])
+  assert.deepEqual([calls.ask, calls.fetch, calls.run], [[], [], []])
+})
+
+test('a kept gateway.env without a driver gets a hint; a gateway.toml driver is respected', async t => {
+  const home = await macHome(t)
+  const envFile = path.join(home, '.config/openshell/gateway.env')
+  let fixture = setup({ home, has: async (file) => file === envFile || file.endsWith('mke2fs'), read: async () => 'DOCKER_HOST=unix:///x\n' })
+  fixture.options.run = brewThenInstaller(fixture.calls, fixture.state)
+  assert.equal(await offerOpenShellInstall(fixture.options), 'ready')
+  assert.ok(fixture.lines.includes(`To run sandboxes in VMs, add OPENSHELL_COMPUTE_DRIVER=vm to ${envFile}.`))
+  fixture = setup({ home, has: async (file) => file.endsWith('mke2fs'), read: async (file) => file === '/stub/var/openshell/gateway.toml' ? 'compute_driver = "docker"\n' : '' })
+  fixture.options.run = brewThenInstaller(fixture.calls, fixture.state)
+  assert.equal(await offerOpenShellInstall(fixture.options), 'ready')
+  await assert.rejects(fs.access(envFile))
+  assert.ok(!fixture.lines.some((line) => line.startsWith('To run sandboxes in VMs')))
+})
+
+test('a gateway.env that cannot be written warns and the install continues', async t => {
+  const home = await macHome(t)
+  await fs.writeFile(path.join(home, '.config'), 'not a directory')
+  const { options, calls, state, lines } = setup({ home, has: async (file) => file.endsWith('mke2fs'), read: async () => '' })
+  options.run = brewThenInstaller(calls, state)
+  assert.equal(await offerOpenShellInstall(options), 'ready')
+  assert.ok(lines.some((line) => line.startsWith(`Could not write ${path.join(home, '.config/openshell/gateway.env')}`)))
+  assert.equal(calls.run.at(-1).command, '/bin/sh')
+})
+
+test('on Linux the Docker line says the gateway needs it and the plain command is printed', async () => {
+  const { options, lines } = setup({ platform: 'linux', arch: 'x64', dockerReady: async () => false, ask: async () => 'n' })
+  assert.equal(await offerOpenShellInstall(options), 'skipped')
+  assert.ok(lines.includes("Docker isn't running. OpenShell's gateway won't start without it."))
+  assert.equal(lines.at(-1), `  ${INSTALL_COMMAND}`)
 })

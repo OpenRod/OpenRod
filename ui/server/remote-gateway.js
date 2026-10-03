@@ -14,6 +14,7 @@ import { fail, findExecutable, openshellBinary, runCli, sshBinary } from './open
 import { listSshHosts, probeHost, installDocker as installHostDocker, installRuntime, sshArgs } from './remote-hosts.js'
 import { prepareGatewayState, registerManagedGateway } from './remote-gateway-state.js'
 import { ensureGateway } from './gateway-install.js'
+import { installCommand } from '../shared/openshell-release.js'
 import { startRemoteRuntime } from './remote-runtime.js'
 import { reapOrphans } from './orphan-processes.js'
 
@@ -318,7 +319,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     async overview() {
       const snapshot = await locationSnapshot()
       const connection = snapshot.remote
-      return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')), openshell: Boolean(openshellBinary()) } }
+      return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')), openshell: Boolean(openshellBinary()), installCommand: installCommand(process.platform) } }
     },
     changing: () => disconnecting || job?.status === 'working',
     architecture: () => active?.status === 'connected' ? active.architecture : null,

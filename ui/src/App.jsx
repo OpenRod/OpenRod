@@ -128,7 +128,7 @@ function ConnectionGate({ onSetup, onConnections, children }) {
       </div>
       {locals?.length === 0 && connections.tools?.openshell === false && <div className="grid w-full gap-2">
         <p className="text-xs text-muted-foreground">OpenShell isn’t installed. Install it in a terminal, then refresh this page.</p>
-        <CopyCommand command={INSTALL_COMMAND} />
+        <CopyCommand command={connections.tools.installCommand ?? INSTALL_COMMAND} />
       </div>}
       {state.error && <p role="alert" className="text-xs text-destructive">{state.error}</p>}
     </section>
