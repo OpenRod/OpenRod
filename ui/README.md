@@ -58,3 +58,7 @@ If `openshell` isn't on your `PATH`, set `OPENSHELL_BIN` to its full path.
 [Apache-2.0](https://github.com/OpenRod/OpenRod/blob/main/LICENSE) · Third-party notices in [THIRD_PARTY_NOTICES.md](https://github.com/OpenRod/OpenRod/blob/main/ui/THIRD_PARTY_NOTICES.md)
 
 OpenRod is an independent community project, not affiliated with, endorsed by, or supported by NVIDIA. NVIDIA and OpenShell are trademarks of NVIDIA Corporation.
+
+## Browser regressions
+
+Run `npm run test:e2e` to build the frontend and run deterministic Chromium checks with `e2e`. The runner serves only static production assets on a free loopback port. Browser fixtures intercept the console API, so these checks require no gateway, credentials, or model provider and cannot mutate operator state. Playwright downloads its browser on the first run; CI can install it ahead of time with `npx playwright install chromium`.

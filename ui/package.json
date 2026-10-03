@@ -46,7 +46,8 @@
     "preview": "node ./server/cli.js",
     "test": "node --test server/*.test.js src/lib/*.test.js",
     "notices": "node scripts/third-party-notices.js",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:e2e": "npm run build && e2e run"
   },
   "dependencies": {
     "@fontsource-variable/pixelify-sans": "^5.3.0",
@@ -64,6 +65,7 @@
   "devDependencies": {
     "@base-ui/react": "^1.8.0",
     "@bufbuild/protobuf": "2.15.0",
+    "@e2e-dev/web": "0.11.2",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@fontsource/instrument-serif": "^5.3.0",
@@ -74,9 +76,11 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.2.5",
+    "e2e": "0.16.0",
     "lucide-react": "^0.577.0",
     "motion": "^13.2.0",
     "next-themes": "^0.4.6",
+    "playwright": "1.63.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "shadcn": "^4.19.0",

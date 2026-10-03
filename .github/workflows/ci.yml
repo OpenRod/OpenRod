@@ -41,6 +41,14 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Install browser for regression checks
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 24
+        run: npx playwright install --with-deps chromium
+      - name: Browser regression checks
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 24
+        run: npx e2e run
+        env:
+          E2E_TELEMETRY_DISABLED: '1'
       - run: node server/cli.js --version
       - run: npm pack --ignore-scripts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
