@@ -35,7 +35,7 @@ test('SSH discovery and a failed local connection never activate a fresh console
       server.closeAllConnections()
     })
   `], {
-    env: { ...process.env, XDG_CONFIG_HOME: path.dirname(config), OPENSHELL_CONSOLE_DATA_DIR: state, OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '' },
+    env: { ...process.env, XDG_CONFIG_HOME: path.dirname(config), OPENSHELL_CONSOLE_DATA_DIR: state, OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '', OPENSHELL_BIN: path.join(root, 'missing-openshell') },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const stopped = new Promise((resolve) => child.once('close', resolve))
@@ -65,7 +65,9 @@ test('SSH discovery and a failed local connection never activate a fresh console
   assert.equal(before.configured, false)
   assert.deepEqual(before.workspaces, [])
   assert.equal(before.workspaceError, null)
-  assert.deepEqual((await (await get('connections')).json()).locals, [{ name: 'suggested', endpoint: 'https://127.0.0.1:1' }])
+  const connections = await (await get('connections')).json()
+  assert.deepEqual(connections.locals, [{ name: 'suggested', endpoint: 'https://127.0.0.1:1' }])
+  assert.equal(connections.tools.openshell, false)
   for (const route of ['overview', 'activity', 'stream']) {
     const response = await get(route)
     assert.equal(response.status, 428)

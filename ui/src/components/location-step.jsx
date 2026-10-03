@@ -132,6 +132,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   const reduce = useReducedMotion()
   const [view, setView] = React.useState("choose")
   const [locals, setLocals] = React.useState(null)
+  const [missingCli, setMissingCli] = React.useState(false)
   const [localBusy, setLocalBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const local = locations.find((location) => !location.remote)
@@ -141,7 +142,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   React.useEffect(() => {
     if (local || !allowRemote) return
     let alive = true
-    api.connections().then((next) => { if (alive) setLocals(next.locals) }).catch(() => { if (alive) setLocals([]) })
+    api.connections().then((next) => { if (alive) { setLocals(next.locals); setMissingCli(next.tools?.openshell === false) } }).catch(() => { if (alive) setLocals([]) })
     return () => { alive = false }
   }, [local, allowRemote])
 
@@ -154,7 +155,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   }
 
   const slide = reduce ? {} : { initial: { opacity: 0, x: view === "remote" ? 24 : -24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: view === "remote" ? -24 : 24 }, transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] } }
-  const localCaption = local ? (local.connected ? "Local gateway" : "Disconnected") : locals?.length ? `Use ${locals[0].name}` : locals ? "No local gateway running" : "Checking…"
+  const localCaption = local ? (local.connected ? "Local gateway" : "Disconnected") : locals?.length ? `Use ${locals[0].name}` : locals ? (missingCli ? "OpenShell isn’t installed" : "No local gateway running") : "Checking…"
 
   return <div className="flex min-h-0 flex-col gap-6 rounded-xl bg-popover p-7 ring-1 ring-foreground/10">
     <DialogHeader className="gap-3">

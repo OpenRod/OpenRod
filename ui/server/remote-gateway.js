@@ -8,9 +8,9 @@ import { randomUUID } from 'node:crypto'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { setTimeout as delay } from 'node:timers/promises'
-import { CONFIG_DIR, clearConsoleContext, contextConfigured, contextSelection, defaultContextSelection, listGateways, gatewayWorkspaces, selectConsoleContext } from './gateway.js'
+import { CONFIG_DIR, clearConsoleContext, contextConfigured, contextSelection, defaultContextSelection, localGateways, gatewayWorkspaces, selectConsoleContext } from './gateway.js'
 import { stateDirectory } from './paths.js'
-import { fail, findExecutable, runCli, sshBinary } from './openshell-cli.js'
+import { fail, findExecutable, openshellBinary, runCli, sshBinary } from './openshell-cli.js'
 import { listSshHosts, probeHost, installDocker as installHostDocker, installRuntime, sshArgs } from './remote-hosts.js'
 import { prepareGatewayState, registerManagedGateway } from './remote-gateway-state.js'
 import { ensureGateway } from './gateway-install.js'
@@ -18,7 +18,6 @@ import { startRemoteRuntime } from './remote-runtime.js'
 import { reapOrphans } from './orphan-processes.js'
 
 const PACKAGE_LIMIT = 4 * 1024 ** 3
-const localGateways = () => listGateways().filter(target => target.name !== 'aws-eks' && target.supported && !target.remote && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(target.endpoint).hostname))
 
 function ownedProcess(executable, args, env, onExit) {
   const child = spawn(executable, args, { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -319,7 +318,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     async overview() {
       const snapshot = await locationSnapshot()
       const connection = snapshot.remote
-      return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')) } }
+      return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')), openshell: Boolean(openshellBinary()) } }
     },
     changing: () => disconnecting || job?.status === 'working',
     architecture: () => active?.status === 'connected' ? active.architecture : null,

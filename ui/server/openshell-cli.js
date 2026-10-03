@@ -9,7 +9,7 @@ const DEFAULT_OUTPUT_LIMIT = 64 * 1024
 const SEARCH_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local/bin')]
 
 export const fail = (message, status = 400) => Object.assign(new Error(message), { status })
-const pathDirs = (env = process.env) => (env.PATH ?? '').split(path.delimiter).filter(Boolean)
+export const pathDirs = (env = process.env) => (env.PATH ?? '').split(path.delimiter).filter(Boolean)
 
 export function findExecutable(binary, dirs = [...pathDirs(), ...SEARCH_DIRS]) {
   if (!binary) return null
