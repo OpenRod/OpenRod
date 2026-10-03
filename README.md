@@ -89,7 +89,7 @@ If `openshell` isn't on your `PATH`, set `OPENSHELL_BIN` to its full path. Gatew
 <details>
 <summary><b>How the token link works</b></summary>
 
-Every start generates a new random secret. The page stores it in an HttpOnly cookie and reloads without the token in the URL, so a bookmark of `http://127.0.0.1:4600/` keeps working until the console restarts. After a restart, or in another browser, copy the new link from your terminal.
+Every start generates a new random secret. The page stores it in an HttpOnly cookie and reloads without the token in the URL, so a bookmark of `http://127.0.0.1:4600/` keeps working until the console restarts. After a restart, OpenRod opens the new link for you; for another browser, copy it from your terminal.
 
 </details>
 

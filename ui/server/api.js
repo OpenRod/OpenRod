@@ -644,5 +644,5 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     const authenticate = () => security.middleware(req, res, () => route(req, res, next))
     return localCloud ? localCloud.middleware(req, res, authenticate) : authenticate()
   }
-  return { middleware, close, token }
+  return { middleware, close, token, launchCode: gate?.launchCode }
 }

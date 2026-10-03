@@ -6,7 +6,7 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 ### Changed
 
-- `npx openrod` opens the console in your browser, so `--open` is no longer needed. Over SSH, in CI, without a display, or when the output isn't a terminal, it only prints the link. `--no-open` always only prints it.
+- `npx openrod` opens the console in your browser, so `--open` is no longer needed. Over SSH, in CI, without a display, or when the output isn't a terminal, it only prints the link. `--no-open` always only prints it. The browser it opens gets a one-time code instead of the secret token, so the token never appears in another process's arguments.
 
 ## 0.1.1
 

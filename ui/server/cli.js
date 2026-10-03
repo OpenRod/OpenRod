@@ -60,8 +60,8 @@ export function parseOptions(args = process.argv.slice(2)) {
 // default. A session with no screen to open on only prints the link.
 export function autoOpen({ env = process.env, platform = process.platform, tty = process.stdout.isTTY } = {}) {
   const set = (name) => Boolean(env[name]) && !['0', 'false'].includes(env[name].toLowerCase())
-  if (!tty || set('CI') || env.SSH_CONNECTION || env.SSH_TTY) return false
-  return platform !== 'linux' || Boolean(env.DISPLAY || env.WAYLAND_DISPLAY)
+  if (!tty || set('CI') || env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY) return false
+  return ['darwin', 'win32'].includes(platform) || Boolean(env.DISPLAY || env.WAYLAND_DISPLAY)
 }
 
 const TYPES = {
@@ -114,8 +114,8 @@ function openBrowser(url, logger) {
   const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32' : 'xdg-open'
   const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url]
   const child = spawn(command, args, { stdio: 'ignore', detached: true })
-  child.once('error', (error) => logger.warn(`Could not open a browser: ${error.message}. Open ${url} manually.`))
-  child.once('exit', (code) => { if (code) logger.warn(`Browser opener exited with status ${code}. Open ${url} manually.`) })
+  child.once('error', (error) => logger.warn(`Couldn’t open a browser (${error.message}). Open the link above.`))
+  child.once('exit', (code) => { if (code) logger.warn(`Couldn’t open a browser (exit ${code}). Open the link above.`) })
   child.unref()
 }
 
@@ -169,7 +169,7 @@ export async function startConsole(options = parseOptions([]), logger = console)
   // The link carries this launch's secret; it changes on every restart.
   const url = tokenUrl(host, port, token)
   logger.info(`OpenRod console (open this link): ${url}`)
-  if (options.open) openBrowser(url, logger)
+  if (options.open) openBrowser(tokenUrl(host, port, api.launchCode?.() ?? token), logger)
   return { server, url, close }
 }
 

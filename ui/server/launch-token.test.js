@@ -29,7 +29,7 @@ async function serve(t, token = createLaunchToken()) {
     let output = ''; for await (const data of socket) output += data
     return output
   }
-  return { token, port, request, upgrade }
+  return { gate, token, port, request, upgrade }
 }
 
 test('launch tokens are 32 random bytes and the link targets loopback', () => {
@@ -77,6 +77,24 @@ test('a valid link sets a per-port HttpOnly cookie and redirects without the tok
   assert.equal((await request(`/?token=${token}`)).headers.location, '/')
   assert.equal((await request(`//evil.example/?token=${token}`)).status, 200)
   assert.equal((await request(`/?token=${token}`, { host: 'evil.example' })).status, 403)
+})
+
+test('a launch code sets the token cookie once and expires', async t => {
+  const { gate, token, port, request } = await serve(t)
+  const code = gate.launchCode()
+  assert.notEqual(code, token)
+  const first = await request(`/?token=${code}`)
+  assert.equal(first.status, 302)
+  assert.equal(first.headers.location, '/')
+  assert.equal(first.headers['set-cookie'][0], `${tokenCookieName(port)}=${token}; Path=/; HttpOnly; SameSite=Strict`)
+  assert.equal((await request(`/?token=${code}`)).headers['set-cookie'], undefined)
+  assert.equal((await request(`/?token=${createLaunchToken()}`)).headers['set-cookie'], undefined)
+  assert.equal((await request('/api/os/overview', { cookie: tokenCookie(port, code) })).status, 401)
+  assert.ok((await request(`/?token=${token}`)).headers['set-cookie'])
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
+  const late = gate.launchCode()
+  t.mock.timers.tick(120_001)
+  assert.equal((await request(`/?token=${late}`)).headers['set-cookie'], undefined)
 })
 
 test('two consoles on different ports keep separate cookies', async t => {
