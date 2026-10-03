@@ -316,6 +316,7 @@ function profileView(p) {
 // gateway's shape; the console only ever passes one of these fixed URLs.
 export const PROFILE_CATALOG = [
   ['claude-code', 'Claude Code', 'agent'], ['codex', 'Codex', 'agent'], ['copilot', 'GitHub Copilot', 'agent'],
+  ['openai', 'OpenAI', 'inference'], ['openrouter', 'OpenRouter', 'inference'],
   ['github', 'GitHub', 'source_control'],
 ].map(([id, name, category]) => ({ id, name, category }))
 

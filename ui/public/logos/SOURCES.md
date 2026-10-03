@@ -18,6 +18,8 @@ Every SVG in this directory is bundled locally so the console never contacts a l
 | `copilot.svg` | GitHub Octicons | `copilot-24` |
 | `cursor.svg` | Lobe Icons | `cursor` |
 | `github.svg` | GitHub Octicons | `mark-github-24` |
+| `openai.svg` | Lobe Icons | `openai` |
+| `openrouter.svg` | Lobe Icons | `openrouter-color` |
 | `vscode.svg` | Devicon | `vscode` |
 | `agents/aider.svg` | OpenRod authors | neutral terminal icon |
 | `agents/antigravity.svg` | Lobe Icons | `antigravity-color` |

@@ -3,6 +3,7 @@
 // NVIDIA's published provider profiles, which the console imports on demand.
 export const SERVICE_GROUPS = [
   { id: "agent", label: "Agents" },
+  { id: "inference", label: "Models" },
   { id: "code", label: "Code" },
 ]
 
@@ -10,6 +11,8 @@ export const SERVICES = [
   { id: "claude-code", name: "Claude Code", group: "agent", blurb: "Anthropic's coding agent", keyUrl: "https://console.anthropic.com/settings/keys", keyHint: "sk-ant-…" },
   { id: "codex", name: "Codex", group: "agent", blurb: "Existing Codex OAuth session", helpUrl: "https://developers.openai.com/codex/auth/" },
   { id: "copilot", name: "Copilot", group: "agent", blurb: "GitHub Copilot CLI" },
+  { id: "openai", name: "OpenAI", group: "inference", blurb: "GPT models API", keyUrl: "https://platform.openai.com/api-keys", keyHint: "sk-…" },
+  { id: "openrouter", name: "OpenRouter", group: "inference", blurb: "One key, many models", keyUrl: "https://openrouter.ai/keys", keyHint: "sk-or-…" },
   { id: "github", name: "GitHub", group: "code", blurb: "Repos and API", keyUrl: "https://github.com/settings/personal-access-tokens", keyHint: "github_pat_…" },
 ]
 
