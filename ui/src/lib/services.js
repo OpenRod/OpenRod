@@ -4,27 +4,16 @@
 export const SERVICE_GROUPS = [
   { id: "agent", label: "Agents" },
   { id: "inference", label: "Models" },
-  { id: "code", label: "Code & packages" },
-  { id: "cloud", label: "Cloud" },
+  { id: "code", label: "Code" },
 ]
 
 export const SERVICES = [
   { id: "claude-code", name: "Claude Code", group: "agent", blurb: "Anthropic's coding agent", keyUrl: "https://console.anthropic.com/settings/keys", keyHint: "sk-ant-…" },
   { id: "codex", name: "Codex", group: "agent", blurb: "Existing Codex OAuth session", helpUrl: "https://developers.openai.com/codex/auth/" },
   { id: "copilot", name: "Copilot", group: "agent", blurb: "GitHub Copilot CLI" },
-  { id: "cursor", name: "Cursor", group: "agent", blurb: "Cursor bootstrap network access" },
-  { id: "anthropic", name: "Anthropic", group: "inference", blurb: "Claude API", keyUrl: "https://console.anthropic.com/settings/keys", keyHint: "sk-ant-…" },
   { id: "openai", name: "OpenAI", group: "inference", blurb: "GPT models API", keyUrl: "https://platform.openai.com/api-keys", keyHint: "sk-…" },
-  { id: "nvidia", name: "NVIDIA", group: "inference", blurb: "NIM model endpoints", keyUrl: "https://build.nvidia.com", keyHint: "nvapi-…" },
   { id: "openrouter", name: "OpenRouter", group: "inference", blurb: "One key, many models", keyUrl: "https://openrouter.ai/keys", keyHint: "sk-or-…" },
-  { id: "deepinfra", name: "DeepInfra", group: "inference", blurb: "Open models, hosted" },
-  { id: "google-vertex-ai", name: "Vertex AI", group: "inference", blurb: "Google Cloud models" },
-  { id: "aws-bedrock", name: "Bedrock", group: "inference", blurb: "Models on AWS" },
   { id: "github", name: "GitHub", group: "code", blurb: "Repos and API", keyUrl: "https://github.com/settings/personal-access-tokens", keyHint: "github_pat_…" },
-  { id: "pypi", name: "PyPI", group: "code", blurb: "Install Python packages" },
-  { id: "aws", name: "AWS", group: "cloud", blurb: "AWS APIs" },
-  { id: "aws-s3", name: "S3", group: "cloud", blurb: "Buckets and objects" },
-  { id: "google-cloud", name: "Google Cloud", group: "cloud", blurb: "GCP APIs" },
 ]
 
 export const serviceOf = (type) => SERVICES.find((s) => s.id === type) ?? null
