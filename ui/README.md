@@ -6,14 +6,18 @@ A web console for [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell). Creat
 
 - Node.js 22.13 or newer
 - macOS (Apple Silicon) or Linux
-- [OpenShell](https://github.com/NVIDIA/OpenShell) 0.1.2 with a local gateway
+- [OpenShell](https://github.com/NVIDIA/OpenShell) 0.1.2 with a local gateway (`npx openrod` offers to install it)
 - Docker, running: [Docker Desktop](https://docs.docker.com/desktop/) on macOS (`brew install --cask docker-desktop`, then open it once) or [Docker Engine](https://docs.docker.com/engine/install/) on Linux. OpenRod builds sandbox images with it, including for Quick setup.
 - OpenSSH and OpenSSL
 
-Install OpenShell, pinned to the supported release:
+If OpenShell is missing, `npx openrod` offers to install 0.1.2. On macOS that uses Homebrew, and sandboxes run in VMs. To install it yourself instead, pinned to the supported release:
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | OPENSHELL_VERSION=v0.1.2 sh
+curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh | OPENSHELL_VERSION=v0.1.2 sh
+# macOS: run sandboxes in VMs (the Docker driver needs Docker Desktop's host networking)
+brew install e2fsprogs
+mkdir -p ~/.config/openshell && echo OPENSHELL_COMPUTE_DRIVER=vm >> ~/.config/openshell/gateway.env
+brew services restart openshell
 ```
 
 ## Run
@@ -32,7 +36,7 @@ On every start, OpenRod opens your browser on a link with a new secret token. Ov
 OpenRod console (open this link): http://127.0.0.1:4600/?token=<secret>
 ```
 
-Treat the link like a password: anyone who has it while OpenRod is running can use your gateway credentials. Then go to **Sandboxes → New sandbox → This computer** to connect your gateway.
+Treat the link like a password: anyone who has it while OpenRod is running can use your gateway credentials. Then click **Use this computer** to connect your gateway.
 
 ### Options
 

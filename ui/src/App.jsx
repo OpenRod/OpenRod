@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/button"
 import { LocationProvider } from "@/lib/location-context"
 import { LocationBadge } from "@/components/location-badge"
 import { connectLocalGateway } from "@/lib/locations"
+import { CopyCommand } from "@/components/copy-command"
+import { INSTALL_COMMAND } from "../shared/openshell-release.js"
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -93,14 +95,15 @@ function ConnectionGate({ onSetup, onConnections, children }) {
   const api = useApi()
   const { connection, overview } = useLive()
   const gated = Boolean(onSetup) && connection === "setup-required"
-  const [locals, setLocals] = React.useState(null)
+  const [connections, setConnections] = React.useState(null)
   const [state, setState] = React.useState({ busy: false, error: null })
   React.useEffect(() => {
     if (!gated) return
     let alive = true
-    api.connections().then((next) => { if (alive) setLocals(next.locals) }).catch(() => { if (alive) setLocals([]) })
+    api.connections().then((next) => { if (alive) setConnections(next) }).catch(() => { if (alive) setConnections({ locals: [] }) })
     return () => { alive = false }
   }, [gated, api])
+  const locals = connections?.locals ?? null
   if (!onSetup) return children
   if (connection === "connecting" && !overview) return <section className="p-8">
     <p role="status" className="text-sm text-muted-foreground">Reading connection settings…</p>
@@ -123,6 +126,10 @@ function ConnectionGate({ onSetup, onConnections, children }) {
         <Button variant="outline" onClick={onConnections}>Connect a remote machine</Button>
         <Button variant={locals?.length ? "ghost" : undefined} onClick={onSetup} className={locals?.length ? "" : action}><Plus aria-hidden="true" className="size-4" />New sandbox</Button>
       </div>
+      {locals?.length === 0 && connections.tools?.openshell === false && <div className="grid w-full gap-2">
+        <p className="text-xs text-muted-foreground">OpenShell isn’t installed. Install it in a terminal, then refresh this page.</p>
+        <CopyCommand command={connections.tools.installCommand ?? INSTALL_COMMAND} />
+      </div>}
       {state.error && <p role="alert" className="text-xs text-destructive">{state.error}</p>}
     </section>
   )

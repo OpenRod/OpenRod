@@ -24,8 +24,10 @@ not a terminal, the link is only printed.
 Mutable data: OPENSHELL_CONSOLE_DATA_DIR, or
   $XDG_STATE_HOME/openshell-console (~/.local/state/openshell-console).
 Requires Node.js >=22.13.0. SSH hosts need local OpenSSH and OpenSSL,
-plus a running Docker Engine on the remote Linux host. A missing local
-gateway executable is downloaded and checksum-verified on supported platforms.
+plus a running Docker Engine on the remote Linux host.
+If OpenShell is missing, openrod offers to install the pinned 0.1.2
+release (macOS needs Homebrew). Connecting an SSH host downloads a missing
+openshell-gateway executable, checksum-verified, on supported platforms.
 `
 
 export function nodeSupported(version = process.versions.node) {
@@ -179,6 +181,11 @@ async function main() {
   if (options.version) { console.log(JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version); return }
   if (!nodeSupported()) throw new Error(`OpenRod needs Node.js 22.13 or newer, and this is ${process.versions.node}. Install a current release from https://nodejs.org, then run it again.`)
   quietSqliteWarning()
+  // Before the console starts, so the browser opens on a usable local gateway.
+  try {
+    const { offerOpenShellInstall } = await import('./openshell-install.js')
+    if (await offerOpenShellInstall() === 'cancelled') { process.exitCode = 130; return }
+  } catch (error) { console.warn(`Could not check for OpenShell: ${error.message}`) }
   const runtime = await startConsole({ ...options, open: options.open ?? autoOpen() })
   let stopping = false
   const shutdown = () => {

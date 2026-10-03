@@ -32,7 +32,7 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 
 - Node.js **22.13+**
 - macOS (Apple Silicon) or Linux
-- OpenShell **0.1.2** with a local gateway
+- OpenShell **0.1.2** with a local gateway (`npx openrod` offers to install it)
 - Docker, running: [Docker Desktop](https://docs.docker.com/desktop/) on macOS (`brew install --cask docker-desktop`, then open it once) or [Docker Engine](https://docs.docker.com/engine/install/) on Linux. OpenRod builds sandbox images with it, including for Quick setup.
 - OpenSSH and OpenSSL
 
@@ -42,25 +42,36 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 brew install --cask docker-desktop && open -a Docker
 ```
 
-**2. Install OpenShell** (pinned to the supported release)
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | OPENSHELL_VERSION=v0.1.2 sh
-```
-
-**3. Run OpenRod**
+**2. Run OpenRod.** If OpenShell is missing, it offers to install 0.1.2. On macOS that uses Homebrew, and sandboxes run in VMs.
 
 ```bash
 npx openrod
 ```
 
-**4. Your browser opens the console.** Over SSH, or anywhere without a display, open the link it prints instead:
+<details>
+<summary>Install OpenShell yourself instead</summary>
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh | OPENSHELL_VERSION=v0.1.2 sh
+```
+
+On macOS, also run sandboxes in VMs: the Docker driver a fresh install picks needs Docker Desktop's host networking, which is off by default.
+
+```bash
+brew install e2fsprogs
+mkdir -p ~/.config/openshell && echo OPENSHELL_COMPUTE_DRIVER=vm >> ~/.config/openshell/gateway.env
+brew services restart openshell
+```
+
+</details>
+
+**3. Your browser opens the console.** Over SSH, or anywhere without a display, open the link it prints instead:
 
 ```text
 OpenRod console (open this link): http://127.0.0.1:4600/?token=<secret>
 ```
 
-**5. Connect your gateway.** Go to **Sandboxes → New sandbox → This computer**, and you're in.
+**4. Connect your gateway.** Click **Use this computer**, and you're in.
 
 > [!WARNING]
 > Treat that link like a password. Anyone who has it while OpenRod is running can use your gateway credentials.
@@ -130,7 +141,7 @@ Run a persistent second gateway in Docker on a Linux machine you reach over SSH.
 | Host key or auth rejected | Run `ssh my-host` yourself and verify the host |
 | `Docker isn’t running` or `Local Docker is required to build images` | Install or start Docker on this computer (Docker Desktop on macOS, Docker Engine on Linux), then click **Try again** |
 | Docker missing or inaccessible on the SSH host | Install Docker Engine and grant the SSH user socket access |
-| Local gateway missing | Start and register it with the OpenShell CLI (HTTPS/mTLS only) |
+| Local gateway missing | Run `npx openrod` again to install OpenShell, or register it: `openshell gateway add https://localhost:17670 --local --name openshell` (Linux: `https://127.0.0.1:17670`) |
 | `failed to resolve vm sandbox image` … `Not authorized` | OpenShell can’t see the Docker that OpenRod builds with ([NVIDIA/OpenShell#4155](https://github.com/NVIDIA/OpenShell/issues/4155)). Click **Connect** (macOS Homebrew service) or **Show steps** on the sandbox, then delete it and create it again. Details: [SECURITY.md](SECURITY.md#local-gateway-docker-connection) |
 | Sandbox not Ready | Inspect its conditions in the console |
 

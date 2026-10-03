@@ -108,6 +108,9 @@ export function listGateways({ configDir = CONFIG_DIR } = {}) {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// mTLS gateways registered on this computer, the ones "Use this computer" can pick.
+export const localGateways = (options) => listGateways(options).filter(target => target.name !== 'aws-eks' && target.supported && !target.remote && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(target.endpoint).hostname))
+
 export const workspaceScope = (workspace = workspaceName()) => ({ selection: { case: 'workspace', value: workspace } })
 export const workspaceName = () => contextSelection().workspace
 

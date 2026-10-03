@@ -4,6 +4,11 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 ## Unreleased
 
+### Added
+
+- `npx openrod` offers to install OpenShell 0.1.2 when it's missing. It runs the official installer for that release after checking its checksum. On macOS it also installs e2fsprogs and, on a fresh setup, runs sandboxes in OpenShell's VM driver, which works with Docker Desktop's default settings. Without a terminal, it prints the install command.
+- The setup screen shows the install command when OpenShell isn't installed.
+
 ### Changed
 
 - `npx openrod` opens the console in your browser, so `--open` is no longer needed. Over SSH, in CI, without a display, or when the output isn't a terminal, it only prints the link. `--no-open` always only prints it. The browser it opens gets a one-time code instead of the secret token, so the token never appears in another process's arguments; if that code is used twice, OpenRod warns in the terminal.
