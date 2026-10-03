@@ -52,7 +52,7 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     currentSignal?.throwIfAborted()
     if (payload.code === LINK_REQUIRED) window.dispatchEvent(new Event(LINK_REQUIRED))
     else if (response.status === 401 || payload.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
-    if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes })
+    if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes, fix: payload.fix })
     return payload
   }
   return {
@@ -77,6 +77,9 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     forgetRemote: () => request('/connections/forget', { method: 'POST', body: {} }),
     disconnectRemote: () => request('/connections/disconnect', { method: 'POST', body: {} }),
     syncLocalCatalog: () => request('/local-catalog', { method: 'POST', body: {} }),
+    gatewayDocker: (fresh = false) => request(`/gateway-docker${fresh ? '?fresh=1' : ''}`, { scoped: false }),
+    connectGatewayDocker: (seen = [], confirm = true) => request('/gateway-docker/connect', { method: 'POST', body: { confirm, seen }, scoped: false }),
+    undoGatewayDocker: (seen = []) => request('/gateway-docker/undo', { method: 'POST', body: { confirm: true, seen }, scoped: false }),
   setups: () => request('/setups'),
   discoverSetups: (sources) => request('/setups/scan', { method: 'POST', body: { sources } }),
   reviewSetup: (token, ids) => request('/setups/review', { method: 'POST', body: { token, ids } }),

@@ -34,6 +34,16 @@ The remote creation dialog copies local network templates, Groups and Setup snap
 
 A fresh console with no saved selection or gateway pin does not collect automatically. Saved/environment selections can start background workers on restart, but managed SSH transport requires explicit reconnection. Listing another host does not pause an active context. See the [persistent-effects summary](docs/data-and-state.md).
 
+## Local gateway Docker connection
+
+OpenShell's VM driver looks for local sandbox images only at `DOCKER_HOST` or `/var/run/docker.sock` ([NVIDIA/OpenShell#4155](https://github.com/NVIDIA/OpenShell/issues/4155)). Docker Desktop leaves that socket off by default, so sandboxes from templates fail with "Not authorized". On macOS, when the gateway runs as the Homebrew service, OpenRod fixes this by editing one file: the `gateway.env` that the service wrapper sources, found the way the wrapper finds it. It appends a commented `DOCKER_HOST=<build engine socket>` line last and leaves every other line as it was; an existing `DOCKER_HOST` is overridden, not removed.
+
+Starting the console or switching to **This computer** only reads. The edit happens without a click only when a template build or launch needs it, `sh.brew.openshell` owns the running gateway and its port, the plist sets no environment variables, the wrapper is the known one, no sandbox is running, the file sets no other `DOCKER_HOST`, the change wasn't undone before for that Docker engine, and no automatic attempt has failed since OpenRod started. Otherwise OpenRod asks first and lists the sandboxes that restart. It never edits the plist, uses `launchctl setenv`, or changes Docker Desktop settings.
+
+Before writing, OpenRod copies an existing file once to `gateway.env.openrod.bak`, keeps the file's mode and symlink, refuses if the file changed since it was read, and sources the new file with `/bin/sh` (`set -eu`) to check that it loads and sets the value, as the service does on every start. It then runs `brew services restart openshell`. That restarts running sandboxes in every workspace: files in `/sandbox` are kept, open sessions and in-flight requests end. If the restart fails or OpenShell doesn't pick up the setting, OpenRod puts the file back.
+
+**Undo**, offered right after the change, removes only OpenRod's two lines (deleting the file if OpenRod created it), restarts again, and stops automatic edits for that engine. To undo by hand, delete the `# openrod-managed` line and the line after it, then run `brew services restart openshell`. On Linux, OpenRod only detects the problem and shows the steps.
+
 ## Credentials and connection context
 
 - Gateway TLS keys stay under `$XDG_CONFIG_HOME/openshell` (otherwise `~/.config/openshell`) in `gateways/NAME/mtls/{ca.crt,tls.crt,tls.key}` and are loaded only by the server. The CLI and console share this path convention. Metadata is in the adjacent `metadata.json`. Do not commit these files or place them in the frontend/public directory. Keep credential directories at mode 0700 and files at 0600.

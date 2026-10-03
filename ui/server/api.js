@@ -6,7 +6,7 @@ import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.j
 import { localTransfer, importTransfer, exportTransfer } from './cloud-transfer.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
-import { scopedStateDirectory } from './paths.js'
+import { scopedStateDirectory, stateDirectory } from './paths.js'
 import { createActivityStore } from './activity-store.js'
 import { createActivityDelivery } from './activity-delivery.js'
 import { exportEvent } from '../src/lib/activity-export.js'
@@ -15,14 +15,16 @@ import { randomUUID } from 'node:crypto'
 import { imageTemplateLabels, nameSandboxImages } from '../src/lib/sandbox-images.js'
 import { PROJECT_LABEL, templateSession, isSession, sessionLaunch, persistentTerminalPolicy, persistentGateway, PERSISTENT_TERMINAL_LABEL } from '../src/lib/sandbox-session.js'
 import { sandboxIdentityLabels } from './sandbox-identity.js'
-import { consoleContext, contextConfigured, contextKey, contextSelection, gateway, iso, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext } from './gateway.js'
+import { consoleContext, contextConfigured, contextKey, contextSelection, forgetGatewayConnection, gateway, gatewayWorkspaces, iso, listGateways, logView, policyView, providerView, runWithContext, sandboxView, selectConsoleContext, workspaceScope } from './gateway.js'
 import { createRemoteConnections } from './remote-gateway.js'
 import { createSshHostStore } from './ssh-hosts.js'
 import { createLocationInventory } from './location-inventory.js'
 import { policyRoute } from './policy.js'
 import { orgRoute, createInGroups, enforcePolicyOnly, startOrgSweeper, assignGroup } from './org.js'
 import { expose, ingressRoute, startSweeper } from './ingress.js'
-import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates } from './image-templates.js'
+import { imageTemplateRoute, imageTemplateForLaunch, listImageTemplates, localEngine, runDocker, savingTemplate, setGatewayDocker } from './image-templates.js'
+import { createGatewayDocker } from './gateway-docker.js'
+import { runCli } from './openshell-cli.js'
 import { editorRoute } from './editor.js'
 import { terminalRoute, terminalUpgrade } from './terminal.js'
 import { assertPackagesPrepared } from '../shared/setup-launch.js'
@@ -135,10 +137,11 @@ async function sandboxDetail(name) {
 // ---- writes -----------------------------------------------------------------
 
 export async function createSandbox(input, { sessionOverride = false } = {}) {
-  const { client, target, workspace } = await gateway()
   // An image template is an OpenShell sandbox template: the gateway supplies
   // its image and environment; the console adds how the sandbox starts.
   const saved = input.imageTemplate ? await imageTemplateForLaunch(String(input.imageTemplate)) : null
+  // After the template check, which can restart the local gateway.
+  const { client, target, workspace } = await gateway()
   const imageLabels = imageTemplateLabels(saved)
   // A built template's agents get their sign-in and model destinations from
   // the reviewed table in shared/agent-access.js, never from the recipe.
@@ -386,6 +389,8 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
       active = next
       if (httpServer?.listening) runWithContext(next.context, () => next.hub.start())
     }
+    // Read-only warm-up; edits wait for a build or launch that needs them.
+    void gatewayDocker?.status({ fresh: true }).catch(() => {})
     return next
   }
   const sshHosts = security.config.mode === 'local' ? createSshHostStore() : null
@@ -396,6 +401,34 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     },
     logger,
   }) : null
+  // The local gateway's VM driver must use the Docker that builds templates.
+  const gatewayDocker = security.config.mode === 'local' ? createGatewayDocker({
+    target: async () => {
+      const local = (await remoteConnections.locationSnapshot()).returnContext
+      return local ? listGateways().find((entry) => entry.name === local.gateway) ?? null : null
+    },
+    client: async (name) => (await gateway({ gateway: name, workspace: 'default' })).client,
+    forget: forgetGatewayConnection,
+    sandboxes: async (name) => {
+      const { client } = await gateway({ gateway: name, workspace: 'default' })
+      const all = []
+      for (const { name: workspace } of await gatewayWorkspaces(name)) {
+        let pageToken = ''
+        do {
+          const page = await client.raw.listSandboxes({ workspaceScope: workspaceScope(workspace), pageSize: 1000, pageToken })
+          all.push(...page.sandboxes.map(sandboxView).map((s) => ({ name: s.name, workspace: s.workspace || workspace, phase: s.phase, image: s.image })))
+          pageToken = page.nextPageToken
+        } while (pageToken)
+      }
+      return all
+    },
+    localEngine: () => localEngine(), docker: runDocker, run: runCli,
+    busy: () => remoteConnections.changing() ? 'connection' : savingTemplate() ? 'saving' : null,
+    stateFile: path.join(stateDirectory(), 'gateway-docker.json'),
+    onJob: (job) => { pending.add(job); job.then(() => pending.delete(job), () => pending.delete(job)) },
+    logger,
+  }) : null
+  setGatewayDocker(gatewayDocker)
   const inventory = createLocationInventory({
     connections: remoteConnections, listSandboxes, listTemplates: listImageTemplates, logger,
     defaultLabel: security.config.mode === 'local' ? 'Local' : 'Cloud',
@@ -469,7 +502,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           const parts = url.pathname.slice('/api/os'.length).split('/').filter(Boolean)
           assertCloudOperation(parts)
           if (cloudOff && ['cloud-export', 'cloud-import', 'cloud-transfer'].includes(parts[0])) return send(res, 409, { error: CLOUD_SOON })
-          if (security.config.mode !== 'local' && (parts[0] === 'connections' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
+          if (security.config.mode !== 'local' && (parts[0] === 'connections' || parts[0] === 'gateway-docker' || (parts[0] === 'context' && req.method !== 'GET') || (parts[0] === 'sandboxes' && ['ssh', 'ssh-open', 'ssh-config'].includes(parts[2])))) throw fail('Host-local actions are unavailable in OpenRod Cloud.', 403)
           const requestedContext = req.headers['x-openshell-context'] ?? url.searchParams.get('context')
           let owner = contextSelection()
           const explicitLocation = req.headers['x-openshell-location'] === '1' || url.searchParams.get('location') === '1'
@@ -511,6 +544,15 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
               return send(res, 200, remoteConnections.download(parts[2]))
             }
             return send(res, 404, { error: 'Not found' })
+          }
+          if (parts[0] === 'gateway-docker') {
+            if (!gatewayDocker) return send(res, 404, { error: 'Not found' })
+            if (req.method === 'GET' && parts.length === 1) return send(res, 200, await gatewayDocker.status({ fresh: url.searchParams.get('fresh') === '1' }))
+            if (req.method !== 'POST' || parts.length !== 2 || !['connect', 'undo'].includes(parts[1])) return send(res, 404, { error: 'Not found' })
+            if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
+            const input = await body(req)
+            const seen = Array.isArray(input.seen) ? input.seen.slice(0, 500).map(String) : []
+            return send(res, 200, await gatewayDocker[parts[1]]({ confirm: input.confirm === true, seen }))
           }
           if (req.method === 'GET' && parts.length === 1) {
             if (parts[0] === 'context') {
@@ -633,7 +675,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
         } catch (error) {
           // Gateway errors carry a readable message; nothing here includes credentials.
           if (res.headersSent) res.destroy(error)
-          else send(res, error.status ?? 502, { error: error.rawMessage ?? error.message ?? 'Gateway request failed', ...(error.code === 'TEMPLATE_IN_USE' ? { code: error.code, sandboxes: error.sandboxes } : {}) })
+          else send(res, error.status ?? 502, { error: error.rawMessage ?? error.message ?? 'Gateway request failed', ...(error.code === 'TEMPLATE_IN_USE' || error.code === 'GATEWAY_DOCKER_MISMATCH' ? { code: error.code, sandboxes: error.sandboxes, fix: error.fix } : {}) })
         }
       })
     pending.add(operation)

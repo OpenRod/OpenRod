@@ -14,6 +14,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AuditLine } from "@/components/audit-line"
 import { CopyCommand } from "@/components/copy-command"
+import { DockerHint } from "@/components/gateway-docker"
 import { ContinueLocally } from "@/components/cloud-transfer"
 import { FilesView } from "@/components/files-view"
 import { useApi, useLocation } from "@/lib/location-context"
@@ -21,6 +22,7 @@ import { LocationBadge } from "@/components/location-badge"
 import { LiveProvider, useLive } from "@/lib/live"
 import { sessionName, terminalHref } from "@/lib/sandbox-session"
 import { absoluteTime } from "@/lib/format"
+import { dockerImageProblem } from "@/lib/gateway-docker"
 import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
 
 import { EgressChart, bucketEgress } from "@/components/egress-chart"
@@ -336,11 +338,9 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
                   <p className="flex items-center gap-1.5 text-xs font-medium text-red-700">
                     <AlertTriangle className="size-3.5" aria-hidden="true" />Failed to start
                   </p>
-                  {/* The VM driver reads local images from Docker; with Docker
-                      stopped it falls through to Docker Hub, which says "Not authorized". */}
-                  {/failed to resolve .*image/i.test(sandbox.problem) && /index\.docker\.io/.test(sandbox.problem) && (
-                    <p className="mt-1 text-[11px] text-red-700">Start Docker, then recreate this sandbox.</p>
-                  )}
+                  {/* The VM driver looks for local images only at DOCKER_HOST or /var/run/docker.sock;
+                      when the image isn't there it asks Docker Hub, which answers Not authorized. */}
+                  {dockerImageProblem(sandbox.problem) && <DockerHint local={!cloud && !(location ? location.remote : live.overview?.gateway?.remote)} />}
                   <p className="mt-1 max-h-28 overflow-y-auto font-mono text-[10px] leading-relaxed break-words text-red-700/80">{sandbox.problem}</p>
                 </div>
               )}

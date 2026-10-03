@@ -3,6 +3,7 @@ import * as React from "react"
 import { Loader2, Plus } from "lucide-react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
 import { SandboxCreationNotifications } from "@/components/sandbox-creation-notices"
+import { GatewayDockerNotifications } from "@/components/gateway-docker"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
 import { ActivityView } from "@/components/activity-view"
@@ -183,6 +184,7 @@ export function App() {
           </header>
           <SetupImportNotifications />
           <SandboxCreationNotifications />
+          {!cloud && <GatewayDockerNotifications />}
           <PageBoundary key={`${view}:${pageLocation?.target ?? ""}:${pageLocation?.context ?? ""}`} view={view}>
           <ScopedPage location={pageLocation}>
           <ConnectionGate onSetup={view === "sandboxes" || view === "templates" || view === "connections" ? undefined : connectMachine} onConnections={() => navigate("connections")}>

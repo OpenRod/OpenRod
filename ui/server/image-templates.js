@@ -32,6 +32,10 @@ async function locked(name, task) {
 const checkName = (name) => { if (!NAME_PATTERN.test(name || '')) throw fail('Unknown image template.', 404); return name }
 const missing = (e) => e?.code === 'not_found'
 export { run as runDocker }
+export const savingTemplate = () => [...jobs.values()].some((j) => j.saving && running(j))
+// Connects the local gateway's VM driver to the build engine (gateway-docker.js); set by api.js in local mode.
+let gatewayDocker = null
+export const setGatewayDocker = (value) => { gatewayDocker = value }
 
 function run(args, { job, engine, timeout = 30_000, spawnProcess = spawn } = {}) {
   return new Promise((resolve, reject) => {
@@ -77,7 +81,7 @@ export async function localEngine({ execute = run } = {}) {
     const info = JSON.parse(await execute(['info', '--format', '{{json .}}'], { engine: { endpoint } }))
     if (info.ServerErrors?.length) throw fail(`Docker is unavailable. Start Docker Desktop and retry. ${info.ServerErrors.join(' ')}`, 503)
     if (info.OSType !== 'linux') throw fail('Switch local Docker to Linux containers, then retry.')
-    return { endpoint, architecture: info.Architecture === 'aarch64' ? 'arm64' : info.Architecture === 'x86_64' ? 'amd64' : info.Architecture, engineId: info.ID }
+    return { endpoint, architecture: info.Architecture === 'aarch64' ? 'arm64' : info.Architecture === 'x86_64' ? 'amd64' : info.Architecture, engineId: info.ID, desktop: info.OperatingSystem === 'Docker Desktop' }
   } catch (e) {
     if (e.code === 'ENOENT') throw fail('Docker isn’t installed. Install Docker Desktop (macOS: brew install --cask docker-desktop) or Docker Engine (Linux), start it, then try again.')
     if (/failed to connect to the docker API|Cannot connect to the Docker daemon|connection refused/i.test(e.message)) throw fail('Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.', 503)
@@ -129,8 +133,10 @@ export function templateView(t) {
 }
 const jobView = (job) => ({ name: job.name, image: null, recipe: job.recipe, status: job.status, logs: job.logs, error: job.error, startedAt: job.startedAt })
 
-export async function listImageTemplates() {
-  const { client, workspace } = await gateway()
+export async function listImageTemplates({ connect = gateway, check = gatewayDocker, resolve = resolveGateway } = {}) {
+  // Wait out a local gateway restart (gateway-docker.js), as the save does.
+  if (check && !resolve().remote) await check.settle()
+  const { client, workspace } = await connect()
   const templates = (await client.sandboxTemplates.listAll({ workspace })).map(templateView)
   const byName = new Map(templates.map((t) => [t.name, t]))
   // A rebuild in progress (or one that failed) shows on the template it replaces.
@@ -139,13 +145,21 @@ export async function listImageTemplates() {
 }
 
 // What New sandbox needs: the template name plus how the sandbox starts.
-export async function imageTemplateForLaunch(name) {
-  const { client, target, workspace } = await gateway()
+export async function imageTemplateForLaunch(name, { connect = gateway, engineFor = deploymentEngine, check = gatewayDocker, execute = run } = {}) {
+  const { client, target, workspace } = await connect()
   let template
   try { template = templateView(await client.sandboxTemplates.get(checkName(name), { workspace })) } catch (e) { if (missing(e)) throw fail('Image template not found.', 404); throw e }
-  if (template.image?.startsWith(BUILT_PREFIX)) {
-    const engine = await deploymentEngine(target)
-    try { await inspect(template.image, engine) } catch { throw fail('This template’s image is unavailable or incompatible on the selected compute. Rebuild the template before launching.') }
+  const built = Boolean(template.image?.startsWith(BUILT_PREFIX))
+  if (built) {
+    const engine = await engineFor(target)
+    try { await inspect(template.image, engine, { execute }) } catch { throw fail('This template’s image is unavailable or incompatible on the selected compute. Rebuild the template before launching.') }
+  }
+  // The local VM driver must reach the engine holding built or never-pushed images.
+  if (!target.remote && check && template.image) {
+    const localOnly = async () => {
+      try { return !JSON.parse(await execute(['image', 'inspect', template.image], { engine: await engineFor(target) }))[0]?.RepoDigests?.length } catch { return false }
+    }
+    await check.assertLaunch({ built, localOnly })
   }
   return template
 }
@@ -191,9 +205,15 @@ async function start(input) {
   const buildEngine = target.remote && (recipe.source === 'build' || setups.length) ? await localEngine() : engine
   const job = { name, scope: contextKey(), recipe, status: 'building', logs: '', error: null, cancelled: false, child: null, startedAt: new Date().toISOString() }
   jobs.set(key, job)
+  // A long build hides the gateway restart that lets its VM driver see local images.
+  if (!target.remote) void gatewayDocker?.ensure()
+  const hooks = target.remote ? {} : {
+    gatewayReady: () => gatewayDocker?.settle(),
+    refreshClient: async () => (await gateway({ gateway: target.name, workspace })).client,
+  }
   void (async () => {
     try {
-      await publishImageTemplate({ recipe, setups, client, workspace, previous, target, engine, buildEngine, job })
+      await publishImageTemplate({ recipe, setups, client, workspace, previous, target, engine, buildEngine, job, ...hooks })
       jobs.delete(key)
       // Other workspaces or gateways may still reference the previous Docker image.
       // Keep published images; removing a record must not remove a shared image.
@@ -204,7 +224,7 @@ async function start(input) {
   return jobView(job)
 }
 
-export async function publishImageTemplate({ recipe, setups = [], client, workspace, previous, target, engine, buildEngine = engine, job }, { execute = run } = {}) {
+export async function publishImageTemplate({ recipe, setups = [], client, workspace, previous, target, engine, buildEngine = engine, job, gatewayReady, refreshClient }, { execute = run } = {}) {
   let temp
   let baseTag
   const generated = recipe.source === 'build' || setups.length > 0
@@ -268,9 +288,13 @@ export async function publishImageTemplate({ recipe, setups = [], client, worksp
       // References are resolved on the deployment engine, not on local Docker.
       await ensureImage(image, engine, { execute, job })
     }
-    active()
+    // Saving deletes and recreates the template, so it waits out a gateway restart.
+    active(); if (gatewayReady) { await gatewayReady(); active() }
     job.saving = true
-    try { await saveTemplate(client, workspace, recipe, image, previous) } catch (e) {
+    try {
+      if (refreshClient) client = await refreshClient()
+      await saveTemplate(client, workspace, recipe, image, previous)
+    } catch (e) {
       // Only this build's unpublished local tag is disposable. Remote images
       // may be shared with another gateway or workspace and are retained.
       if (generated) await execute(['image', 'rm', '--', image], { engine: buildEngine }).catch(() => {})

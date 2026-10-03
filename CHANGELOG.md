@@ -8,6 +8,10 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 - `npx openrod` opens the console in your browser, so `--open` is no longer needed. Over SSH, in CI, without a display, or when the output isn't a terminal, it only prints the link. `--no-open` always only prints it. The browser it opens gets a one-time code instead of the secret token, so the token never appears in another process's arguments; if that code is used twice, OpenRod warns in the terminal.
 
+### Fixed
+
+- On macOS, OpenRod connects OpenShell to the Docker it builds images with, so sandboxes from templates start even when Docker Desktop’s default socket is off.
+
 ## 0.1.1
 
 ### Added

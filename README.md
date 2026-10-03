@@ -131,6 +131,7 @@ Run a persistent second gateway in Docker on a Linux machine you reach over SSH.
 | `Docker isn’t running` or `Local Docker is required to build images` | Install or start Docker on this computer (Docker Desktop on macOS, Docker Engine on Linux), then click **Try again** |
 | Docker missing or inaccessible on the SSH host | Install Docker Engine and grant the SSH user socket access |
 | Local gateway missing | Start and register it with the OpenShell CLI (HTTPS/mTLS only) |
+| `failed to resolve vm sandbox image` … `Not authorized` | OpenShell can’t see the Docker that OpenRod builds with ([NVIDIA/OpenShell#4155](https://github.com/NVIDIA/OpenShell/issues/4155)). Click **Connect** (macOS Homebrew service) or **Show steps** on the sandbox, then delete it and create it again. Details: [SECURITY.md](SECURITY.md#local-gateway-docker-connection) |
 | Sandbox not Ready | Inspect its conditions in the console |
 
 More: [docs/remote-hosts.md#troubleshooting](docs/remote-hosts.md#troubleshooting)
