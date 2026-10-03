@@ -9,8 +9,8 @@ import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { createLaunchToken, createTokenGate, tokenCookie, tokenCookieName, tokenUrl } from './launch-token.js'
 
-async function serve(t, token = createLaunchToken()) {
-  const gate = createTokenGate(token)
+async function serve(t, token = createLaunchToken(), options) {
+  const gate = createTokenGate(token, options)
   const server = http.createServer((req, res) => { if (!gate.http(req, res)) res.writeHead(200).end('ok') })
   server.on('upgrade', (req, socket) => { if (!gate.upgrade(req, socket)) socket.end('HTTP/1.1 101 Switching Protocols\r\nConnection: close\r\n\r\n') })
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -79,16 +79,20 @@ test('a valid link sets a per-port HttpOnly cookie and redirects without the tok
   assert.equal((await request(`/?token=${token}`, { host: 'evil.example' })).status, 403)
 })
 
-test('a launch code sets the token cookie once and expires', async t => {
-  const { gate, token, port, request } = await serve(t)
+test('a launch code sets the token cookie once, reports reuse and expires', async t => {
+  let reused = 0
+  const { gate, token, port, request } = await serve(t, undefined, { onReuse: () => reused++ })
   const code = gate.launchCode()
   assert.notEqual(code, token)
   const first = await request(`/?token=${code}`)
   assert.equal(first.status, 302)
   assert.equal(first.headers.location, '/')
   assert.equal(first.headers['set-cookie'][0], `${tokenCookieName(port)}=${token}; Path=/; HttpOnly; SameSite=Strict`)
+  assert.equal(reused, 0)
   assert.equal((await request(`/?token=${code}`)).headers['set-cookie'], undefined)
+  assert.equal(reused, 1)
   assert.equal((await request(`/?token=${createLaunchToken()}`)).headers['set-cookie'], undefined)
+  assert.equal(reused, 1)
   assert.equal((await request('/api/os/overview', { cookie: tokenCookie(port, code) })).status, 401)
   assert.ok((await request(`/?token=${token}`)).headers['set-cookie'])
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() })

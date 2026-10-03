@@ -13,7 +13,7 @@ export const tokenUrl = (host, port, token) => `http://${host.includes(':') ? `[
 const digest = value => createHash('sha256').update(String(value)).digest()
 const isApi = pathname => pathname === '/api' || pathname.startsWith('/api/')
 
-export function createTokenGate(token) {
+export function createTokenGate(token, { onReuse = () => {} } = {}) {
   if (typeof token !== 'string' || token.length < 32) throw Error('A launch token of at least 32 characters is required')
   const expected = digest(token)
   const valid = value => typeof value === 'string' && value.length <= 256 && timingSafeEqual(digest(value), expected)
@@ -23,8 +23,10 @@ export function createTokenGate(token) {
   }
   // A browser OpenRod opens itself gets a one-time code instead of the token:
   // the opener's arguments are visible to other local users, and on Linux a
-  // browser it starts keeps them for its whole life.
-  const codes = new Map()
+  // browser it starts keeps them for its whole life. Whoever uses the code
+  // first gets the cookie, so a second use is reported: someone else may have
+  // been first.
+  const codes = new Map(), spent = new Set()
   const launchCode = () => {
     const now = Date.now()
     for (const [code, expires] of codes) if (expires <= now) codes.delete(code)
@@ -32,7 +34,13 @@ export function createTokenGate(token) {
     codes.set(code, now + 120_000)
     return code
   }
-  const spend = value => { const expires = codes.get(value); codes.delete(value); return expires > Date.now() }
+  const spend = value => {
+    if (spent.has(value)) { onReuse(); return false }
+    const expires = codes.get(value)
+    if (expires === undefined) return false
+    codes.delete(value); spent.add(value)
+    return expires > Date.now()
+  }
   const denied = res => { res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ error: 'Open the link printed by `openrod` in your terminal.', code: TOKEN_REQUIRED })) }
   // Handlers downstream also read the raw target, so a path the URL parser rewrites (dot segments, %2e) must never reach them.
   const rewritten = (req, pathname) => req.url.split('?', 1)[0] !== pathname
