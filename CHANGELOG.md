@@ -2,7 +2,7 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.2
 
 ### Added
 
@@ -12,12 +12,15 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 ### Changed
 
 - `npx openrod` opens the console in your browser, so `--open` is no longer needed. Over SSH, in CI, without a display, or when the output isn't a terminal, it only prints the link. `--no-open` always only prints it. The browser it opens gets a one-time code instead of the secret token, so the token never appears in another process's arguments; if that code is used twice, OpenRod warns in the terminal.
+- **Add secret** lists only services whose keys the gateway can inject: Claude Code, Codex, Copilot, OpenAI, OpenRouter and GitHub. Secrets already saved for other services keep working.
 
 ### Fixed
 
 - On macOS, OpenRod connects OpenShell to the Docker it builds images with, so sandboxes from templates start even when Docker Desktop’s default socket is off.
 - A fresh console connects to the local gateway OpenShell is set to, as **Use this computer** would, once it answers. The sidebar no longer says "Not connected" while sandboxes work, and the browser opens after the connection.
 - The install prompt asks again when the answer is neither yes nor no, for example a key typed in another keyboard layout.
+- New sandbox keeps a name you typed while its defaults are still loading.
+- Ingress shows gateway errors with a **Retry** button instead of "No sandboxes yet."
 
 ## 0.1.1
 
