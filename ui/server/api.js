@@ -433,8 +433,11 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     connections: remoteConnections, listSandboxes, listTemplates: listImageTemplates, logger,
     defaultLabel: security.config.mode === 'local' ? 'Local' : 'Cloud',
   })
-  const start = async () => {
-    if (closed || (security.config.mode === 'local' && !contextConfigured())) return
+  let ready = Promise.resolve()
+  const start = () => { ready = begin(); return ready }
+  const begin = async () => {
+    if (closed) return
+    if (security.config.mode === 'local' && !contextConfigured()) { await remoteConnections?.autoSelect(); return }
     if (remoteConnections && /^console-ssh-[a-f0-9]{24}$/.test(initialContext.gateway)) {
       const remote = (await remoteConnections.locationSnapshot()).remote
       if (remote?.gateway !== initialContext.gateway || remote.status !== 'connected') return
@@ -688,5 +691,5 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     const authenticate = () => security.middleware(req, res, () => route(req, res, next))
     return localCloud ? localCloud.middleware(req, res, authenticate) : authenticate()
   }
-  return { middleware, close, token, launchCode: gate?.launchCode }
+  return { middleware, close, token, launchCode: gate?.launchCode, ready: () => ready }
 }

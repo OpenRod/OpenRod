@@ -146,7 +146,9 @@ export async function offerOpenShellInstall({
   const needs = platform === 'darwin' ? 'OpenRod needs it to build sandbox images.' : "OpenShell's gateway won't start without it."
   if (docker === 'missing') log.info(`Docker isn't installed. ${needs}`)
   else if (!docker) log.info(`Docker isn't running. ${needs}`)
-  const answer = await ask(`Install OpenShell ${OPENSHELL_VERSION} now? ${platform === 'darwin' ? 'It uses Homebrew and runs sandboxes in VMs.' : 'It uses sudo and may ask for your password.'} [Y/n] `)
+  let answer = await ask(`Install OpenShell ${OPENSHELL_VERSION} now? ${platform === 'darwin' ? 'It uses Homebrew and runs sandboxes in VMs.' : 'It uses sudo and may ask for your password.'} [Y/n] `)
+  // Anything but yes or no (a key from another keyboard layout, say) asks again.
+  for (let tries = 0; answer !== null && !['', 'y', 'yes', 'n', 'no'].includes(answer.trim().toLowerCase()) && tries < 3; tries++) answer = await ask('Please answer y or n. [Y/n] ')
   if (answer === null) return 'cancelled'
   if (!['', 'y', 'yes'].includes(answer.trim().toLowerCase())) { manual('Skipped. To install it later, run:'); return 'skipped' }
 
