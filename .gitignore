@@ -25,3 +25,6 @@ openrod-*.tgz
 *.tfstate.*
 *.tfvars
 *.tfplan
+
+# Browser regression artifacts
+.e2e/
