@@ -225,6 +225,8 @@ function ScopedIngressView() {
   const visitsFor = (port) => inbound.filter((e) => e.type === "visit" && e.port === port && Date.parse(e.at) > now - 3600000)
   const sessions = inbound.filter((e) => e.type === "session" || e.type === "command")
   const ttl = data?.sessions?.ttlSeconds
+  // App-wide signals only matter while there is no sandbox list to show.
+  const error = data?.error ?? (live.sandboxes == null ? live.overview?.error ?? (live.connection === "gateway-down" ? "The gateway is unavailable." : null) : null)
 
   return (
     <div className="flex h-full min-h-0">
@@ -241,9 +243,12 @@ function ScopedIngressView() {
       </nav>
 
       <div className="min-w-0 flex-1 overflow-y-auto">
-        {!selected ? <p className="py-16 text-center text-sm text-muted-foreground">No sandboxes yet.</p>
-          : !data ? <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
-          : data.error ? <p role="alert" className="py-16 text-center text-sm text-muted-foreground">{data.error}</p>
+        {error ? <div role="alert" className="grid justify-items-center gap-3 py-16 text-center text-sm text-muted-foreground">
+            <p>{error}</p>
+            <Button variant="outline" size="sm" onClick={() => { load(); live.refresh() }}>Retry</Button>
+          </div>
+          : !data || live.sandboxes == null ? <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+          : !selected ? <p className="py-16 text-center text-sm text-muted-foreground">No sandboxes yet.</p>
           : (
             <div className="mx-auto grid max-w-6xl gap-6 px-4 py-5 sm:px-6 xl:grid-cols-[minmax(0,1fr)_17rem]">
               <div className="min-w-0 space-y-6">
