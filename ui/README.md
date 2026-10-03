@@ -19,14 +19,14 @@ curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | 
 ## Run
 
 ```bash
-npx openrod --open
+npx openrod
 
 # or install the openrod command globally
 npm install -g openrod
-openrod --open
+openrod
 ```
 
-On every start, OpenRod prints a link with a new secret token. Open that link:
+On every start, OpenRod opens your browser on a link with a new secret token. Over SSH, or anywhere without a display, open the printed link yourself:
 
 ```text
 OpenRod console (open this link): http://127.0.0.1:4600/?token=<secret>
@@ -39,8 +39,8 @@ Treat the link like a password: anyone who has it while OpenRod is running can u
 ```text
 --port <port>  HTTP port from 1 to 65535 (default: 4600)
 --host <host>  Loopback only: 127.0.0.1 (default), localhost, or ::1
---open         Open the console in your default browser
---no-open      Do not open a browser (default)
+--open         Always open the console in your default browser
+--no-open      Only print the link (the default over SSH, in CI or without a display)
 --help, -h     Show help
 --version, -v  Show the installed version
 ```
