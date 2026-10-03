@@ -29,7 +29,7 @@ export function createSandboxCreations() {
       update(id, { status: "created", sandbox: { ...sandbox, location: sandbox.location ?? job.location }, message: "" })
     }).catch((error) => {
       if (controller.signal.aborted || error.name === "AbortError") update(id, { status: "cancelled", message: "Creation cancelled." })
-      else update(id, { status: "failed", error: error.message, message: "" })
+      else update(id, { status: "failed", error: error.message, code: error.code ?? null, fix: error.fix ?? null, message: "" })
     })
   }
 
@@ -44,7 +44,8 @@ export function createSandboxCreations() {
       run(id)
       return id
     },
-    retry(id) { if (runs.has(id)) run(id) },
+    // Only a failed job reruns; a late retry (Connect's `then`) must not start a second task.
+    retry(id) { if (runs.has(id) && snapshot.find((job) => job.id === id)?.status === "failed") run(id) },
     cancel(id) {
       const job = snapshot.find((item) => item.id === id)
       if (job?.status !== "preparing") return

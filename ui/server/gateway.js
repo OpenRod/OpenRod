@@ -132,6 +132,8 @@ async function connectRegisteredGateway(name) {
     throw error
   }
 }
+// A restarted gateway gets a fresh connection on the next call.
+export const forgetGatewayConnection = (name) => { connections.delete(name) }
 
 async function listWorkspaces(client) {
   const workspaces = []

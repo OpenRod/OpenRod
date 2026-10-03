@@ -252,7 +252,8 @@ Focused checks:
 
 - Sandboxes from a locally built image (such as `claude-sandbox:latest`) need
   Docker Desktop running when they are created. Otherwise the VM driver falls
-  back to Docker Hub and the sandbox errors.
+  back to Docker Hub and the sandbox errors. The driver must also reach that
+  Docker (NVIDIA/OpenShell#4155); see [SECURITY.md](../SECURITY.md#local-gateway-docker-connection).
 - Only approvals can be undone. Rejections are final; a rejected host shows
   up again only if the sandbox retries it.
 

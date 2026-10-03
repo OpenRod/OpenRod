@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { MAX_RECIPE_BYTES, RECIPE_ANNOTATION, newRecipe, pendingRecipe, pendingRecipeKey, recipeErrors, dockerfileFor, storedRecipe } from '../src/lib/image-templates.js'
-import { imageTemplateRoute, localEngine, publishImageTemplate, templateView } from './image-templates.js'
+import { imageTemplateForLaunch, imageTemplateRoute, listImageTemplates, localEngine, publishImageTemplate, templateView } from './image-templates.js'
 import { contextKey, runWithContext } from './gateway.js'
 import { agentAccessRules } from '../shared/agent-access.js'
 import { scopedStateDirectory } from './paths.js'
@@ -390,6 +390,84 @@ test('local and worker builds keep their native platform without exporting or lo
   assert.equal(fixture.stores.get(fixture.input.engine.endpoint).get(image).Architecture, 'arm64')
   assert.equal(fixture.templates.get('origin/app').spec.workload.image, image)
   assert.deepEqual(fixture.events.map(event => event.kind), ['build', 'inspect', 'create'])
+})
+
+test('imageTemplateForLaunch asks the Docker check only for local targets and passes local-only images', async () => {
+  const engine = { endpoint: 'unix:///local-docker.sock', architecture: 'arm64' }
+  const images = new Map([
+    ['openshell-template/app:1', { Os: 'linux', Architecture: 'arm64' }],
+    ['mine:latest', { Os: 'linux', Architecture: 'arm64', RepoDigests: [] }],
+    ['ubuntu:24.04', { Os: 'linux', Architecture: 'arm64', RepoDigests: ['ubuntu@sha256:abc'] }],
+  ])
+  const launch = async (image, { remote = false, assertLaunch } = {}) => {
+    const calls = [], inspected = []
+    const connect = async () => ({ client: { sandboxTemplates: { get: async (name) => ({ metadata: { name }, spec: { workload: { image } } }) } }, target: { remote, name: 'local' }, workspace: 'default' })
+    const execute = async (args, { engine: selected }) => {
+      assert.equal(selected, engine)
+      inspected.push(args.at(-1))
+      if (!images.has(args.at(-1))) throw new Error(`No such image: ${args.at(-1)}`)
+      return JSON.stringify([images.get(args.at(-1))])
+    }
+    const check = { assertLaunch: async (options) => { calls.push({ built: options.built, localOnly: await options.localOnly() }); await assertLaunch?.() } }
+    const template = await imageTemplateForLaunch('app', { connect, engineFor: async () => engine, check, execute })
+    assert.equal(template.image, image)
+    return { calls, inspected }
+  }
+  assert.deepEqual((await launch('openshell-template/app:1')).calls, [{ built: true, localOnly: true }])
+  assert.deepEqual((await launch('mine:latest')).calls, [{ built: false, localOnly: true }])
+  assert.deepEqual((await launch('ubuntu:24.04')).calls, [{ built: false, localOnly: false }])
+  assert.deepEqual((await launch('missing:latest')).calls, [{ built: false, localOnly: false }])
+  const remote = await launch('openshell-template/app:1', { remote: true })
+  assert.deepEqual(remote.calls, [])
+  assert.deepEqual(remote.inspected, ['openshell-template/app:1'])
+  const mismatch = Object.assign(new Error('OpenShell can’t use your Docker images yet.'), { status: 409, code: 'GATEWAY_DOCKER_MISMATCH' })
+  await assert.rejects(launch('mine:latest', { assertLaunch: () => { throw mismatch } }), { code: 'GATEWAY_DOCKER_MISMATCH' })
+})
+
+test('listing templates waits out a local gateway restart and skips the wait for remote gateways', async () => {
+  for (const remote of [false, true]) {
+    const events = []
+    let release
+    const restarting = new Promise((resolve) => { release = resolve })
+    const connect = async () => { events.push('connect'); return { client: { sandboxTemplates: { listAll: async () => [] } }, workspace: 'default' } }
+    const check = { settle: async () => { events.push('settle'); await restarting } }
+    const listing = listImageTemplates({ connect, check, resolve: () => ({ remote }) })
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(events, remote ? ['connect'] : ['settle'])
+    release()
+    assert.deepEqual(await listing, [])
+    assert.deepEqual(events, remote ? ['connect'] : ['settle', 'connect'])
+  }
+})
+
+test('publishImageTemplate waits for a restart in progress before saving and uses a fresh client', { timeout: 10_000 }, async () => {
+  for (const cancel of [false, true]) {
+    const fixture = publicationFixture({ local: true, replace: true })
+    let release
+    const restarting = new Promise((resolve) => { release = resolve })
+    const fresh = { sandboxTemplates: {
+      delete: async (name, { workspace }) => { fixture.events.push({ kind: 'fresh-delete' }); fixture.templates.delete(`${workspace}/${name}`) },
+      create: async (template, { workspace }) => { fixture.events.push({ kind: 'fresh-create' }); fixture.templates.set(`${workspace}/${template.metadata.name}`, template) },
+    } }
+    Object.assign(fixture.input, {
+      gatewayReady: async () => { fixture.events.push({ kind: 'settle' }); await restarting },
+      refreshClient: async () => { fixture.events.push({ kind: 'refresh' }); return fresh },
+    })
+    const operation = fixture.operation()
+    while (!fixture.events.some((event) => event.kind === 'settle')) await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(fixture.input.job.saving, undefined)
+    if (cancel) fixture.input.job.cancelled = true
+    release()
+    if (cancel) {
+      await assert.rejects(operation, /cancelled/)
+      assert.equal(fixture.templates.get('origin/app'), fixture.input.previous)
+      assert.equal(fixture.events.some((event) => ['refresh', 'delete', 'create', 'fresh-delete', 'fresh-create'].includes(event.kind)), false)
+      continue
+    }
+    const image = await operation
+    assert.equal(fixture.templates.get('origin/app').spec.workload.image, image)
+    assert.deepEqual(fixture.events.map((event) => event.kind), ['build', 'inspect', 'settle', 'refresh', 'fresh-delete', 'fresh-create'])
+  }
 })
 
 test('failed transfers and mismatched loaded images preserve the previous template and remove the archive', async () => {

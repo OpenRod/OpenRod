@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { LocationBadge } from "@/components/location-badge"
 import { Notice } from "@/components/notice"
 import { useInventory } from "@/lib/inventory"
+import { gatewayDocker } from "@/lib/gateway-docker-store"
 import { sandboxCreations } from "@/lib/sandbox-creations"
 import { PHASE_LABEL } from "@/lib/sandboxes"
 
@@ -64,7 +65,7 @@ export function SandboxCreationNotifications() {
       const showBuild = job.build && <Button size="xs" variant="outline" onClick={() => setLogsFor(job.id)}>Show build</Button>
       const props = job.status === "preparing" ? { tone: "progress", title: `Preparing ${job.name}…`, body: job.message, actions: <>{showBuild}<Button size="xs" variant="ghost" onClick={() => sandboxCreations.cancel(job.id)}>Cancel</Button></> }
         : job.status === "creating" ? { tone: "progress", title: `Creating ${job.name}…`, body: job.message }
-        : job.status === "failed" ? { tone: "error", title: `Couldn’t create ${job.name}`, body: job.error, actions: <>{showBuild}<Button size="xs" variant="outline" onClick={() => sandboxCreations.retry(job.id)}>Try again</Button></> }
+        : job.status === "failed" ? { tone: "error", title: `Couldn’t create ${job.name}`, body: job.error, actions: <>{showBuild}{job.code === "GATEWAY_DOCKER_MISMATCH" && <Button size="xs" variant="outline" onClick={() => gatewayDocker.ask({ kind: job.fix === "manual" ? "steps" : undefined, then: () => sandboxCreations.retry(job.id) })}>{job.fix === "manual" ? "Show steps" : "Connect"}</Button>}<Button size="xs" variant="outline" onClick={() => sandboxCreations.retry(job.id)}>Try again</Button></> }
         : job.status === "cancelled" ? { tone: "info", title: `${job.name} not created`, body: "Creation was cancelled." }
         : ready ? { tone: "success", title: `${job.name} is ready`, body: "Your sandbox is ready to use.", actions: <Button size="xs" variant="outline" disabled={job.location?.connected === false} onClick={() => openSandbox(job)}>Open sandbox<ArrowUpRight className="size-3" /></Button> }
         : ended ? { tone: "error", title: `${job.name} needs attention`, body: `Status: ${PHASE_LABEL[job.phase]}. Open the sandbox to inspect it.`, actions: <Button size="xs" variant="outline" onClick={() => openSandbox(job)}>Open sandbox<ArrowUpRight className="size-3" /></Button> }
