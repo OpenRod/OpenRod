@@ -16,6 +16,8 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 ### Fixed
 
 - On macOS, OpenRod connects OpenShell to the Docker it builds images with, so sandboxes from templates start even when Docker Desktop’s default socket is off.
+- A fresh console connects to the local gateway OpenShell is set to, as **Use this computer** would, once it answers. The sidebar no longer says "Not connected" while sandboxes work, and the browser opens after the connection.
+- The install prompt asks again when the answer is neither yes nor no, for example a key typed in another keyboard layout.
 
 ## 0.1.1
 

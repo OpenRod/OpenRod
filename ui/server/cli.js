@@ -171,7 +171,11 @@ export async function startConsole(options = parseOptions([]), logger = console)
   // The link carries this launch's secret; it changes on every restart.
   const url = tokenUrl(host, port, token)
   logger.info(`OpenRod console (open this link): ${url}`)
-  if (options.open) openBrowser(tokenUrl(host, port, api.launchCode?.() ?? token), logger)
+  if (options.open) {
+    // A fresh console first connects to its local gateway, so the page opens on it.
+    await Promise.race([api.ready?.(), new Promise((resolve) => setTimeout(resolve, 5000).unref())])
+    openBrowser(tokenUrl(host, port, api.launchCode?.() ?? token), logger)
+  }
   return { server, url, close }
 }
 

@@ -32,6 +32,9 @@ let selected = {
 let configured = Boolean(process.env.OPENSHELL_GATEWAY || saved.gateway)
 let selectionSource = process.env.OPENSHELL_GATEWAY ? 'environment' : saved.gateway ? 'saved' : cliGateway ? 'cli' : 'default'
 export const contextConfigured = () => configured
+// A console nobody has pointed anywhere yet: no saved or cleared choice and no
+// OPENSHELL_GATEWAY. Its candidate is the gateway the OpenShell CLI is set to.
+export const unchosenCliGateway = () => !configured && !process.env.OPENSHELL_GATEWAY && cliGateway && !fs.existsSync(CONTEXT_FILE) ? cliGateway : null
 
 const requestContext = new AsyncLocalStorage()
 export const contextSelection = () => ({ ...(requestContext.getStore() ?? selected) })

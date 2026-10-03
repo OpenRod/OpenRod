@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { setTimeout as delay } from 'node:timers/promises'
-import { CONFIG_DIR, clearConsoleContext, contextConfigured, contextSelection, defaultContextSelection, localGateways, gatewayWorkspaces, selectConsoleContext } from './gateway.js'
+import { CONFIG_DIR, clearConsoleContext, contextConfigured, contextSelection, defaultContextSelection, localGateways, gatewayWorkspaces, selectConsoleContext, unchosenCliGateway } from './gateway.js'
 import { stateDirectory } from './paths.js'
 import { fail, findExecutable, openshellBinary, runCli, sshBinary } from './openshell-cli.js'
 import { listSshHosts, probeHost, installDocker as installHostDocker, installRuntime, sshArgs } from './remote-hosts.js'
@@ -322,6 +322,13 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
       return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')), openshell: Boolean(openshellBinary()), installCommand: installCommand(process.platform) } }
     },
     changing: () => disconnecting || job?.status === 'working',
+    // A fresh console connects to the CLI's local gateway the way "Use this
+    // computer" does, but only once it answers; otherwise setup stays up.
+    async autoSelect() {
+      const name = unchosenCliGateway()
+      if (!name || job?.status === 'working' || !localGateways().some(target => target.name === name)) return false
+      try { await select(name); return true } catch { return false }
+    },
     architecture: () => active?.status === 'connected' ? active.architecture : null,
     begin,
     job: id => view(getJob(id)),

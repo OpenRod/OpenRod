@@ -404,3 +404,14 @@ test('on Linux the Docker line says the gateway needs it and the plain command i
   assert.ok(lines.includes("Docker isn't running. OpenShell's gateway won't start without it."))
   assert.equal(lines.at(-1), `  ${INSTALL_COMMAND}`)
 })
+
+test('an answer that is neither yes nor no asks again', async () => {
+  const answers = ['ט', 'maybe', 'y']
+  const { options, calls } = setup({ ask: async (question) => { calls.ask.push(question); return answers.shift() } })
+  assert.equal(await offerOpenShellInstall(options), 'ready')
+  assert.deepEqual(calls.ask.slice(1), ['Please answer y or n. [Y/n] ', 'Please answer y or n. [Y/n] '])
+  const fixture = setup({ ask: async (question) => { fixture.calls.ask.push(question); return 'ט' } })
+  assert.equal(await offerOpenShellInstall(fixture.options), 'skipped')
+  assert.equal(fixture.calls.ask.length, 4)
+  assert.equal(fixture.calls.run.length, 0)
+})
