@@ -171,6 +171,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   const [sandboxes, setSandboxes] = React.useState([])
   const [providers, setProviders] = React.useState([])
   const [name, setName] = React.useState("")
+  const nameEdited = React.useRef(false)
   const [images, setImages] = React.useState([])
   const [setupIds, setSetupIds] = React.useState([])
   const [setupAccessReview, setSetupAccessReview] = React.useState(null)
@@ -200,13 +201,14 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   React.useEffect(() => {
     if (!open || location?.connected === false) return
     let current = true
+    nameEdited.current = false
     setSandboxes([]); setProviders([])
     api.overview().then((overview) => {
       if (!current) return
       const list = overview.sandboxes ?? []
       const savedProviders = overview.providers ?? []
       setSandboxes(list); setProviders(savedProviders)
-      setName(nextName(takenNames(list, location)))
+      if (!nameEdited.current) setName(nextName(takenNames(list, location)))
       setChosen(savedProviders.map((provider) => provider.name))
     }).catch((e) => { if (current) setError(e.message) })
     setName("")
@@ -352,7 +354,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
               className="grid min-w-0 content-start gap-6 p-5 @3xl:overflow-y-auto @3xl:p-7">
             <div className="grid gap-1.5">
               <Label htmlFor="sandbox-name" className="text-xs">Name</Label>
-              <Input id="sandbox-name" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="h-10 font-mono text-sm" required aria-invalid={(showMissing && !name) || undefined}
+              <Input id="sandbox-name" value={name} onChange={(e) => { nameEdited.current = true; setName(e.target.value.toLowerCase()) }} className="h-10 font-mono text-sm" required aria-invalid={(showMissing && !name) || undefined}
                 pattern="[a-z0-9]([a-z0-9\-]{0,17}[a-z0-9])?" maxLength={19} title="Lowercase letters, digits and dashes, up to 19" autoFocus />
             </div>
 
