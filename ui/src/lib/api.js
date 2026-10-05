@@ -2,6 +2,7 @@
 // holds the gateway certificate, so nothing here carries a credential.
 
 import { computeApiPath, currentComputeTarget, currentCloudOwner } from './compute-target.js'
+import { analyticsFeatureRequest } from './analytics.js'
 
 // The local server answers 401 with this code until the browser opens the
 // tokened link that `openrod` prints; the app then shows how to get back in.
@@ -53,6 +54,7 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     if (payload.code === LINK_REQUIRED) window.dispatchEvent(new Event(LINK_REQUIRED))
     else if (response.status === 401 || payload.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
     if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes, fix: payload.fix })
+    analyticsFeatureRequest(suffix, method)
     return payload
   }
   return {

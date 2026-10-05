@@ -16,6 +16,7 @@ import { LocationChip, StepTrail } from '@/components/location-step'
 import { useApi, useLocation } from '@/lib/location-context'
 import { LocationBadge } from '@/components/location-badge'
 import { buildTemplateWithSetups } from '@/lib/setup-template-build'
+import { analytics } from '@/lib/analytics'
 import { persistentGateway } from '@/lib/sandbox-session'
 import { AGENTS, BASES, RUNTIMES, STARTS, dockerfileFor, newRecipe, recipeErrors, requiresShell, selectedAgents, splitPackages } from '@/lib/image-templates'
 
@@ -125,9 +126,11 @@ function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted, onC
     const controller = new AbortController()
     preparation.current = controller
     try {
-      onStarted(await buildTemplateWithSetups(api, recipe, replace, {
+      const record = await buildTemplateWithSetups(api, recipe, replace, {
         signal: controller.signal, onProgress: setProgress, onPrepared: () => setPreparing(false),
-      }))
+      })
+      analytics.templateStarted(record, location)
+      onStarted(record)
     } catch (e) { if (e.name !== 'AbortError') setError(e.message) }
     finally { setBusy(false); setPreparing(false); setProgress(''); preparation.current = null }
   }

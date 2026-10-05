@@ -17,6 +17,21 @@ test('anonymous localhost use remains protected against remote and cross-site ca
   assert.equal(isLocalApiRequest({ ...req, socket: { remoteAddress: '10.1.1.1' } }), false)
   assert.equal(isLocalApiRequest({ ...req, headers: { ...req.headers, origin: 'https://evil.example' } }), false)
 })
+
+test('local runtime telemetry override is exposed without enabling cloud capture', async t => {
+  const before = process.env.OPENROD_TELEMETRY
+  t.after(() => { if (before === undefined) delete process.env.OPENROD_TELEMETRY; else process.env.OPENROD_TELEMETRY = before })
+  const req = { method: 'GET', url: '/api/auth/config', headers: { host: '127.0.0.1:4600' }, socket: { remoteAddress: '127.0.0.1' } }
+  for (const setting of ['0', 'false', 'FALSE', '1', '']) {
+    process.env.OPENROD_TELEMETRY = setting
+    let payload
+    await createSecurity({ mode: 'local' }).middleware(req, { writeHead: () => {}, end: body => { payload = JSON.parse(body) } }, () => assert.fail('must return config'))
+    assert.equal(payload.telemetryEnabled, !['0', 'false', 'FALSE'].includes(setting))
+  }
+  let cloud
+  await createSecurity(cloudConfig(env), auth()).middleware(request({ url: '/api/auth/config' }), { writeHead: () => {}, end: body => { cloud = JSON.parse(body) } }, () => assert.fail('must return config'))
+  assert.equal(cloud.telemetryEnabled, false)
+})
 test('cloud requires a verified session and a current verified Google account', async () => {
   const security = createSecurity(cloudConfig(env), auth())
   const req = request()

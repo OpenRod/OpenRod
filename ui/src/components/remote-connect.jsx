@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SelectField } from "@/components/ui/select-field"
 import { api } from "@/lib/api"
+import { analytics, classifyAnalyticsError } from '@/lib/analytics'
 
 const PENDING = ["working", "needs-docker", "needs-install"]
 
@@ -33,13 +34,22 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
   const generation = React.useRef(0)
   const chosen = React.useRef(null)
   const done = React.useRef(false)
+  const tracked = React.useRef(null)
   const prefix = React.useId()
 
   const finish = React.useCallback((next) => {
     if (done.current) return
     done.current = true
+    analytics.finishFlow(tracked.current, 'connected')
     onConnected(next)
   }, [onConnected])
+
+  React.useEffect(() => {
+    if (!job || !tracked.current) return
+    if (job.status === 'needs-docker') analytics.step(tracked.current, 'needs_docker', 'blocked', 'docker_missing')
+    else if (job.status === 'needs-install') analytics.step(tracked.current, 'needs_runtime', 'blocked', 'runtime_missing')
+    else if (job.status === 'failed') analytics.finishFlow(tracked.current, 'failed', classifyAnalyticsError({ code: job.code }))
+  }, [job?.status, job?.id])
 
   React.useEffect(() => {
     const controller = new AbortController()
@@ -79,12 +89,14 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
   }, [job?.id, job?.status, pollError, busy, finish])
 
   async function run(kind, operation) {
+    if (kind === 'connect' || tracked.current?.outcome === 'failed') tracked.current = analytics.startFlow('gateway_connection', { location_type: 'ssh' }, tracked.current)
     setBusy(kind); setError(null); setPollError(null)
     try {
       const next = await operation()
       setJob(next)
       if (next.status === "ready") finish(next)
     } catch (reason) {
+      analytics.finishFlow(tracked.current, 'failed', classifyAnalyticsError(reason))
       setError(reason.message)
     } finally {
       setBusy(null)

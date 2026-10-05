@@ -22,6 +22,8 @@ import { LocationBadge } from "@/components/location-badge"
 import { connectLocalGateway } from "@/lib/locations"
 import { CopyCommand } from "@/components/copy-command"
 import { INSTALL_COMMAND } from "../shared/openshell-release.js"
+import { analytics } from '@/lib/analytics'
+import { useUsageState } from '@/components/usage-feedback'
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -94,6 +96,8 @@ function viewFromLocation() {
 function ConnectionGate({ onSetup, onConnections, children }) {
   const api = useApi()
   const { connection, overview } = useLive()
+  const usage = useUsageState()
+  React.useEffect(() => { analytics.observeConsole(connection) }, [connection, usage.sharing])
   const gated = Boolean(onSetup) && connection === "setup-required"
   const [connections, setConnections] = React.useState(null)
   const [state, setState] = React.useState({ busy: false, error: null })
@@ -143,6 +147,8 @@ export function App() {
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
   const [createRequest, setCreateRequest] = React.useState(0)
   const [pageLocation, setPageLocation] = React.useState(locationFromHash)
+  const usage = useUsageState()
+  React.useEffect(() => { analytics.observeView(terminal ? 'terminal' : view) }, [view, Boolean(terminal), usage.sharing])
   const connectMachine = cloud ? undefined : () => { navigate("sandboxes"); setCreateRequest((value) => value + 1) }
   React.useEffect(() => {
     const sync = () => { setView(viewFromLocation()); setTerminal(terminalFromLocation()); setPageLocation(locationFromHash()) }

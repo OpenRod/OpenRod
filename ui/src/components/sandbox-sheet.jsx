@@ -21,6 +21,7 @@ import { useApi, useLocation } from "@/lib/location-context"
 import { LocationBadge } from "@/components/location-badge"
 import { LiveProvider, useLive } from "@/lib/live"
 import { sessionName, terminalHref } from "@/lib/sandbox-session"
+import { analytics, analyticsLocation, classifyAnalyticsError } from '@/lib/analytics'
 import { absoluteTime } from "@/lib/format"
 import { dockerImageProblem } from "@/lib/gateway-docker"
 import { ownerOf, PHASE_LABEL, canStart, canStop, commandText, imageName, statusOf, styleOf } from "@/lib/sandboxes"
@@ -67,6 +68,14 @@ function useEditors() {
 // Cloud sandboxes have no local SSH or editors, so only the browser terminal applies.
 function OpenIn({ name, editors, cloud, context, cursorAgent = false }) {
   const api = useApi()
+  const location = useLocation()
+  const trackedLaunch = React.useRef(null)
+  function launch(target) {
+    const previous = trackedLaunch.current
+    trackedLaunch.current = analytics.startFlow('session_launch', { launch_target: target, location_type: analyticsLocation(location) },
+      previous?.outcome === 'failed' && previous.properties.launch_target === target ? previous : null)
+    return trackedLaunch.current
+  }
   const [connection, setConnection] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [mode, setMode] = React.useState("ssh")
@@ -95,20 +104,25 @@ function OpenIn({ name, editors, cloud, context, cursorAgent = false }) {
     : null)
 
   async function openEditor(editor) {
+    const tracked = launch(editor.id)
     setOpening(true)
     try {
       await api.openEditor(name, editor.id)
+      analytics.finishFlow(tracked, 'handoff_requested')
       toast.success(`Opening ${name} in ${editor.label}`)
-    } catch (e) { toast.error(`Couldn’t open ${editor.label}`, { description: e.message }) }
+    } catch (e) { analytics.finishFlow(tracked, 'failed', classifyAnalyticsError(e)); toast.error(`Couldn’t open ${editor.label}`, { description: e.message }) }
     finally { setOpening(false) }
   }
 
   async function open() {
+    const tracked = launch('terminal')
     setOpening(true)
     try {
       await api.openSshTerminal(name, mode)
+      analytics.finishFlow(tracked, 'handoff_requested')
       toast.success(mode === "ssh" ? `Opening SSH to ${name}` : mode === "attach" ? `Attaching to ${name}` : `Starting a new session in ${name}`)
     } catch (e) {
+      analytics.finishFlow(tracked, 'failed', classifyAnalyticsError(e))
       toast.error("Couldn’t open SSH terminal", { description: e.message })
     } finally {
       setOpening(false)
@@ -122,7 +136,7 @@ function OpenIn({ name, editors, cloud, context, cursorAgent = false }) {
     finally { setLoadingConfig(false) }
   }
 
-  const browser = <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} disabled={!cloud && (!context?.name || !context?.workspace)} render={<a href={cloud || (context?.name && context?.workspace) ? terminalHref(name, undefined, context) : undefined} target="_blank" rel="noreferrer" />}>
+  const browser = <Button variant="outline" size="sm" className="justify-start text-xs" nativeButton={false} disabled={!cloud && (!context?.name || !context?.workspace)} render={<a href={cloud || (context?.name && context?.workspace) ? terminalHref(name, undefined, context) : undefined} onClick={event => analytics.terminalClick(event, { location_type: analyticsLocation(location) })} target="_blank" rel="noreferrer" />}>
     <Globe className="size-3.5" />Browser
   </Button>
 

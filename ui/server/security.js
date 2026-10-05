@@ -81,7 +81,9 @@ export function createSecurity(config, auth, revocations = { has: () => false, a
       const pathname = requestPath(req)
       if (!pathname.startsWith('/api/')) return next()
       checkBoundary(req)
-      if (pathname === '/api/auth/config' && req.method === 'GET') return json(res, 200, { mode: config.mode, ...(config.mode === 'cloud' ? { firebase: config.firebase } : {}) })
+      if (pathname === '/api/auth/config' && req.method === 'GET') return json(res, 200, { mode: config.mode,
+        telemetryEnabled: config.mode === 'local' && !['0', 'false'].includes((process.env.OPENROD_TELEMETRY ?? '').toLowerCase()),
+        ...(config.mode === 'cloud' ? { firebase: config.firebase } : {}) })
       if (config.mode === 'cloud' && pathname === '/api/auth/session' && req.method === 'POST') {
         if (req.headers['x-openshell-console'] !== '1' || req.headers['content-type'] !== 'application/json') throw fail('Request rejected', 403)
         // nginx overwrites this header from the GCP-appended client address.

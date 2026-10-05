@@ -1,5 +1,6 @@
 import { SelectField } from "@/components/ui/select-field"
 import * as React from "react"
+import { analytics } from '@/lib/analytics'
 import { ArrowDown, ArrowUp, Check, Copy, Filter, Pause, Play, X, SlidersHorizontal, Download, Webhook, ChevronDown, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ActivityDestinations } from "@/components/activity-destinations"
@@ -136,6 +137,7 @@ function ScopedActivityView() {
   }
   const events = live.demo ? held ?? live.events : history.events
   function applyView(view) {
+    if (!live.demo) analytics.capture('feature_used', { feature: 'activity', action: 'filter_applied' })
     view = normalizeAgentSelection(view)
     hold(); setQuery(view.query || ''); setDirection(view.direction || 'all'); setSandboxes(view.sandboxes || []); setVerdicts(view.verdicts || []); setAgents(view.agents || []); setFilters(view.filters || {}); setRange(view.range || 'all'); setFrom(localDate(view.from)); setTo(localDate(view.to)); setSort(view.sort || { key: 'time', direction: 'desc' })
   }

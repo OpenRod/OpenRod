@@ -9,6 +9,8 @@ import { toast } from 'sonner'
 import { buttonVariants } from '@/components/ui/button'
 import { CLOUD_AVAILABLE, CLOUD_SOON } from '@/lib/cloud-origin'
 import { LINK_REQUIRED } from '@/lib/api'
+import { analytics } from '@/lib/analytics'
+import { UsageProvider } from './usage-feedback'
 
 async function authRequest(path, body) {
   const response = await fetch(`/api/auth/${path}`, {
@@ -49,6 +51,7 @@ export function AuthGate({ children }) {
         const value = await authRequest('config')
         if (!['local', 'cloud'].includes(value.mode)) throw Error('Invalid console configuration')
         if (!alive) return
+        analytics.configure({ mode: value.mode, enabled: value.telemetryEnabled === true })
         setConfig(value)
         if (value.mode === 'cloud') {
           const response = await fetch('/api/auth/me')
@@ -59,8 +62,8 @@ export function AuthGate({ children }) {
       finally { if (alive) setLoading(false) }
     }
     load()
-    const expired = () => { setUser(null); setError('Your session expired. Sign in again.') }
-    const locked = () => setLinkRequired(true)
+    const expired = () => { analytics.stop(); setUser(null); setError('Your session expired. Sign in again.') }
+    const locked = () => { analytics.stop(); setLinkRequired(true) }
     window.addEventListener('openrod-session-expired', expired)
     window.addEventListener(LINK_REQUIRED, locked)
     return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); window.removeEventListener(LINK_REQUIRED, locked) }
@@ -78,7 +81,7 @@ export function AuthGate({ children }) {
     </section>
   </main>
   if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading OpenRod…</div>
-  if (config?.mode === 'local') return <LocalComputeProvider><LocalReturn>{children}</LocalReturn></LocalComputeProvider>
+  if (config?.mode === 'local') return <LocalComputeProvider><LocalReturn><UsageProvider>{children}</UsageProvider></LocalReturn></LocalComputeProvider>
   if (user) return <LocalConnect user={user} logout={logout}><CloudComputeProvider user={user} logout={logout}><CloudMachine key={user.uid} logout={logout}>{children}</CloudMachine></CloudComputeProvider></LocalConnect>
   return <main className="grid min-h-screen place-items-center bg-background px-6">
     <section className="w-full max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
