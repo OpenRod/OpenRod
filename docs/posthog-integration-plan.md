@@ -6,7 +6,7 @@ The implementation and operational details are in [posthog.md](posthog.md).
 2. **Understand behavior.** Explicitly observe console state, screen changes, connection/creation/session stages and successful feature use. Keep created vs Ready, browser live vs native handoff, and exploration vs submitted attempts separate.
 3. **Understand friction.** Correlate supported retries and structured failure categories, without sending raw errors or treating missing events as failures.
 4. **Hear what is missing.** Keep feedback available manually. Do not interrupt users with outcome surveys or blocker questions.
-5. **Respect local execution.** Require opt-in, retain only small preference/correlation records, and silently drop blocked/offline requests. Avoid queues, retries, logs and any dependency on analytics for product operations.
+5. **Respect local execution.** Offer opt-in through a small, muted sidebar notice with **Allow** / **No thanks**, without interrupting the console. Collect nothing until **Allow**; save **No thanks** as sharing off. Retain only small preference/correlation records and silently drop blocked/offline requests. Avoid queues, retries, logs and any dependency on analytics for product operations.
 6. **Review evidence.** Use one production-only dashboard for activation, friction, adoption, return use and feedback. Combine manual feedback with observed actions; document offline, opt-out and external-app blind spots.
 
 The transport uses PostHog’s public capture API directly rather than a full SDK. The release public token is bundled; runtime disable and build overrides are documented. Autocapture, replay, heatmaps, web vitals, person profiles and geo-IP enrichment are excluded.

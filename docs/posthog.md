@@ -1,6 +1,6 @@
 # Optional usage and feedback
 
-OpenRod runs locally. Usage sharing starts only after the authorized browser user chooses **Approve** in a short disclosure with **No thanks** as the alternative. There are no follow-up questions or automatic feedback prompts. **Usage & feedback** in the sidebar lets them turn sharing off or submit feedback manually. Closing the first prompt declines sharing. General feedback can be sent explicitly while usage sharing is off, using a one-off anonymous ID.
+OpenRod runs locally. A small, muted notice at the bottom of the sidebar says “Share anonymous metrics via PostHog.” Usage sharing starts only after the authorized browser user chooses **Allow**. **No thanks** saves sharing off and dismisses the notice. There are no follow-up questions or automatic feedback prompts. **Usage & feedback** lets users manage sharing or submit feedback manually. General feedback can be sent explicitly while usage sharing is off, using a one-off anonymous ID.
 
 ## Delivery and configuration
 
@@ -29,7 +29,7 @@ Every event has `schema_version`, `app_version`, `environment`, and a random ano
 
 A browser session is `live` only after its WebSocket confirms readiness. Native Terminal/VS Code/Cursor success is **handoff_requested**: OpenRod cannot observe whether the external app became useful. Sandbox creation finishes `created`; readiness is a separate event. Closing the creation dialog does not cancel its background job. Pre-submit dialog cancellation has `start_observed=false` and no duration. Reloads, crashes and lost events can leave unmatched starts.
 
-The first-run dialog contains a short disclosure and only **Approve** / **No thanks**. Approving closes it and goes straight back to the console. Declining, Escape or dismissing the dialog records sharing off. There are no goal questions, outcome surveys, blocker questions, sampling timers or prompt cooldowns. Feedback stays available manually in **Usage & feedback**. Browser-origin consent and safe terminal-flow correlation synchronize between tabs. Revocation aborts in-flight requests and prevents old workflows from being attributed after re-enabling sharing, including suspended tabs.
+The sidebar notice does not interrupt the console. Its **Allow** / **No thanks** controls use the same low-key styling. Ignoring the notice leaves usage collection off. Either choice removes the notice; the saved preference can be changed in **Usage & feedback**. There are no goal questions, outcome surveys, blocker questions, sampling timers or prompt cooldowns. Feedback stays available manually. Browser-origin consent and safe terminal-flow correlation synchronize between tabs. Revocation aborts in-flight requests and prevents old workflows from being attributed after re-enabling sharing, including suspended tabs.
 
 ## Privacy and local state
 

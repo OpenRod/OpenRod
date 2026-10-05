@@ -8,49 +8,38 @@ import { Textarea } from '@/components/ui/textarea'
 
 const UsageContext = React.createContext(null)
 export const useUsageState = () => React.useSyncExternalStore(analytics.subscribe, analytics.getSnapshot)
-const terminalTab = () => window.location.hash.startsWith('#terminal/')
 
 export function UsageProvider({ children }) {
   const state = useUsageState()
   const [dialog, setDialog] = React.useState(null)
-  const prompted = React.useRef(false)
   React.useEffect(() => {
     const changed = () => analytics.refresh()
     window.addEventListener('storage', changed)
     window.addEventListener('focus', changed)
     return () => { window.removeEventListener('storage', changed); window.removeEventListener('focus', changed) }
   }, [])
-  React.useEffect(() => {
-    if (!state.available || state.sharing !== null || dialog || terminalTab() || prompted.current) return
-    prompted.current = true
-    setDialog('usage')
-  }, [state.available, state.sharing, dialog])
   const open = React.useCallback(() => setDialog('settings'), [])
-  function close() {
-    if (dialog === 'usage') analytics.setSharing(false)
-    setDialog(null)
-  }
   function chooseSharing(value) {
     analytics.setSharing(value)
     setDialog(null)
   }
   return <UsageContext.Provider value={open}>
     {children}
-    <Dialog open={Boolean(dialog)} onOpenChange={value => { if (!value) close() }}>
-      <DialogContent showCloseButton={dialog !== 'usage'} className="sm:max-w-sm">
-        {dialog === 'usage' || dialog === 'settings' ? <>
+    <Dialog open={Boolean(dialog)} onOpenChange={value => { if (!value) setDialog(null) }}>
+      <DialogContent className="sm:max-w-sm">
+        {dialog === 'settings' ? <>
           <DialogHeader>
-            <DialogTitle>{dialog === 'usage' ? 'Help improve OpenRod' : 'Usage and feedback'}</DialogTitle>
+            <DialogTitle>Usage and feedback</DialogTitle>
             <DialogDescription>Share anonymous usage metrics with PostHog ({state.destination}) to improve OpenRod. No commands or project content.</DialogDescription>
           </DialogHeader>
-          {dialog === 'settings' && <p className="text-xs font-medium" role="status">Usage sharing: {state.available && state.sharing ? 'On' : 'Off'}</p>}
+          <p className="text-xs font-medium" role="status">Usage sharing: {state.available && state.sharing ? 'On' : 'Off'}</p>
           {state.available ? <div className="flex justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={() => chooseSharing(false)}>{dialog === 'usage' ? 'No thanks' : 'Turn sharing off'}</Button>
-            <Button size="sm" onClick={() => chooseSharing(true)}>{dialog === 'usage' ? 'Approve' : 'Share usage'}</Button>
+            <Button size="sm" variant="outline" onClick={() => chooseSharing(false)}>Turn sharing off</Button>
+            <Button size="sm" onClick={() => chooseSharing(true)}>Share usage</Button>
           </div> : <p className="text-xs text-muted-foreground">Usage sharing is disabled for this console.</p>}
-          {dialog === 'settings' && <div className="border-t pt-3">
+          <div className="border-t pt-3">
             <Button size="sm" variant="outline" onClick={() => setDialog('feedback')}>Give feedback</Button>
-          </div>}
+          </div>
         </> : dialog === 'feedback' ? <FeedbackForm canSend={state.available} onClose={() => setDialog(null)} /> : null}
       </DialogContent>
     </Dialog>
@@ -60,7 +49,20 @@ export function UsageProvider({ children }) {
 export function UsageButton() {
   const open = React.useContext(UsageContext)
   if (!open) return null
-  return <Button variant="ghost" size="sm" className="justify-start text-xs" onClick={open}><MessageSquare className="size-3.5" aria-hidden="true" />Usage &amp; feedback</Button>
+  return <Button variant="ghost" size="xs" className="justify-start text-xs text-muted-foreground" onClick={open}><MessageSquare className="size-3" aria-hidden="true" />Usage &amp; feedback</Button>
+}
+
+export function UsageNotice() {
+  const open = React.useContext(UsageContext)
+  const state = useUsageState()
+  if (!open || !state.available || state.sharing !== null) return null
+  return <div role="group" aria-label="Optional usage sharing" className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
+    <p>Share anonymous metrics via PostHog.</p>
+    <div className="-ml-1.5 flex gap-1">
+      <Button type="button" variant="ghost" size="xs" className="px-1.5 text-[11px] font-normal" onClick={() => analytics.setSharing(true)}>Allow</Button>
+      <Button type="button" variant="ghost" size="xs" className="px-1.5 text-[11px] font-normal" onClick={() => analytics.setSharing(false)}>No thanks</Button>
+    </div>
+  </div>
 }
 
 function FeedbackForm({ canSend, onClose }) {
