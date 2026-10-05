@@ -19,7 +19,7 @@ WHERE event = 'flow_finished' AND properties.environment = 'production'
   AND timestamp >= now() - INTERVAL 30 DAY
 GROUP BY flow, outcome, error_category, attempt ORDER BY observations DESC;
 
--- Meaningful adoption, segmented by explicitly selected intent.
+-- Meaningful adoption; intent is historical, with new observations unspecified.
 SELECT coalesce(properties.intent, 'unspecified') AS intent,
        properties.feature AS feature, properties.action AS action,
        uniq(distinct_id) AS anonymous_ids, count() AS observations

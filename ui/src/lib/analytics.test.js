@@ -50,7 +50,7 @@ test('runtime disable, missing token, invalid host, development and sensitive UR
 
 test('storage denial fails silently and does not invent consent', () => {
   const h = harness({ getStorage: () => { throw Error('storage denied') } })
-  assert.doesNotThrow(() => { h.enable(); h.client.capture('view_opened'); h.client.setIntent('project'); h.client.submitFeedback({ text: 'hello' }) })
+  assert.doesNotThrow(() => { h.enable(); h.client.capture('view_opened'); h.client.submitFeedback({ text: 'hello' }) })
   assert.equal(h.calls.length, 0)
   assert.equal(h.client.getSnapshot().available, false)
 })
@@ -143,12 +143,12 @@ test('creation, readiness and browser session success remain distinct observatio
   assert.equal(h.calls.filter(call => call.event.properties.outcome === 'live').length, 0)
 })
 
-test('creation retries correlate, step polling deduplicates, and second failure offers contextual feedback', async () => {
+test('creation retries correlate and step polling deduplicates without automatic questions', async () => {
   const h = harness(); h.enable()
   let item = h.client.startFlow('sandbox_creation', { file_source: 'repo' }); await tick()
   for (let i = 0; i < 50; i++) h.client.step(item, 'building_image')
   h.client.finishFlow(item, 'failed', 'image_build'); await tick()
-  assert.equal(h.client.getSnapshot().candidate, null)
+  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'candidate'), false)
   item = h.client.startFlow('sandbox_creation', { file_source: 'repo' }, item); await tick()
   h.client.finishFlow(item, 'failed', 'image_build'); h.client.finishFlow(item, 'failed', 'unknown'); await tick()
   const starts = h.calls.filter(call => call.event.event === 'flow_started')
@@ -156,7 +156,10 @@ test('creation retries correlate, step polling deduplicates, and second failure 
   assert.equal(starts[0].event.properties.flow_id, starts[1].event.properties.flow_id)
   assert.equal(h.calls.filter(call => call.event.event === 'flow_finished').length, 2)
   assert.equal(h.calls.filter(call => call.event.properties.step === 'building_image').length, 1)
-  assert.equal(h.client.getSnapshot().candidate.prompt, 'blocker')
+  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'candidate'), false)
+  assert.equal(h.data.has('openrod.feedback-candidate.v1'), false)
+  assert.equal(h.data.has('openrod.feedback-last.v1'), false)
+  assert.equal(h.calls.some(call => call.event.event === 'feedback_prompted'), false)
 })
 
 test('pre-submission cancellation is distinguishable from a submitted attempt', async () => {
@@ -169,16 +172,36 @@ test('pre-submission cancellation is distinguishable from a submitted attempt', 
   assert.equal(h.calls.some(call => call.event.event === 'flow_started'), false)
 })
 
-test('prompt cooldown and intent skip survive page loads', () => {
+test('legacy goals and feedback prompts are ignored and cleared on opt-out', async () => {
+  const h = harness()
+  const legacy = ['openrod.intent.v1', 'openrod.feedback-candidate.v1', 'openrod.feedback-last.v1']
+  h.data.set(legacy[0], 'tools')
+  h.data.set(legacy[1], JSON.stringify({ prompt: 'outcome', flow_id: '00000001-0000-4000-8000-000000000000', at: 1800000000000 }))
+  h.data.set(legacy[2], '1800000000000')
+  h.enable(); h.client.observeConsole('live'); await tick()
+  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'intent'), false)
+  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'candidate'), false)
+  assert.equal(h.calls[0].event.properties.intent, undefined)
+  assert.equal(h.client.setIntent, undefined)
+  assert.equal(h.client.promptEligible, undefined)
+  assert.equal(h.client.promptInteraction, undefined)
+  h.client.setSharing(false)
+  assert.ok(legacy.every(key => !h.data.has(key)))
+  assert.deepEqual([...h.data], [[USAGE_KEY, 'no']])
+})
+
+test('successful sessions and native handoffs never create automatic question state', async () => {
   const h = harness(); h.enable()
-  assert.equal(h.client.promptEligible('intent'), true)
-  h.client.promptInteraction('intent', 'dismissed')
-  assert.equal(h.client.promptEligible('intent'), false)
-  h.client.setIntent('tools'); assert.equal(h.client.getSnapshot().intent, 'tools')
-  h.client.promptInteraction('blocker', 'shown')
-  assert.equal(h.client.promptEligible('outcome'), false)
-  assert.equal(h.client.promptEligible('blocker'), false)
-  h.advance(7 * 86400000 + 1); assert.equal(h.client.promptEligible('blocker'), true)
+  for (const outcome of ['live', 'handoff_requested']) {
+    const item = h.client.startFlow('session_launch'); await tick()
+    h.client.finishFlow(item, outcome); await tick()
+  }
+  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'intent'), false)
+  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'candidate'), false)
+  assert.equal(h.data.has('openrod.intent.v1'), false)
+  assert.equal(h.data.has('openrod.feedback-candidate.v1'), false)
+  assert.equal(h.data.has('openrod.feedback-last.v1'), false)
+  assert.equal(h.calls.some(call => call.event.event === 'feedback_prompted'), false)
 })
 
 test('terminal correlation stores only safe metadata and restores the opener flow', async () => {
@@ -231,7 +254,7 @@ test('revocation prevents old workflows being attributed to a newly opted-in ide
   h.client.setSharing(false); h.client.setSharing(true)
   h.client.step(old, 'creating'); h.client.finishFlow(old, 'failed'); h.client.ready(old)
   assert.equal(h.calls.length, 2)
-  assert.equal(h.client.getSnapshot().candidate, null)
+  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'candidate'), false)
   const next = h.client.startFlow('sandbox_creation', {}, old)
   assert.notEqual(next.id, old.id)
   assert.equal(next.attempt, 1)
@@ -245,7 +268,7 @@ test('a suspended tab cannot attach an old flow after a rapid off/on toggle else
   first.client.setSharing(false); first.client.setSharing(true); first.client.observeConsole('live'); await tick()
   suspended.client.finishFlow(old, 'live'); suspended.client.step(old, 'connecting'); suspended.client.ready(old)
   assert.equal(suspended.calls.length, 2)
-  assert.equal(suspended.client.getSnapshot().candidate, null)
+  assert.equal(Object.hasOwn(suspended.client.getSnapshot(), 'candidate'), false)
   const next = suspended.client.startFlow('session_launch', {}, old)
   assert.notEqual(next.id, old.id)
   assert.equal(next.attempt, 1)

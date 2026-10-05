@@ -4,23 +4,18 @@
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i
 export const USAGE_KEY = 'openrod.usage.v1'
 const ID_KEY = 'openrod.usage-id.v1'
-const INTENT_KEY = 'openrod.intent.v1'
+const LEGACY_INTENT_KEY = 'openrod.intent.v1'
 const SESSION_KEY = 'openrod.usage-session.v1'
-const PROMPT_KEY = 'openrod.feedback-last.v1'
+const LEGACY_PROMPT_KEY = 'openrod.feedback-last.v1'
 const TERMINAL_KEY = 'openrod.terminal-flows.v1'
-const CANDIDATE_KEY = 'openrod.feedback-candidate.v1'
-const WEEK = 7 * 24 * 60 * 60 * 1000
-export const INTENTS = {
-  project: 'Run an agent on my project', access: 'Control agent access',
-  tools: 'Bring my tools into a sandbox', remote: 'Work on a remote machine',
-  exploring: 'Just exploring', other: 'Other',
-}
+const LEGACY_CANDIDATE_KEY = 'openrod.feedback-candidate.v1'
 const choices = (...values) => value => values.includes(value) ? value : undefined
 const uuid = value => typeof value === 'string' && UUID.test(value) ? value : undefined
 const number = value => Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), 86400000) : undefined
 const boolean = value => typeof value === 'boolean' ? value : undefined
 const view = choices('sandboxes', 'activity', 'groups', 'egress', 'ingress', 'secrets', 'templates', 'setups', 'connections', 'terminal')
-const intent = choices(...Object.keys(INTENTS))
+// Retain historical schema values without collecting or reading goal preferences.
+const intent = choices('project', 'access', 'tools', 'remote', 'exploring', 'other')
 const flow = choices('gateway_connection', 'sandbox_creation', 'session_launch')
 const location = choices('local', 'ssh', 'unknown')
 const errorCategory = choices('docker_missing', 'docker_unavailable', 'openshell_missing', 'gateway_unavailable', 'ssh_auth', 'host_key', 'runtime_missing', 'image_build', 'credentials_missing', 'setup_import', 'policy', 'file_seed', 'timeout', 'connection_lost', 'unknown')
@@ -71,8 +66,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
 } = {}) {
   let authorized = false, runtimeEnabled = false, storageFailed = false, currentView, lastView, opened = false, firstVisit
   const destination = config.host === 'https://eu.i.posthog.com' ? 'EU' : 'US'
-  let state = Object.freeze({ available: false, sharing: null, intent: null, candidate: null, destination })
-  let candidate = null
+  let state = Object.freeze({ available: false, sharing: null, destination })
   const listeners = new Set(), pending = new Map(), finished = new Set(), steps = new Map(), templates = new Map()
   let recent = [], generation = 0
   const storage = () => getStorage()
@@ -80,7 +74,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
   function halt() {
     generation++
     for (const [controller, timer] of pending) { controller.abort(); clearTimer(timer) }
-    pending.clear(); finished.clear(); steps.clear(); templates.clear(); recent = []; candidate = null
+    pending.clear(); finished.clear(); steps.clear(); templates.clear(); recent = []
     opened = false; lastView = undefined; firstVisit = undefined
   }
   function cleanLocation() {
@@ -94,20 +88,13 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
   }
   function refresh() {
     safe(() => {
-      let sharing = null, selected = null
+      let sharing = null
       try {
-        const value = storage().getItem(USAGE_KEY); sharing = value === 'yes' ? true : value === 'no' ? false : null; selected = intent(storage().getItem(INTENT_KEY)) ?? null
-        if (sharing === true) {
-          let saved
-          try { saved = JSON.parse(storage().getItem(CANDIDATE_KEY)) } catch { /* invalid old state */ }
-          if (uuid(saved?.flow_id) && ['outcome', 'blocker'].includes(saved.prompt) && Number.isFinite(saved.at) && now() - saved.at < 86400000) {
-            if (candidate?.flow_id !== saved.flow_id || candidate?.at !== saved.at) candidate = { prompt: saved.prompt, flow_id: saved.flow_id, at: saved.at }
-          } else candidate = null
-        }
+        const value = storage().getItem(USAGE_KEY); sharing = value === 'yes' ? true : value === 'no' ? false : null
       }
       catch { storageFailed = true; halt() }
       if (sharing !== true && state.sharing === true) halt()
-      const next = { available: available(), sharing, intent: selected, candidate, destination }
+      const next = { available: available(), sharing, destination }
       if (Object.keys(next).some(key => next[key] !== state[key])) {
         state = Object.freeze(next)
         for (const notify of listeners) safe(notify)
@@ -122,7 +109,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       try {
         storage().setItem(USAGE_KEY, value ? 'yes' : 'no')
         if (!value) {
-          for (const key of [ID_KEY, INTENT_KEY, SESSION_KEY, TERMINAL_KEY, CANDIDATE_KEY]) storage().removeItem(key)
+          for (const key of [ID_KEY, SESSION_KEY, TERMINAL_KEY, LEGACY_INTENT_KEY, LEGACY_PROMPT_KEY, LEGACY_CANDIDATE_KEY]) storage().removeItem(key)
           halt()
         }
       } catch { storageFailed = true; halt() }
@@ -159,7 +146,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
         api_key: config.projectToken, event, distinct_id: who.id, timestamp: new Date(now()).toISOString(),
         properties: { schema_version: 1, app_version: config.version, environment: config.environment,
           ...(who.session ? { $session_id: who.session } : {}),
-          ...(regular && state.intent ? { intent: state.intent } : {}), ...(currentView ? { view: currentView } : {}),
+          ...(currentView ? { view: currentView } : {}),
           ...sanitized, $process_person_profile: false, $geoip_disable: true,
           ...(event === 'console_opened' ? { first_observed_visit: who.first } : {}),
           ...(explicitFeedback ? { feedback_only: !regular } : {}),
@@ -184,13 +171,6 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
   }
   function observeView(next) {
     safe(() => { currentView = view(next); if (currentView && currentView !== lastView && capture('view_opened', { previous_view: lastView })) lastView = currentView })
-  }
-  function setIntent(value) {
-    safe(() => {
-      if (!intent(value) || state.sharing !== true || !state.available) return
-      try { storage().setItem(INTENT_KEY, value) } catch { storageFailed = true; halt(); refresh(); return }
-      refresh(); capture('intent_selected', { intent: value })
-    })
   }
   function startFlow(kind, properties = {}, previous = null) {
     return safe(() => {
@@ -234,10 +214,6 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       finished.add(key); steps.delete(key)
       item.outcome = outcome
       capture('flow_finished', { ...fields(item), outcome, start_observed: item.started !== null, duration_ms: item.started === null ? undefined : now() - item.started, error_category: category })
-      if (outcome === 'live' || outcome === 'handoff_requested' || (outcome === 'failed' && item.attempt >= 2)) {
-        candidate = { prompt: outcome === 'failed' ? 'blocker' : 'outcome', flow_id: item.id, at: now() }
-        safe(() => storage().setItem(CANDIDATE_KEY, JSON.stringify(candidate))); refresh()
-      }
     })
   }
   function ready(item) {
@@ -250,28 +226,8 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       capture('sandbox_ready', { flow_id: item.id, duration_ms: now() - item.started, location_type: item.properties.location_type })
     })
   }
-  function promptEligible(kind) {
-    return safe(() => {
-      refresh()
-      if (!state.available || state.sharing !== true) return false
-      if (kind === 'intent') return !state.intent && storage().getItem(INTENT_KEY) !== 'skipped'
-      const last = Number(storage().getItem(PROMPT_KEY) || 0)
-      if (now() - last < WEEK) return false
-      if (kind === 'outcome') return parseInt(identity().id.slice(0, 2), 16) % 4 === 0
-      return true
-    }, false)
-  }
-  function promptInteraction(kind, interaction, flowId) {
-    safe(() => {
-      if (kind === 'intent' && interaction === 'dismissed') storage().setItem(INTENT_KEY, 'skipped')
-      if (kind === 'outcome' || kind === 'blocker') storage().setItem(PROMPT_KEY, String(now()))
-      capture('feedback_prompted', { prompt: kind, interaction, flow_id: flowId })
-      if (interaction === 'dismissed') { storage().removeItem(CANDIDATE_KEY); candidate = null; refresh() }
-    })
-  }
   function submitFeedback(properties) {
     capture('feedback_submitted', properties, { explicitFeedback: true })
-    safe(() => storage().removeItem(CANDIDATE_KEY)); candidate = null; refresh()
   }
   // Only safe correlation metadata is stored, never a name, command, or host.
   function terminalClick(event, properties = {}) {
@@ -326,8 +282,8 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       }
     })
   }
-  return { configure, setSharing, refresh, capture, observeConsole, observeView, setIntent, startFlow, exploreFlow, step, finishFlow, ready, templateStarted, observeTemplates,
-    promptEligible, promptInteraction, submitFeedback, terminalClick, terminalFlow,
+  return { configure, setSharing, refresh, capture, observeConsole, observeView, startFlow, exploreFlow, step, finishFlow, ready, templateStarted, observeTemplates,
+    submitFeedback, terminalClick, terminalFlow,
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) }, getSnapshot: () => state,
     stop: () => { authorized = false; halt(); refresh() },
   }
