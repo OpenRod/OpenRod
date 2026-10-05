@@ -236,3 +236,17 @@ test('revocation prevents old workflows being attributed to a newly opted-in ide
   assert.notEqual(next.id, old.id)
   assert.equal(next.attempt, 1)
 })
+
+
+test('a suspended tab cannot attach an old flow after a rapid off/on toggle elsewhere', async () => {
+  const first = harness(); first.enable(); first.client.observeConsole('live'); await tick()
+  const suspended = harness({ getStorage: () => first.storage }); suspended.enable()
+  const old = suspended.client.startFlow('session_launch'); await tick()
+  first.client.setSharing(false); first.client.setSharing(true); first.client.observeConsole('live'); await tick()
+  suspended.client.finishFlow(old, 'live'); suspended.client.step(old, 'connecting'); suspended.client.ready(old)
+  assert.equal(suspended.calls.length, 2)
+  assert.equal(suspended.client.getSnapshot().candidate, null)
+  const next = suspended.client.startFlow('session_launch', {}, old)
+  assert.notEqual(next.id, old.id)
+  assert.equal(next.attempt, 1)
+})

@@ -196,8 +196,9 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
     return safe(() => {
       refresh()
       if (!state.available || state.sharing !== true || !flow(kind)) return null
-      if (previous?.generation !== generation) previous = null
-      const item = { generation, id: previous?.id ?? randomUUID(), flow: kind, attempt: (previous?.attempt ?? 0) + 1, started: now(), properties: sanitizeEvent('flow_started', properties) }
+      const installationId = identity().id
+      if (previous?.generation !== generation || previous?.installationId !== installationId) previous = null
+      const item = { generation, installationId, id: previous?.id ?? randomUUID(), flow: kind, attempt: (previous?.attempt ?? 0) + 1, started: now(), properties: sanitizeEvent('flow_started', properties) }
       capture('flow_started', { ...item.properties, flow: kind, flow_id: item.id, attempt: item.attempt })
       step(item, kind === 'session_launch' ? 'requesting' : kind === 'gateway_connection' ? 'connecting' : 'preparing_tools')
       return item
@@ -206,13 +207,17 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
   function exploreFlow(kind, properties = {}) {
     return safe(() => {
       refresh(); if (!state.available || state.sharing !== true || !flow(kind)) return null
-      return { generation, id: randomUUID(), flow: kind, attempt: 0, started: null, properties: sanitizeEvent('flow_started', properties) }
+      return { generation, installationId: identity().id, id: randomUUID(), flow: kind, attempt: 0, started: null, properties: sanitizeEvent('flow_started', properties) }
     }, null)
   }
+  // Also bind to the stored identity: a suspended tab can miss the brief
+  // opt-out state if sharing is turned off and back on before it resumes.
+  const activeFlow = item => item && item.generation === generation && state.available && state.sharing === true
+    && uuid(item.installationId) && item.installationId === storage().getItem(ID_KEY)
   const fields = item => ({ ...item.properties, flow: item.flow, flow_id: item.id, attempt: item.attempt })
   function step(item, next, phaseState = 'entered', category) {
     safe(() => {
-      refresh(); if (!item || item.generation !== generation || !state.available || state.sharing !== true) return
+      refresh(); if (!activeFlow(item)) return
       const key = `${item.id}:${item.attempt}`, value = `${next}:${phaseState}:${category}`
       if (steps.get(key) === value) return
       if (steps.size >= 100) steps.delete(steps.keys().next().value)
@@ -222,7 +227,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
   }
   function finishFlow(item, outcome, category) {
     safe(() => {
-      refresh(); if (!item || item.generation !== generation || !state.available || state.sharing !== true) return
+      refresh(); if (!activeFlow(item)) return
       const key = `${item.id}:${item.attempt}`
       if (finished.has(key)) return
       if (finished.size >= 200) finished.delete(finished.values().next().value)
@@ -237,7 +242,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
   }
   function ready(item) {
     safe(() => {
-      refresh(); if (!item || item.generation !== generation || !state.available || state.sharing !== true) return
+      refresh(); if (!activeFlow(item)) return
       const key = `${item.id}:ready`
       if (finished.has(key)) return
       if (finished.size >= 200) finished.delete(finished.values().next().value)
@@ -272,7 +277,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
   function terminalClick(event, properties = {}) {
     safe(() => {
       const item = startFlow('session_launch', { ...properties, launch_target: 'browser' })
-      refresh(); if (!item || item.generation !== generation || !state.available || state.sharing !== true) return
+      refresh(); if (!activeFlow(item)) return
       const url = new URL(event.currentTarget.href)
       const [path, query = ''] = url.hash.split('?')
       const params = new URLSearchParams(query); params.set('analyticsFlow', item.id)
@@ -294,9 +299,10 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       refresh(); if (!state.available || state.sharing !== true) return null
       if (previous) return startFlow('session_launch', properties, previous)
       const id = new URLSearchParams(new URL(getLocation()).hash.split('?')[1]).get('analyticsFlow')
-      const restored = readTerminalFlows().find(item => item.id === id)
+      const installationId = identity().id
+      const restored = readTerminalFlows().find(item => item.id === id && item.installationId === installationId)
       if (!restored) return startFlow('session_launch', { ...properties, launch_target: 'browser' })
-      return { generation, id: restored.id, flow: 'session_launch', attempt: number(restored.attempt) ?? 1, started: restored.started, properties: sanitizeEvent('flow_started', restored.properties) }
+      return { generation, installationId, id: restored.id, flow: 'session_launch', attempt: number(restored.attempt) ?? 1, started: restored.started, properties: sanitizeEvent('flow_started', restored.properties) }
     }, null)
   }
   function templateStarted(record, owner) {
@@ -305,7 +311,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       if (record.status === 'ready') { capture('feature_used', { feature: 'template', action: 'built', location_type: analyticsLocation(owner) }); return }
       if (record.status !== 'building') return
       if (templates.size >= 100) templates.delete(templates.keys().next().value)
-      templates.set(JSON.stringify([owner?.context, record.name]), { startedAt: record.startedAt, at: now(), location_type: analyticsLocation(owner) })
+      templates.set(JSON.stringify([owner?.context, record.name]), { installationId: identity().id, startedAt: record.startedAt, at: now(), location_type: analyticsLocation(owner) })
     })
   }
   function observeTemplates(records) {
@@ -313,7 +319,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       for (const record of records) {
         const key = JSON.stringify([record.location?.context, record.name]), tracked = templates.get(key)
         if (!tracked) continue
-        if (now() - tracked.at > 1800000) { templates.delete(key); continue }
+        if (tracked.installationId !== storage().getItem(ID_KEY) || now() - tracked.at > 1800000) { templates.delete(key); continue }
         if (record.startedAt !== tracked.startedAt || record.location?.connected === false) continue
         if (record.status === 'ready') { templates.delete(key); capture('feature_used', { feature: 'template', action: 'built', location_type: tracked.location_type }) }
         else if (record.status === 'failed') templates.delete(key)
