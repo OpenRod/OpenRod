@@ -57,11 +57,15 @@ test('storage denial fails silently and does not invent consent', () => {
 
 test('schema drops private fields, rejects arbitrary events, and limits feedback text', () => {
   assert.equal(sanitizeEvent('$pageview', { $current_url: 'secret' }), null)
+  assert.equal(sanitizeEvent('intent_selected', { intent: 'project' }), null)
+  assert.equal(sanitizeEvent('feedback_prompted', { prompt: 'outcome', interaction: 'shown' }), null)
   const privateFields = { name: 'private-box', path: '/private/project', token: 'private-token', host: 'private-host', repository: 'https://private/repo', message: 'private-error', command: 'private-command', $current_url: 'private-url', properties: { secret: 'private-nested' } }
   const h = harness(); h.enable()
-  h.client.capture('flow_started', { ...privateFields, flow: 'sandbox_creation', location_type: 'ssh', agent_ids: ['codex', 'codex', 'private-agent'], creation_mode: 'quick', file_source: 'repo', setup_count: 2 })
+  h.client.capture('flow_started', { ...privateFields, flow: 'sandbox_creation', location_type: 'ssh', intent: 'project', goal_achieved: 'yes', agent_ids: ['codex', 'codex', 'private-agent'], creation_mode: 'quick', file_source: 'repo', setup_count: 2 })
   const payload = h.calls[0].event
   assert.deepEqual(payload.properties.agent_ids, ['codex'])
+  assert.equal(payload.properties.intent, undefined)
+  assert.equal(payload.properties.goal_achieved, undefined)
   assert.equal(payload.properties.$process_person_profile, false)
   assert.equal(payload.properties.$geoip_disable, true)
   assert.equal(payload.properties.environment, 'production')
@@ -70,6 +74,8 @@ test('schema drops private fields, rejects arbitrary events, and limits feedback
   assert.equal(h.calls[0].init.referrerPolicy, 'no-referrer')
   assert.equal(h.calls[0].init.redirect, 'error')
   assert.equal(sanitizeEvent('feedback_submitted', { text: 'x'.repeat(3000) }).text.length, 2000)
+  assert.deepEqual(sanitizeEvent('feedback_submitted', { prompt: 'outcome', category: 'setup', intent: 'project', goal_achieved: 'yes', flow_id: '00000001-0000-4000-8000-000000000000', text: '  requested feedback  ' }), { text: 'requested feedback' })
+  assert.deepEqual(sanitizeEvent('feedback_submitted', { prompt: 'general', category: 'general', text: 'manual' }), { prompt: 'general', category: 'general', text: 'manual' })
   assert.equal(sanitizeEvent('feature_used', { text: 'secret', count: -1 }).text, undefined)
   assert.equal(classifyAnalyticsError({ message: 'host private-host timed out' }), 'unknown')
 })
@@ -110,7 +116,7 @@ test('revocation from another tab aborts requests and prevents future delivery',
 
 test('explicit feedback can be submitted without enabling usage or persisting an identity', () => {
   const h = harness(); h.configure(); h.client.setSharing(false)
-  h.client.submitFeedback({ prompt: 'general', text: 'missing capability', category: 'missing_capability' })
+  h.client.submitFeedback({ prompt: 'general', text: 'missing capability', category: 'general' })
   assert.equal(h.calls.length, 1)
   assert.equal(h.calls[0].event.properties.feedback_only, true)
   assert.equal(h.calls[0].event.properties.text, 'missing capability')

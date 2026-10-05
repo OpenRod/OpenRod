@@ -14,33 +14,28 @@ const uuid = value => typeof value === 'string' && UUID.test(value) ? value : un
 const number = value => Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), 86400000) : undefined
 const boolean = value => typeof value === 'boolean' ? value : undefined
 const view = choices('sandboxes', 'activity', 'groups', 'egress', 'ingress', 'secrets', 'templates', 'setups', 'connections', 'terminal')
-// Retain historical schema values without collecting or reading goal preferences.
-const intent = choices('project', 'access', 'tools', 'remote', 'exploring', 'other')
 const flow = choices('gateway_connection', 'sandbox_creation', 'session_launch')
 const location = choices('local', 'ssh', 'unknown')
 const errorCategory = choices('docker_missing', 'docker_unavailable', 'openshell_missing', 'gateway_unavailable', 'ssh_auth', 'host_key', 'runtime_missing', 'image_build', 'credentials_missing', 'setup_import', 'policy', 'file_seed', 'timeout', 'connection_lost', 'unknown')
 const flowFields = { flow, flow_id: uuid, attempt: number, location_type: location, launch_target: choices('browser', 'terminal', 'vscode', 'cursor') }
-const prompt = choices('intent', 'outcome', 'blocker', 'general')
 const text = value => typeof value === 'string' ? value.trim().slice(0, 2000) : undefined
 const agentIds = value => Array.isArray(value) ? [...new Set(value.filter(id => ['claude', 'codex', 'cursor', 'pi', 'antigravity', 'opencode', 'aider', 'copilot', 'kiro', 'droid'].includes(id)))].slice(0, 12) : undefined
 const configFields = { creation_mode: choices('quick', 'template'), file_source: choices('empty', 'folder', 'repo'), agent_ids: agentIds, setup_count: number, provider_count: number, group_count: number }
 const EVENTS = {
   console_opened: { gateway_state: choices('available', 'setup_required', 'unavailable'), first_observed_visit: boolean, connection_method: choices('automatic', 'manual', 'existing', 'unknown') },
   view_opened: { previous_view: view },
-  intent_selected: { intent },
   flow_started: { ...flowFields, ...configFields },
   flow_step_changed: { ...flowFields, step: choices('location', 'configuration', 'validation', 'host_selection', 'connecting', 'needs_docker', 'needs_runtime', 'preparing_tools', 'building_image', 'creating', 'requesting'), state: choices('entered', 'blocked'), error_category: errorCategory },
   flow_finished: { ...flowFields, ...configFields, outcome: choices('connected', 'created', 'live', 'handoff_requested', 'failed', 'cancelled'), duration_ms: number, start_observed: boolean, error_category: errorCategory },
   sandbox_ready: { flow_id: uuid, duration_ms: number, location_type: location },
   feature_used: { feature: choices('template', 'setup', 'network', 'group', 'activity', 'files', 'sandbox'), action: choices('built', 'imported', 'activated', 'rule_saved', 'membership_saved', 'filter_applied', 'exported', 'uploaded', 'started', 'stopped', 'deleted'), count: number, location_type: location },
-  feedback_prompted: { prompt, interaction: choices('shown', 'dismissed'), flow_id: uuid },
-  feedback_submitted: { prompt, category: choices('setup', 'connection', 'missing_capability', 'instructions', 'other', 'general'), goal_achieved: choices('yes', 'partly', 'no'), text, flow_id: uuid, feedback_only: boolean },
+  feedback_submitted: { prompt: choices('general'), category: choices('general'), text, feedback_only: boolean },
 }
 
 export function sanitizeEvent(event, properties = {}) {
   if (!Object.hasOwn(EVENTS, event)) return null
   const safe = {}
-  for (const [key, validate] of Object.entries({ view, intent, ...EVENTS[event] })) {
+  for (const [key, validate] of Object.entries({ view, ...EVENTS[event] })) {
     const value = validate(properties[key])
     if (value !== undefined) safe[key] = value
   }

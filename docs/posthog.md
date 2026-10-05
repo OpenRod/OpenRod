@@ -12,19 +12,17 @@ Set `OPENROD_TELEMETRY=0` (or `false`) before starting the server to disable all
 
 ## Events and interpretation
 
-Every event has `schema_version`, `app_version`, `environment`, and a random anonymous installation ID. Opted-in events have a session ID with a 30-minute inactivity window and may include a fixed view enum. Historical intent fields are retained in the event schema, but new events do not attach a stored goal. IDs are scoped to browser storage for the console origin, including its port: different browsers or ports are separate observations.
+Every event has `schema_version`, `app_version`, `environment`, and a random anonymous installation ID. Opted-in events have a session ID with a 30-minute inactivity window and may include a fixed view enum. The current client collects no intent or goal-answer fields. IDs are scoped to browser storage for the console origin, including its port: different browsers or ports are separate observations.
 
 | Event | Meaning |
 | --- | --- |
 | `console_opened` | Initial observable gateway state, including an already connected gateway. `first_observed_visit` means a fresh local anonymous ID, not a verified new user. |
 | `view_opened` | A change to an allowlisted product screen; no URL, referrer or search terms. |
-| `intent_selected` | Legacy schema only; the console no longer asks goal questions or emits this event. |
 | `flow_started` | A submitted connection, sandbox creation or session launch attempt. Safe choices/counts only. |
 | `flow_step_changed` | Entered or blocked stage; repeated status polling is deduplicated. Pre-submit exploration has attempt zero. |
 | `flow_finished` | Observed connected, created, live, handoff requested, failed or cancelled result. A stable `flow_id` and attempt correlate supported retries. |
 | `sandbox_ready` | A tracked creation subsequently observed Ready, distinct from its create response. |
 | `feature_used` | Successful template build, setup import/activation, network rule or group membership save, activity filter application, file upload, or sandbox start/stop/delete. |
-| `feedback_prompted` | Legacy schema only; the console no longer emits automatic feedback prompts. |
 | `feedback_submitted` | Manually submitted text (maximum 2,000 characters), marked as general feedback. |
 
 A browser session is `live` only after its WebSocket confirms readiness. Native Terminal/VS Code/Cursor success is **handoff_requested**: OpenRod cannot observe whether the external app became useful. Sandbox creation finishes `created`; readiness is a separate event. Closing the creation dialog does not cancel its background job. Pre-submit dialog cancellation has `start_observed=false` and no duration. Reloads, crashes and lost events can leave unmatched starts.
