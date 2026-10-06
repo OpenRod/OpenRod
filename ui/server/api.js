@@ -530,12 +530,18 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
             const input = await body(req)
             if (parts.length === 2 && parts[1] === 'connect') return send(res, 200, remoteConnections.begin(input))
             if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'scan') return send(res, 200, await sshHosts.scan(input))
-            if (parts.length === 2 && parts[1] === 'hosts') return send(res, 201, await sshHosts.add(input.token))
+            if (parts.length === 2 && parts[1] === 'hosts') {
+              const saved = await sshHosts.add(input.token)
+              await remoteConnections.unforgetHost(saved.alias)
+              return send(res, 201, saved)
+            }
             if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'restore') return send(res, 200, await remoteConnections.restoreHost(input.host))
             if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'remove') {
               const current = (await remoteConnections.overview()).active
               if (current?.host === input.alias && ['connected', 'connecting'].includes(current.status)) throw fail('Disconnect from this machine before removing it.', 409)
-              return send(res, 200, await sshHosts.remove(input.alias))
+              const removed = await sshHosts.remove(input.alias)
+              await remoteConnections.unforgetHost(removed.alias)
+              return send(res, 200, removed)
             }
             if (parts.length === 2 && parts[1] === 'disconnect') return send(res, 200, await remoteConnections.disconnect())
             if (parts.length === 2 && parts[1] === 'forget') {
