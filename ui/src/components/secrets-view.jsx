@@ -180,7 +180,7 @@ function SecretDetails({ secret, profile, sandboxes, onRotate, onDelete, onDone 
 import { LocationProvider } from '@/lib/location-context'
 import { PlacementBadge } from '@/components/placement-badge'
 import { LocationAction } from '@/components/location-action'
-import { useLocationData } from '@/lib/location-data'
+import { SourceStatus, useLocationData } from '@/lib/location-data'
 import { resourceKey } from '@/lib/locations'
 
 const EMPTY = []
@@ -206,8 +206,9 @@ function ScopedSecretsView({model}) {
   const location = useLocation()
   const live = useLive()
   const [singleData, setData] = React.useState(null)
-  const data = model ? (model.loading && !model.sources.length ? null : {providers:EMPTY,profiles:EMPTY,sources:model.sources}) : singleData
+  const data = model ? ((model.loading && !model.sources.length) || model.status.unavailable ? null : {providers:EMPTY,profiles:EMPTY,sources:model.sources}) : singleData
   const [error, setError] = React.useState(null)
+  const unavailable = model ? model.status.unavailable : error && !data
   const [loading, setLoading] = React.useState(false)
   const [adding, setAdding] = React.useState(false)
   const [rotating, setRotating] = React.useState(null)
@@ -277,8 +278,9 @@ function ScopedSecretsView({model}) {
         <Button size="sm" disabled={!data} onClick={() => setAdding(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus />Add secret</Button>
       </div>
       {error && <div role="alert" className="flex items-center gap-3 border-b border-border px-6 py-2 text-xs text-red-600"><span>{data ? "Could not refresh. Showing the last reading. " : ""}{error}</span><Button variant="outline" size="sm" onClick={load}>Retry</Button></div>}
+      {model && <SourceStatus model={model} what="secrets" />}
       <div ref={virtual.ref} onScroll={virtual.onScroll} tabIndex={0} role="region" aria-label="Secret inventory" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-        {!data && !error ? <p role="status" className="py-20 text-center text-sm text-muted-foreground">Loading secrets…</p> : !ordered.length ? <div className="py-20 text-center"><KeyRound className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{error && !data ? "Secrets unavailable" : rows.length ? "No matching secrets" : "No secrets yet"}</p>{data && <Button variant="outline" className="mt-4" onClick={rows.length ? clear : () => setAdding(true)}>{rows.length ? "Clear filters" : "Add secret"}</Button>}</div> :
+        {!data && !unavailable ? <p role="status" className="py-20 text-center text-sm text-muted-foreground">Loading secrets…</p> : !ordered.length ? <div className="py-20 text-center"><KeyRound className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{unavailable ? "Secrets unavailable" : rows.length ? "No matching secrets" : "No secrets yet"}</p>{data && (rows.length > 0 || !model?.status.any) && <Button variant="outline" className="mt-4" onClick={rows.length ? clear : () => setAdding(true)}>{rows.length ? "Clear filters" : "Add secret"}</Button>}</div> :
           <table aria-label="Secrets" aria-rowcount={ordered.length + 1} className="w-full min-w-[900px] table-fixed border-separate border-spacing-0 text-xs">
             <colgroup>{COLUMNS.map((c) => <col key={c.id} style={{ width: c.width }} />)}</colgroup>
             <thead className="sticky top-0 z-10 bg-muted"><tr aria-rowindex={1}>{COLUMNS.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="h-9 border-b border-border px-4 text-left font-medium text-muted-foreground first:pl-6">{["hosts","source"].includes(c.id) ? c.label : <button className="flex h-9 w-full items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSort({ key: c.id, direction: sort.key === c.id && sort.direction === "asc" ? "desc" : "asc" })}>{c.label}{sort.key === c.id && (sort.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>}</th>)}</tr></thead>

@@ -123,6 +123,12 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     })
     return historyWrites.catch(error => logger.warn(`Remote location history could not be saved: ${error.message}`))
   }
+  // Adding, deleting or connecting to a host again undoes Forget for it, so
+  // its alias is never hidden for good.
+  const unforgetHost = async host => {
+    await loadHistory()
+    if (forgottenHosts.delete(host)) await saveHistory()
+  }
   async function locationSnapshot() {
     await loadHistory()
     const selected = defaultContextSelection()
@@ -136,7 +142,9 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     if (!remote && /^console-ssh-[a-f0-9]{24}$/.test(selected.gateway)) {
       try {
         const owner = JSON.parse(await fs.readFile(path.join(CONFIG_DIR, 'gateways', selected.gateway, 'console-managed.json'), 'utf8'))
-        if (typeof owner.host === 'string' && !forgottenHosts.has(owner.host)) remote = { host: owner.host, ...selected, status: 'disconnected', error: null }
+        // Deleting a host undoes Forget but leaves its gateway registered, so
+        // a registration is retained only while its host still exists.
+        if (typeof owner.host === 'string' && !forgottenHosts.has(owner.host) && listSshHosts().some(host => host.name === owner.host)) remote = { host: owner.host, ...selected, status: 'disconnected', error: null }
       } catch { /* No managed registration to retain. */ }
     }
     if (!returnContext && (remote || contextConfigured())) {
@@ -294,6 +302,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
         return
       }
       if (!(await listSshHosts()).some(host => host.name === input.host)) throw fail('Choose a host from your SSH configuration.')
+      await unforgetHost(input.host)
       const installedVersion = await version(value)
       value.probe = await probeHost(input.host, installedVersion, { signal })
       await prepareRuntime(value)
@@ -391,10 +400,10 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     async restoreHost(host) {
       await loadHistory()
       if (typeof host !== 'string' || !forgottenHosts.has(host)) throw fail('This host is not forgotten.', 409)
-      forgottenHosts.delete(host)
-      await saveHistory()
+      await unforgetHost(host)
       return { ok: true }
     },
+    unforgetHost,
     async disconnect() {
       idle()
       const current = defaultContextSelection()

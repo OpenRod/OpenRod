@@ -21,7 +21,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { POLICY_HANDOFF } from "@/components/egress-view"
 import { useApi, LocationProvider } from "@/lib/location-context"
-import { useLocationData } from "@/lib/location-data"
+import { SourceStatus, useLocationData } from "@/lib/location-data"
 import { PlacementBadge } from "@/components/placement-badge"
 import { LocationAction } from "@/components/location-action"
 import { resourceKey } from "@/lib/locations"
@@ -506,16 +506,18 @@ function CombinedGroupsView({onNavigate}) {
     const org=orgFor(location)
     return <NewGroupDialog open onOpenChange={open=>{if(!open)onClose()}} groups={org?.groups ?? []} assignments={org?.assignments ?? {}} sandboxes={boxes.filter(box=>box.location.id===location.id)} onCreated={async(group,result,added)=>{await model.refresh();onClose();toast.success(`Created ${group.name}`)}} />
   }}</LocationAction>
-  if(model.loading && !groups.length)return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Reading groups…</p>
+  if(model.loading && !model.sources.length)return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Reading groups…</p>
+  if(model.status.unavailable)return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto"><SourceStatus model={model} what="groups" /><p className="py-24 text-center text-sm text-muted-foreground">Groups unavailable</p></div>
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
     <div className="flex flex-wrap items-center gap-2 border-b px-4 pt-4 pb-3 sm:px-6">
       {[['Groups',groups.length],['In a group',grouped],['No group',boxes.length-grouped]].map(([label,value])=><div key={label} className="rounded-md px-3 py-1.5"><span className="block text-[11px] text-muted-foreground">{label}</span><span className="mt-1 block font-mono text-lg leading-none">{value}</span></div>)}
       <Button size="sm" className="ml-auto bg-[var(--action)] text-[var(--action-foreground)]" onClick={()=>setCreating(true)}><Plus />New group</Button>
     </div>
+    <SourceStatus model={model} what="groups" />
     <section aria-label="Groups" className="grid gap-3 px-4 py-5 sm:grid-cols-2 sm:px-6 xl:grid-cols-3">
       {groups.map(group=><div key={resourceKey(group)} className="relative flex min-w-0 flex-col gap-2"><div className="flex min-w-0 flex-wrap items-center gap-2"><SourceChips record={group} />{group.location.connected===false && <span className="text-[11px] text-muted-foreground">Offline</span>}</div><GroupCard group={group} members={group.sourceOrg.members?.[group.id] ?? []} policies={groupPolicies(group.sourceOrg.policies,group.id)} disabled={!group.location.connected} onOpen={()=>setOpened(group)} delay={0} /></div>)}
     </section>
-    {!groups.length && <FirstRun onCreate={()=>setCreating(true)} onPolicy={()=>onNavigate('egress')} />}
+    {!groups.length && !model.status.any && <FirstRun onCreate={()=>setCreating(true)} onPolicy={()=>onNavigate('egress')} />}
     <section aria-label="Sandboxes and their groups" className="border-t">
       <div className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-6"><Button variant="ghost" size="sm" aria-expanded={showSandboxes} onClick={()=>setShowSandboxes(!showSandboxes)}><ChevronRight className={showSandboxes?'rotate-90':''} />Sandboxes {boxes.length}</Button>{showSandboxes && <SearchInput className="ml-auto w-full sm:w-56" aria-label="Search sandboxes" value={query} onValueChange={setQuery} placeholder="Search sandboxes…" />}</div>
       {showSandboxes && <>

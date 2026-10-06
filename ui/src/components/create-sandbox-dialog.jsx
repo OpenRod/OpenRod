@@ -28,7 +28,7 @@ import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { AGENT_ACCESS, agentAccessFor, connectorAgents } from "../../shared/agent-access.js"
+import { AGENT_ACCESS, agentAccessFor, connectorAgents, holdsApiKey } from "../../shared/agent-access.js"
 
 const locationKey = (location) => location?.id ?? location?.context
 const PRIMARY_QUICK_AGENTS = ["claude", "codex", "cursor", "pi", "antigravity", "opencode"]
@@ -248,7 +248,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
 
   const setupAgentIds = mode === "quick" ? agentIds : (templateAgents ?? []).map((agent) => agent.id)
   // Connectors come with a subscription sign-in, so an attached API key rules them out.
-  const keyed = mode === "quick" ? Object.keys(quickProviders).filter((id) => quickProviders[id]) : []
+  const keyed = mode === "quick" ? Object.keys(quickProviders).filter((id) => holdsApiKey(providers.find((provider) => provider.name === quickProviders[id]))) : []
   const chosenConnectors = connectorAgents(setupAgentIds).filter((id) => connectors.includes(id) && !keyed.includes(id))
   const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds) : chosenImage?.managed ? chosenImage.recipe : null, { connectors: chosenConnectors })
   const setupTargets = setupTargetsFor(setupAgentIds)
