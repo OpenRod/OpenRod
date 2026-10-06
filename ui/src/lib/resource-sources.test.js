@@ -24,6 +24,19 @@ test('propagation applies only changed fields, keeps destination identity and un
  await applySourceChange({type:'groups',before:group,args:[{...group,name:'Engineering'}],method:'saveGroup'},target,{org:async()=>({groups:[target]}),saveGroup:async value=>{saved=value}})
  assert.equal(saved.id,'cloud-dev');assert.equal(saved.name,'Engineering');assert.equal(saved.description,'Destination description')
 })
+test('template propagation never copies environment values to another source',async()=>{
+ const recipe={name:'tools',base:'ubuntu:24.04',packages:['git'],environment:[{name:'TOKEN',value:'source-secret'}]}
+ const before={name:'tools',recipe,managed:true,status:'ready',exists:true,location:local}
+ const target={...before,recipe:{...recipe,environment:[{name:'TOKEN',value:'cloud-value'}]},location:cloud}
+ let built
+ const api={imageTemplates:async()=>({templates:[target]}),buildImageTemplate:async value=>{built=value}}
+ await applySourceChange({type:'templates',before,args:[{...recipe,packages:['git','curl'],environment:[{name:'TOKEN',value:'changed-secret'}]}],method:'buildImageTemplate'},target,api)
+ assert.deepEqual(built.packages,['git','curl'])
+ assert.deepEqual(built.environment,[{name:'TOKEN',value:'cloud-value'}])
+ built=null
+ await assert.rejects(applySourceChange({type:'templates',before,args:[{...recipe,environment:[{name:'TOKEN',value:'changed-secret'}]}],method:'buildImageTemplate'},target,api),/environment values/)
+ assert.equal(built,null)
+})
 test('stale or offline targets never receive writes',async()=>{
  const change={type:'groups',before:group,args:[{...group,name:'New'}],method:'saveGroup'}
  let writes=0

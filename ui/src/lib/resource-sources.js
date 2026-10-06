@@ -68,7 +68,9 @@ export async function applySourceChange({ type, before, args, method }, target, 
   const patch = {}
   const old = type === 'templates' ? before.recipe : before
   for (const [key, value] of Object.entries(args[0])) {
-    if (metadata.includes(key) || key === 'isNew') continue
+    // Template environment values can be credentials. As with imports, they
+    // are entered on each source and never copied to another one.
+    if (metadata.includes(key) || key === 'isNew' || (type === 'templates' && key === 'environment')) continue
     if (JSON.stringify(canonical(old[key])) !== JSON.stringify(canonical(value))) patch[key] = mergeChanged(old[key],value,(type === 'templates' ? current.recipe : current)[key])
   }
   if (method === 'savePolicy') {
@@ -95,6 +97,9 @@ export async function applySourceChange({ type, before, args, method }, target, 
     return api.savePolicy(next)
   }
   if (method === 'saveGroup') return api.saveGroup({...current, ...patch, id:current.id, isNew:false})
-  if (method === 'buildImageTemplate') return api.buildImageTemplate({...current.recipe, ...patch, name:current.name}, true)
+  if (method === 'buildImageTemplate') {
+    if (!Object.keys(patch).length) throw new Error('Only environment values changed. Enter them on this source separately.')
+    return api.buildImageTemplate({...current.recipe, ...patch, name:current.name}, true)
+  }
   throw new Error('This change must be made separately on each source.')
 }
