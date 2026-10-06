@@ -42,9 +42,10 @@ export const AGENT_ACCESS = {
     name: 'Codex',
     binaries: ['/usr/bin/codex', '/usr/local/bin/codex', '/usr/local/lib/node_modules/@openai/**/codex', '/usr/lib/node_modules/@openai/**/codex'],
     endpoints: ['api.openai.com', 'auth.openai.com', 'chatgpt.com', 'ab.chatgpt.com'].map(host => endpoint(host)),
-    // Codex lists and calls ChatGPT connectors (apps) on chatgpt.com, which it
-    // also needs for sign-in, so turning them off closes these paths instead.
-    connectors: { name: 'ChatGPT connectors', paths: { 'chatgpt.com': ['/backend-api/ps/mcp', '/backend-api/ps/mcp/**', '/backend-api/connectors/**'] } },
+    // Codex lists and calls ChatGPT connectors (apps) and hosted plugins on
+    // chatgpt.com, which it also needs for sign-in, so turning them off closes
+    // these paths instead.
+    connectors: { name: 'ChatGPT connectors and plugins', paths: { 'chatgpt.com': ['/backend-api/ps/mcp', '/backend-api/ps/mcp/**', '/backend-api/connectors/**'] } },
     // Codex's "Sign in with ChatGPT" redirects the host browser to a callback
     // server inside the sandbox, which the browser cannot reach.
     authentication: 'Attach a Codex credential, or run codex after connecting and choose “Sign in with Device Code” (ChatGPT plan) or “Provide your own API key”. “Sign in with ChatGPT” can’t complete from a sandbox.',
@@ -94,6 +95,10 @@ export const TOOL_ACCESS = {
 // Agents whose subscription brings its own connectors (remote MCPs). They stay
 // off unless chosen at creation.
 export const connectorAgents = (ids = []) => ids.filter(id => AGENT_ACCESS[id]?.connectors)
+// A Claude Code secret is an API key; a Codex secret is the ChatGPT sign-in
+// itself, so only the former rules connectors out.
+const API_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'OPENAI_API_KEY']
+export const holdsApiKey = (secret) => Boolean(secret?.credentialKeys?.some(key => API_KEYS.includes(key)))
 
 function withConnectors(access, on) {
   const { hosts = [], paths = {} } = access.connectors ?? {}

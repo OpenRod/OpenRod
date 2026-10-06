@@ -8,7 +8,7 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 - Resource pages show Local and Remote resources together. Network, Secrets, Templates, MCPs & Skills, and Activity identify each row's source with consistent chips; Groups retains each resource's source when editing membership or rules.
 - Creation and setup import choose a destination explicitly. Edits, deletions, activity pagination, and exports keep their original source, including when resource names or IDs match across machines.
-- Sandbox creation offers explicit opt-in for Claude Code and Codex subscription connectors. Connector access remains off by default.
+- New Codex sandboxes no longer reach your ChatGPT connectors or hosted plugins unless you turn them on when creating the sandbox; existing sandboxes keep their access. Claude Code sandboxes can turn on your claude.ai connectors the same way.
 
 ### Fixed
 
