@@ -18,7 +18,11 @@ import { GroupPicker } from "@/components/group-picker"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { POLICY_HANDOFF } from "@/components/egress-view"
-import { useApi } from "@/lib/location-context"
+import { useApi, LocationProvider } from "@/lib/location-context"
+import { useLocationData } from "@/lib/location-data"
+import { PlacementBadge } from "@/components/placement-badge"
+import { LocationAction } from "@/components/location-action"
+import { resourceKey } from "@/lib/locations"
 import { useLive } from "@/lib/live"
 import { groupId, groupPolicies, policiesFor, groupFor } from "@/lib/groups"
 import { styleOf } from "@/lib/sandboxes"
@@ -317,7 +321,7 @@ function GroupCard({ group, members, policies, onOpen, delay }) {
   )
 }
 
-export function GroupsView({ onNavigate }) {
+function ScopedGroupsView({ onNavigate }) {
   const api = useApi()
   const live = useLive()
   const [org, setOrg] = React.useState(null)
@@ -463,4 +467,62 @@ export function GroupsView({ onNavigate }) {
       <GroupSheet group={groups.find((g) => g.id === open) ?? null} org={org} sandboxes={sandboxes} onClose={() => setOpen(null)} onChanged={load} onPolicy={policy} />
     </div>
   )
+}
+
+
+export function GroupsView({combined,...props}) {
+  return combined ? <CombinedGroupsView {...props} /> : <ScopedGroupsView {...props} />
+}
+function CombinedGroupsView({onNavigate}) {
+  const model=useLocationData(['org'])
+  const [creating,setCreating]=React.useState(false)
+  const [opened,setOpened]=React.useState(null)
+  const [query,setQuery]=React.useState('')
+  const [showSandboxes,setShowSandboxes]=React.useState(false)
+  const [selected,setSelected]=React.useState([])
+  const [bulkGroups,setBulkGroups]=React.useState([])
+  const [busy,setBusy]=React.useState(false)
+  const groups=model.sources.flatMap(source=>(source.data?.org?.groups ?? []).map(group=>({...group,location:source.location,sourceOrg:source.data.org})))
+  const orgFor=location=>model.sources.find(source=>source.location.id===location.id)?.data?.org
+  const boxes=model.inventory.sandboxes.filter(box=>box.phase!=='deleting')
+  const grouped=boxes.filter(box=>groupFor(orgFor(box.location),box.name).length).length
+  const visible=boxes.filter(box=>!query || [box.name,...groupFor(orgFor(box.location),box.name).map(id=>orgFor(box.location)?.groups.find(group=>group.id===id)?.name ?? '')].join(' ').toLowerCase().includes(query.toLowerCase()))
+  const picked=boxes.filter(box=>selected.includes(resourceKey(box)))
+  const oneSource=picked.length>0 && picked.every(box=>box.location.id===picked[0].location.id)
+  const selectedOwner=oneSource?picked[0].location.id:null
+  React.useEffect(()=>setBulkGroups([]),[selectedOwner])
+  const bulkOrg=oneSource?orgFor(picked[0].location):null
+  async function move(boxes,ids,mode) {
+    setBusy(true)
+    try { reportSync(await model.apiFor(boxes[0].location).setGroupMembers(boxes.map(box=>box.name),ids,mode),'Updated groups');setSelected([]);await model.refresh() }
+    catch(error){toast.error(error.message)}finally{setBusy(false)}
+  }
+  const creation=creating && <LocationAction onClose={()=>setCreating(false)}>{(location,onClose)=>{
+    const org=orgFor(location)
+    return <NewGroupDialog open onOpenChange={open=>{if(!open)onClose()}} groups={org?.groups ?? []} assignments={org?.assignments ?? {}} sandboxes={boxes.filter(box=>box.location.id===location.id)} onCreated={async(group,result,added)=>{await model.refresh();onClose();toast.success(`Created ${group.name}`)}} />
+  }}</LocationAction>
+  if(model.loading && !groups.length)return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Reading groups…</p>
+  return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 pt-4 pb-3 sm:px-6">
+      {[['Groups',groups.length],['In a group',grouped],['No group',boxes.length-grouped]].map(([label,value])=><div key={label} className="rounded-md px-3 py-1.5"><span className="block text-[11px] text-muted-foreground">{label}</span><span className="mt-1 block font-mono text-lg leading-none">{value}</span></div>)}
+      <Button size="sm" className="ml-auto bg-[var(--action)] text-[var(--action-foreground)]" onClick={()=>setCreating(true)}><Plus />New group</Button>
+    </div>
+    <section aria-label="Groups" className="grid gap-3 px-4 py-5 sm:grid-cols-2 sm:px-6 xl:grid-cols-3">
+      {groups.map(group=><div key={resourceKey(group)} className="relative"><div className="mb-2 flex items-center gap-2"><PlacementBadge location={group.location} />{group.location.connected===false && <span className="text-[11px] text-muted-foreground">Offline</span>}</div><GroupCard group={group} members={group.sourceOrg.members?.[group.id] ?? []} policies={groupPolicies(group.sourceOrg.policies,group.id)} onOpen={()=>{if(group.location.connected)setOpened(group)}} delay={0} /></div>)}
+    </section>
+    {!groups.length && <FirstRun onCreate={()=>setCreating(true)} onPolicy={()=>onNavigate('egress')} />}
+    <section aria-label="Sandboxes and their groups" className="border-t">
+      <div className="flex items-center gap-2 px-6 py-3"><Button variant="ghost" size="sm" onClick={()=>setShowSandboxes(!showSandboxes)}><ChevronRight className={showSandboxes?'rotate-90':''} />Sandboxes {boxes.length}</Button>{showSandboxes && <SearchInput className="ml-auto w-56" aria-label="Search sandboxes" value={query} onValueChange={setQuery} placeholder="Search sandboxes…" />}</div>
+      {showSandboxes && <>
+        {picked.length>0 && <div className="flex flex-wrap items-center gap-2 border-y bg-accent/30 px-6 py-2 text-xs"><span>{picked.length} selected</span>{oneSource ? <><GroupPicker multiple allowCreate={false} groups={bulkOrg?.groups ?? []} value={bulkGroups} onChange={setBulkGroups} /><Button size="sm" disabled={busy || !bulkGroups.length || !picked[0].location.connected} onClick={()=>move(picked,bulkGroups,'add')}>Add to groups</Button><Button size="sm" variant="outline" disabled={busy || !bulkGroups.length || !picked[0].location.connected} onClick={()=>move(picked,bulkGroups,'remove')}>Remove from groups</Button></>:<span className="text-muted-foreground">Select sandboxes from one source to change their groups.</span>}<Button size="sm" variant="ghost" onClick={()=>setSelected([])}>Clear</Button></div>}
+        <div className="overflow-x-auto"><table aria-label="Sandboxes and groups" className="w-full min-w-[640px] text-left text-xs"><thead className="border-y bg-muted text-muted-foreground"><tr>{['','Sandbox','Source','Groups','Network rules'].map((label,i)=><th className="px-4 py-2 font-normal" key={i}>{label}</th>)}</tr></thead><tbody className="divide-y">{visible.map(box=>{
+          const org=orgFor(box.location),current=groupFor(org,box.name),key=resourceKey(box)
+          const rules=policiesFor(org?.policies ?? [],{name:box.name,groups:current,setups:org?.setupMembers?.[box.name] ?? []})
+          return <tr key={key} className="bg-card"><td className="px-4"><input type="checkbox" aria-label={`Select ${box.name} at ${box.location.label}`} disabled={!box.location.connected} checked={selected.includes(key)} onChange={()=>setSelected(old=>old.includes(key)?old.filter(item=>item!==key):[...old,key])} /></td><td className="px-4 py-3 font-mono">{box.name}</td><td className="px-4"><PlacementBadge location={box.location} /></td><td className="px-4"><fieldset disabled={busy || !box.location.connected}><GroupPicker multiple allowCreate={false} groups={org?.groups ?? []} value={current} onChange={next=>{const added=next.filter(id=>!current.includes(id)),removed=current.filter(id=>!next.includes(id));move([box],added.length?added:removed,added.length?'add':'remove')}} /></fieldset></td><td className="px-4 text-muted-foreground">{rules.map(rule=>rule.name).join(', ') || 'No network rules'}</td></tr>
+        })}</tbody></table></div>
+      </>}
+    </section>
+    {creation}
+    {opened && <LocationProvider location={opened.location}><GroupSheet group={opened} org={orgFor(opened.location)} sandboxes={boxes.filter(box=>box.location.id===opened.location.id)} onClose={()=>setOpened(null)} onChanged={model.refresh} onPolicy={value=>{handOff({...value,location:opened.location});onNavigate('egress',opened.location)}} /></LocationProvider>}
+  </div>
 }

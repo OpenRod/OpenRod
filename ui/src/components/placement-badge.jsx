@@ -39,7 +39,7 @@ export function PlacementIcon({ type, className = 'size-3.5' }) {
 }
 
 export function PlacementPill({ type, title }) {
-  return <span title={title} className={`inline-flex shrink-0 items-center gap-1 rounded-full py-0.5 pr-2 pl-1.5 text-[11px] font-medium ring-1 ring-inset ${TONE[type]}`}>
+  return <span title={title} className={`inline-flex h-5 w-fit shrink-0 items-center gap-1 whitespace-nowrap rounded-full pr-2 pl-1.5 font-sans text-[11px] leading-none font-medium ring-1 ring-inset ${TONE[type]}`}>
     <PlacementIcon type={type} />{PLACEMENTS[type].label}
   </span>
 }

@@ -10,7 +10,7 @@ export function activityRow(event) {
   const agent = known ? { name: known.name, logo: `/logos/agents/${known.logo}.svg` } : null
   const direction = event.direction || (event.kind === 'inbound' && ['NET', 'HTTP', 'SSH'].includes(event.category) ? 'in' : event.kind === 'audit' && ['NET', 'HTTP'].includes(event.category) ? 'out' : 'unknown')
   const values = {
-    time: event.at ?? '', sandbox: event.sandbox ?? '', scope: event.scope ?? '', sandboxId: event.sandboxId ?? event.original?.sandboxId ?? '', agent: agent?.name ?? 'Unknown',
+    source: event.location?.label ?? '', time: event.at ?? '', sandbox: event.sandbox ?? '', scope: event.scope ?? '', sandboxId: event.sandboxId ?? event.original?.sandboxId ?? '', agent: agent?.name ?? 'Unknown',
     category: CATEGORY_NAMES[event.category] ?? (event.kind === 'log' ? 'Log' : 'Unclassified'),
     severity: event.severity || 'Not reported',
     logLevel: event.level && event.level !== 'OCSF' ? event.level : 'Not reported', direction,

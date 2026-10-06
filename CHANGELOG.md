@@ -2,6 +2,20 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Resource pages show Local and Remote resources together. Network, Secrets, Templates, MCPs & Skills, and Activity identify each row's source with consistent chips; Groups retains each resource's source when editing membership or rules.
+- Creation and setup import choose a destination explicitly. Edits, deletions, activity pagination, and exports keep their original source, including when resource names or IDs match across machines.
+- Sandbox creation offers explicit opt-in for Claude Code and Codex subscription connectors. Connector access remains off by default.
+
+### Fixed
+
+- A disconnected SSH location no longer blocks Local resource pages or imports, and retained remote inventory no longer requires a persistent banner.
+- Reconnecting an SSH location selects the requested host instead of falling back to another configured host.
+- Forgetting a remote connection removes its host from the Connections list across restarts; forgotten hosts can be restored explicitly.
+
 ## 0.1.2
 
 ### Added
@@ -63,7 +77,7 @@ First public release of OpenRod, a local web console for NVIDIA OpenShell 0.1.2.
 ### Policy and network
 
 - Reusable egress rules (allow or block) for groups, specific sandboxes or every sandbox, with organization-wide blocked hosts.
-- Groups of sandboxes that share network access, approvals for blocked requests, ingress services with auto-close timers, and secrets with destination-bound injection.
+- Groups of sandboxes that share network access, policy-only egress (requests no rule allows are blocked and pending proposals are auto-rejected), ingress services with auto-close timers, and secrets with destination-bound injection.
 
 ### MCPs & Skills Setups
 

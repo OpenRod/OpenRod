@@ -27,6 +27,7 @@ const working = (t) => t.status === 'building'
 export const launchable = (t) => t.status === 'ready' || t.exists
 const statusLabel = (t) => working(t) ? (t.exists ? 'Rebuilding' : 'Building') : t.status === 'failed' ? (t.exists ? 'Rebuild failed' : 'Build failed') : 'Ready'
 function Status({ record }) {
+  if (record.location?.connected === false) return <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground"><span className="size-1.5 rounded-full bg-muted-foreground/50" />Offline</span>
   return <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px]">{working(record) ? <Spinner className="size-3 text-amber-600" /> : <span className={`size-1.5 rounded-full ${record.status === 'failed' ? 'bg-amber-500' : 'bg-emerald-500'}`} />}{statusLabel(record)}</span>
 }
 const startsIn = (command) => STARTS.find((s) => s.id === command)?.name ?? command
@@ -65,7 +66,7 @@ export function TemplatesView() {
   }, [defaultContext, locations])
   const selected = records.find((t) => resourceKey(t) === selectedKey)
   const owner = (t) => locations.find((location) => locationKey(location) === locationKey(t.location)) ?? t.location
-  // The location column only tells templates apart when more than one gateway is listed.
+  // Location filtering narrows the table; every row always shows its source.
   const multipleLocations = locations.length > 1
   const connected = (t) => owner(t).connected !== false
   const scopedApi = (t) => {
@@ -186,7 +187,6 @@ export function TemplatesView() {
       <Button variant="destructive" size="sm" disabled={busy} onClick={() => askRemove(checkedRecords)}><Trash2 />Delete selected</Button>
     </div>}
     {error && <div role="alert" className="px-4 py-4 text-xs sm:px-6"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button></div>}
-    {locations.filter((location) => location.connected === false).map((location) => <div key={locationKey(location)} role="status" className="border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-6">{locationLabel(location)} is disconnected. Saved templates are shown; reconnect to use or change them.{location.error && <span className="ml-1">{location.error}</span>}</div>)}
     {loading && !records.length ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground"><Spinner />Loading…</div>
       : !shown.length ? <div className="py-12 text-center text-xs text-muted-foreground">
         <p>{records.length ? 'No matching templates.' : 'No image templates yet.'}</p>
@@ -196,14 +196,14 @@ export function TemplatesView() {
         <div className="overflow-x-auto">
           <table aria-label="Image templates" className="w-full min-w-[580px] text-left">
             <thead className="border-b text-[11px] text-muted-foreground">
-              <tr><th className="w-10 px-4 py-2 sm:pl-6"><Checkbox aria-label="Select all matching templates" checked={allChecked} indeterminate={matchingChecked > 0 && !allChecked} disabled={busy || !selectable.length} onCheckedChange={toggleMatching} /></th><th className="px-4 py-2 font-normal">Name</th>{multipleLocations && <th className="px-4 py-2 font-normal">Location</th>}<th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
+              <tr><th className="w-10 px-4 py-2 sm:pl-6"><Checkbox aria-label="Select all matching templates" checked={allChecked} indeterminate={matchingChecked > 0 && !allChecked} disabled={busy || !selectable.length} onCheckedChange={toggleMatching} /></th><th className="px-4 py-2 font-normal">Name</th><th className="px-4 py-2 font-normal">Source</th><th className="px-4 py-2 font-normal">Starts in</th><th className="px-4 py-2 font-normal">Image</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2"><span className="sr-only">Actions</span></th></tr>
             </thead>
             <tbody className="divide-y">{shown.map((t) => <tr key={resourceKey(t)} className={checked.has(resourceKey(t)) ? "bg-accent/40 hover:bg-muted/40" : "hover:bg-muted/40"}>
               <td className="px-4 py-2 sm:pl-6"><Checkbox aria-label={`Select ${t.name} in ${locationLabel(owner(t))}`} checked={checked.has(resourceKey(t))} disabled={busy || working(t) || !connected(t)} onCheckedChange={() => toggle(resourceKey(t))} /></td>
               <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedKey(resourceKey(t))}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
               </td>
-              {multipleLocations && <td className="px-4 py-2"><PlacementBadge location={owner(t)} /></td>}
+              <td className="px-4 py-2"><PlacementBadge location={owner(t)} /></td>
               <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '-' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>

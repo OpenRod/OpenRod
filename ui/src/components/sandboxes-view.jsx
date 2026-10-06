@@ -7,6 +7,8 @@ import { useInventory } from "@/lib/inventory"
 import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
 import { locationLabel, resourceKey } from "@/lib/locations"
 import { LocationBadge } from "@/components/location-badge"
+import { RemoteConnect } from "@/components/remote-connect"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Notice } from "@/components/notice"
 import { PlacementBadge, PlacementPill } from "@/components/placement-badge"
 import { PLACEMENTS, placementOf } from "@/lib/placement"
@@ -57,6 +59,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const live = useDemoFleet(useLive())
   const inventory = useInventory()
   const { locations } = inventory
+  const [reconnectHost, setReconnectHost] = React.useState(null)
   const inheritedLocation = useLocation()
   const [selectedContext, setSelectedContext] = React.useState(null)
   const defaultContext = locationKey(inheritedLocation) ?? selectedContext
@@ -279,11 +282,11 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
           {Object.entries(all.status).map(([key, value]) => value > 0 && <span key={key} className={STATUS[key].strip} style={{ width: `${value / all.total * 100}%` }} />)}
         </div>
         {inventory.error && sandboxes.length > 0 && <Notice id="sandboxes:inventory-error" tone="warning" title="Inventory refresh failed" actions={<Button size="xs" variant="outline" onClick={inventory.refresh}>Retry</Button>}>Showing the last reading. {inventory.error}</Notice>}
-        {locations.filter((location) => !location.connected).map((location) => <LocationReconnect key={locationKey(location)} location={location} onReconnected={inventory.refresh} />)}
         {live.demo && <p className="border-b border-border px-6 py-2 text-xs text-amber-700">Preview · synthetic sandbox data</p>}
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
           <SearchInput ref={search} value={query} onValueChange={setQuery} placeholder="Search name, owner, image…" aria-label="Search sandboxes" className="mr-auto w-full sm:w-64" />
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
+          {locations.filter(location => location.remote && !location.connected && location.host).map(location => <Button key={locationKey(location)} variant="ghost" size="sm" className="h-7 gap-1.5 rounded-full px-2 text-[11px] text-muted-foreground" title={`Reconnect to ${location.host}`} onClick={() => setReconnectHost(location.host)}><span aria-hidden="true" className="size-1.5 rounded-full bg-stone-400" />{location.host} · Offline</Button>)}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={inventory.refresh}><RefreshCw className="size-3.5" /></Button>
           <Button size="sm" disabled={!availableLocation && !canConnect} onClick={beginCreation} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
         </div>
@@ -334,6 +337,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <Dialog open={Boolean(reconnectHost)} onOpenChange={open => { if (!open) setReconnectHost(null) }}><DialogContent className="sm:max-w-3xl" aria-describedby={undefined}><DialogHeader><DialogTitle>Connect to {reconnectHost}</DialogTitle></DialogHeader>{reconnectHost && <RemoteConnect key={reconnectHost} initialHost={reconnectHost} onConnected={() => { setReconnectHost(null); inventory.refresh() }} onBack={() => setReconnectHost(null)} />}</DialogContent></Dialog>
       <LocationProvider location={chosenLocation}><CreateSandboxDialog open={creating} onOpenChange={setCreating} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} onRefreshLocations={inventory.refresh} allowRemote={canConnect} /></LocationProvider>
     </>
   )
@@ -355,34 +359,6 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
     <td className={cell}><span className="block truncate tabular-nums" title={sandbox.createdAt || "Not reported"}>{elapsedSince(sandbox.createdAt, now)}{sandbox.createdAt ? " ago" : ""}</span></td>
   </tr>
 })
-
-// Brings a disconnected SSH location back with the connect call the dialog
-// uses. A host that needs Docker or runtime images is left to the dialog.
-function LocationReconnect({ location, onReconnected }) {
-  const api = useApi()
-  const [state, setState] = React.useState({ busy: false, error: null })
-  const mounted = React.useRef(true)
-  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  async function reconnect() {
-    setState({ busy: true, error: null })
-    try {
-      let job = await api.connect({ host: location.host })
-      while (job.status === "working") {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        job = await api.connectionJob(job.id)
-      }
-      if (job.status !== "ready") throw new Error(job.error || `${location.host} needs setup. Use New sandbox → Remote to finish connecting.`)
-      onReconnected()
-      if (mounted.current) setState({ busy: false, error: null })
-    } catch (reason) {
-      if (mounted.current) setState({ busy: false, error: reason.message })
-    }
-  }
-  return <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">
-    <span>{locationLabel(location)} disconnected. Its last inventory is retained; reconnect to use these resources.{location.error ? ` ${location.error}` : ""}{state.error ? ` ${state.error}` : ""}</span>
-    {location.host && <Button size="xs" variant="outline" disabled={state.busy} onClick={reconnect}><RefreshCw className={`size-3 ${state.busy ? "animate-spin motion-reduce:animate-none" : ""}`} />{state.busy ? "Reconnecting…" : "Reconnect"}</Button>}
-  </div>
-}
 
 function SelectionCheckbox({ label, checked, mixed = false, disabled, onChange }) {
   const ref = React.useRef(null)

@@ -102,17 +102,19 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
   const initial = contextSelection()
   let returnContext = contextConfigured() && localGateways().some(target => target.name === initial.gateway) ? initial : null
   let lastRemote = null, historyReady = null, historyWrites = Promise.resolve()
+  const forgottenHosts = new Set()
   const historyFile = path.join(stateDirectory(), 'remote-gateways', 'last-location.json')
   const validContext = value => value && /^[\w.-]{1,64}$/.test(value.gateway ?? '') && /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(value.workspace ?? '')
   const loadHistory = () => historyReady ??= (async () => {
     try {
       const saved = JSON.parse(await fs.readFile(historyFile, 'utf8'))
+      for (const host of Array.isArray(saved.forgottenHosts) ? saved.forgottenHosts : []) if (typeof host === 'string') forgottenHosts.add(host)
       if (!returnContext && validContext(saved.returnContext) && localGateways().some(target => target.name === saved.returnContext.gateway)) returnContext = saved.returnContext
-      if (validContext(saved.remote) && /^console-ssh-[a-f0-9]{24}$/.test(saved.remote.gateway) && typeof saved.remote.host === 'string') lastRemote = { ...saved.remote, status: 'disconnected', error: null }
+      if (validContext(saved.remote) && /^console-ssh-[a-f0-9]{24}$/.test(saved.remote.gateway) && typeof saved.remote.host === 'string' && !forgottenHosts.has(saved.remote.host)) lastRemote = { ...saved.remote, status: 'disconnected', error: null }
     } catch (error) { if (error.code !== 'ENOENT') logger.warn(`Remote location history unavailable: ${error.message}`) }
   })()
   const saveHistory = () => {
-    const data = JSON.stringify({ returnContext, remote: lastRemote })
+    const data = JSON.stringify({ returnContext, remote: lastRemote, forgottenHosts: [...forgottenHosts] })
     historyWrites = historyWrites.catch(() => {}).then(async () => {
       await fs.mkdir(path.dirname(historyFile), { recursive: true, mode: 0o700 })
       const temporary = `${historyFile}.${randomUUID()}.tmp`
@@ -134,7 +136,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     if (!remote && /^console-ssh-[a-f0-9]{24}$/.test(selected.gateway)) {
       try {
         const owner = JSON.parse(await fs.readFile(path.join(CONFIG_DIR, 'gateways', selected.gateway, 'console-managed.json'), 'utf8'))
-        if (typeof owner.host === 'string') remote = { host: owner.host, ...selected, status: 'disconnected', error: null }
+        if (typeof owner.host === 'string' && !forgottenHosts.has(owner.host)) remote = { host: owner.host, ...selected, status: 'disconnected', error: null }
       } catch { /* No managed registration to retain. */ }
     }
     if (!returnContext && (remote || contextConfigured())) {
@@ -319,7 +321,7 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     async overview() {
       const snapshot = await locationSnapshot()
       const connection = snapshot.remote
-      return { hosts: await listSshHosts(), locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')), openshell: Boolean(openshellBinary()), installCommand: installCommand(process.platform) } }
+      return { hosts: (await listSshHosts()).filter(host => !forgottenHosts.has(host.name)), forgottenHosts: [...forgottenHosts], locals: localGateways().map(({ name, endpoint }) => ({ name, endpoint })), active: view(connection), job: view(job), tools: { ssh: Boolean(sshBinary()), gateway: Boolean(findExecutable('openshell-gateway')), openshell: Boolean(openshellBinary()), installCommand: installCommand(process.platform) } }
     },
     changing: () => disconnecting || job?.status === 'working',
     // A fresh console connects to the CLI's local gateway the way "Use this
@@ -378,15 +380,24 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     async forget() {
       if (disconnecting || job?.status === 'working') throw fail('Wait for the current connection change to finish.', 409)
       await loadHistory()
-      if (active?.status === 'connected' || active?.status === 'connecting') await this.disconnect()
+      const remote = (await locationSnapshot()).remote
+      if (remote || active?.status === 'connected' || active?.status === 'connecting') await this.disconnect()
+      if (remote) forgottenHosts.add(remote.host)
       active = null
       lastRemote = null
       await saveHistory()
       return { ok: true }
     },
+    async restoreHost(host) {
+      await loadHistory()
+      if (typeof host !== 'string' || !forgottenHosts.has(host)) throw fail('This host is not forgotten.', 409)
+      forgottenHosts.delete(host)
+      await saveHistory()
+      return { ok: true }
+    },
     async disconnect() {
       idle()
-      const current = contextSelection()
+      const current = defaultContextSelection()
       const replaceSelection = current.gateway === active?.gateway || /^console-ssh-[a-f0-9]{24}$/.test(current.gateway)
       if (replaceSelection && process.env.OPENSHELL_GATEWAY) throw fail('Remove OPENSHELL_GATEWAY before disconnecting its selected gateway.', 409)
       disconnecting = true

@@ -177,23 +177,36 @@ function SecretDetails({ secret, profile, sandboxes, onRotate, onDelete, onDone 
   )
 }
 
+import { LocationProvider } from '@/lib/location-context'
+import { PlacementBadge } from '@/components/placement-badge'
+import { LocationAction } from '@/components/location-action'
+import { useLocationData } from '@/lib/location-data'
+import { resourceKey } from '@/lib/locations'
+
 const EMPTY = []
 const COLUMNS = [
-  { id: "name", label: "Secret", width: "28%" }, { id: "service", label: "Service", width: "16%" },
-  { id: "credentials", label: "Credentials", width: "13%" }, { id: "attached", label: "Sandboxes", width: "16%" },
-  { id: "expiry", label: "Next expiry", width: "15%" }, { id: "hosts", label: "Allowed hosts", width: "12%" },
+  { id: "name", label: "Secret", width: "22%" }, { id: "source", label: "Source", width: "10%" }, { id: "service", label: "Service", width: "14%" },
+  { id: "credentials", label: "Credentials", width: "12%" }, { id: "attached", label: "Sandboxes", width: "14%" },
+  { id: "expiry", label: "Next expiry", width: "12%" }, { id: "hosts", label: "Allowed hosts", width: "12%" },
 ]
 const EXPIRY_LABEL = { none: "No expiry", expired: "Expired", expiring: "Within 7 days", scheduled: "Scheduled" }
 
-export function SecretsView() {
+function CombinedSecretsView() {
+  const model = useLocationData(['secrets'])
+  return <ScopedSecretsView model={model} />
+}
+export function SecretsView({combined}) {
   const location = useLocation()
+  if(combined)return <CombinedSecretsView />
   return <ScopedSecretsView key={location?.id ?? location?.context ?? "default"} />
 }
 
-function ScopedSecretsView() {
+function ScopedSecretsView({model}) {
   const api = useApi()
+  const location = useLocation()
   const live = useLive()
-  const [data, setData] = React.useState(null)
+  const [singleData, setData] = React.useState(null)
+  const data = model ? (model.loading && !model.sources.length ? null : {providers:EMPTY,profiles:EMPTY,sources:model.sources}) : singleData
   const [error, setError] = React.useState(null)
   const [loading, setLoading] = React.useState(false)
   const [adding, setAdding] = React.useState(false)
@@ -210,10 +223,10 @@ function ScopedSecretsView() {
   const deferredQuery = React.useDeferredValue(query)
   const load = React.useCallback(async () => {
     setLoading(true)
-    try { const d = await api.secrets(); setData(d); setError(null); return d }
+    try { const d = model ? await model.refresh() : await api.secrets(); if(!model)setData(d); setError(null); return d }
     catch (e) { setError(e.message); return null }
     finally { setLoading(false) }
-  }, [api])
+  }, [api, model?.refresh])
   React.useEffect(() => { load() }, [load])
   React.useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000)
@@ -223,13 +236,13 @@ function ScopedSecretsView() {
   }, [opened, adding, rotating, deleting])
   const providers = data?.providers ?? EMPTY
   const profiles = data?.profiles ?? EMPTY
-  const rows = React.useMemo(() => indexSecrets(providers, profiles, now), [providers, profiles, now])
+  const rows = React.useMemo(() => model ? model.sources.flatMap(source=>indexSecrets(source.data?.secrets?.providers ?? [],source.data?.secrets?.profiles ?? [],now).map(row=>({...row,secret:{...row.secret,location:source.location}}))) : indexSecrets(providers, profiles, now), [providers, profiles, now, model?.sources])
   const ordered = React.useMemo(() => filterSecrets(rows, { query: deferredQuery, scope, service, expiry, sort }), [rows, deferredQuery, scope, service, expiry, sort])
   const services = React.useMemo(() => [...new Map(rows.map((row) => [row.secret.type, row.service])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [rows])
   const virtual = useVirtualRows({ count: ordered.length, rowHeight: 40 })
   React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, scope, service, expiry, sort])
-  const selected = rows.find((row) => row.secret.name === opened)
-  const sandboxes = (live.sandboxes ?? []).filter((s) => s.phase !== "deleting")
+  const selected = rows.find((row) => resourceKey(row.secret) === opened)
+  const sandboxes = (model ? model.inventory.sandboxes : live.sandboxes ?? []).filter((s) => s.phase !== "deleting")
   const attached = rows.filter((row) => row.secret.attachedTo.length > 0).length
   const expiring = rows.filter((row) => row.status === "expiring").length
   const expired = rows.filter((row) => row.status === "expired").length
@@ -264,18 +277,19 @@ function ScopedSecretsView() {
         {!data && !error ? <p role="status" className="py-20 text-center text-sm text-muted-foreground">Loading secrets…</p> : !ordered.length ? <div className="py-20 text-center"><KeyRound className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{error && !data ? "Secrets unavailable" : rows.length ? "No matching secrets" : "No secrets yet"}</p>{data && <Button variant="outline" className="mt-4" onClick={rows.length ? clear : () => setAdding(true)}>{rows.length ? "Clear filters" : "Add secret"}</Button>}</div> :
           <table aria-label="Secrets" aria-rowcount={ordered.length + 1} className="w-full min-w-[900px] table-fixed border-separate border-spacing-0 text-xs">
             <colgroup>{COLUMNS.map((c) => <col key={c.id} style={{ width: c.width }} />)}</colgroup>
-            <thead className="sticky top-0 z-10 bg-muted"><tr aria-rowindex={1}>{COLUMNS.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="h-9 border-b border-border px-4 text-left font-medium text-muted-foreground first:pl-6">{c.id === "hosts" ? c.label : <button className="flex h-9 w-full items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSort({ key: c.id, direction: sort.key === c.id && sort.direction === "asc" ? "desc" : "asc" })}>{c.label}{sort.key === c.id && (sort.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>}</th>)}</tr></thead>
+            <thead className="sticky top-0 z-10 bg-muted"><tr aria-rowindex={1}>{COLUMNS.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="h-9 border-b border-border px-4 text-left font-medium text-muted-foreground first:pl-6">{["hosts","source"].includes(c.id) ? c.label : <button className="flex h-9 w-full items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSort({ key: c.id, direction: sort.key === c.id && sort.direction === "asc" ? "desc" : "asc" })}>{c.label}{sort.key === c.id && (sort.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>}</th>)}</tr></thead>
             <tbody>
-              {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={6} style={{ height: virtual.paddingTop, padding: 0 }} /></tr>}
-              {ordered.slice(virtual.start, virtual.end).map((row, i) => <tr key={row.secret.name} aria-rowindex={virtual.start + i + 2} onClick={() => setOpened(row.secret.name)} className="group cursor-pointer bg-card hover:bg-muted/60 focus-within:bg-muted/60">
-                <td className={`${cell} pl-6`}><button aria-haspopup="dialog" aria-label={`Open ${row.secret.name}`} className="flex h-9 w-full items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(e) => { e.stopPropagation(); setOpened(row.secret.name) }}><ServiceLogo type={row.secret.type} size="sm" /><span title={row.secret.name} className="truncate font-medium text-foreground">{row.secret.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+              {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={COLUMNS.length} style={{ height: virtual.paddingTop, padding: 0 }} /></tr>}
+              {ordered.slice(virtual.start, virtual.end).map((row, i) => <tr key={resourceKey(row.secret)} aria-rowindex={virtual.start + i + 2} onClick={() => { if(row.secret.location?.connected !== false)setOpened(resourceKey(row.secret)) }} className="group cursor-pointer bg-card hover:bg-muted/60 focus-within:bg-muted/60">
+                <td className={`${cell} pl-6`}><button disabled={row.secret.location?.connected === false} aria-haspopup="dialog" aria-label={`Open ${row.secret.name}`} className="flex h-9 w-full items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(e) => { e.stopPropagation(); setOpened(resourceKey(row.secret)) }}><ServiceLogo type={row.secret.type} size="sm" /><span title={row.secret.name} className="truncate font-medium text-foreground">{row.secret.name}</span><ArrowUpRight className="ml-auto size-3 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" /></button></td>
+                <td className={cell}><PlacementBadge location={row.secret.location ?? location} /></td>
                 <td className={cell}><span className="block truncate" title={row.service}>{row.service}</span></td>
                 <td className={cell}><span className="font-mono text-[11px]">{row.secret.credentialKeys.length || "Access only"}</span></td>
                 <td className={cell}><span className="block truncate" title={row.secret.attachedTo.slice(0, 10).join(", ")}>{row.secret.attachedTo.length === 1 ? row.secret.attachedTo[0] : row.secret.attachedTo.length ? `${row.secret.attachedTo.length.toLocaleString()} sandboxes` : "Unattached"}</span></td>
                 <td className={cell}><span className={row.status === "expired" ? "text-red-600" : row.status === "expiring" ? "text-amber-700" : ""} title={row.expiry ? new Date(row.expiry).toLocaleString() : undefined}>{row.status === "expired" ? "Expired · " : ""}{row.expiry ? new Date(row.expiry).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "No expiry"}</span></td>
                 <td className={cell}><span className="block truncate font-mono text-[11px]" title={row.hosts.join(", ")}>{row.hosts.length === 1 ? row.hosts[0] : row.hosts.length ? `${row.hosts.length} hosts` : "-"}</span></td>
               </tr>)}
-              {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={6} style={{ height: (ordered.length - virtual.end) * 40, padding: 0 }} /></tr>}
+              {virtual.end < ordered.length && <tr aria-hidden="true"><td colSpan={COLUMNS.length} style={{ height: (ordered.length - virtual.end) * 40, padding: 0 }} /></tr>}
             </tbody>
           </table>}
       </div>
@@ -284,12 +298,13 @@ function ScopedSecretsView() {
     <Sheet open={Boolean(selected)} onOpenChange={(open) => { if (!open) setOpened(null) }}>
       <SheetContent className="w-full gap-0 sm:max-w-lg" aria-describedby="secret-description">
         <SheetHeader className="border-b border-border px-4 py-4 pr-12"><SheetTitle>Secret details</SheetTitle><SheetDescription id="secret-description" className="text-xs">Manage credentials, expiry, and sandbox access.</SheetDescription></SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto">{selected && <SecretDetails key={selected.secret.name} secret={selected.secret} profile={selected.profile} sandboxes={sandboxes} onRotate={() => setRotating(selected.secret)} onDelete={() => setDeleting(selected.secret)} onDone={refresh} />}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{selected && <LocationProvider location={selected.secret.location ?? location}><SecretDetails key={resourceKey(selected.secret)} secret={selected.secret} profile={selected.profile} sandboxes={sandboxes.filter(item=>!model || item.location?.id===selected.secret.location?.id)} onRotate={() => setRotating(selected.secret)} onDelete={() => setDeleting(selected.secret)} onDone={refresh} /></LocationProvider>}</div>
       </SheetContent>
     </Sheet>
-      <AddSecretDialog open={adding} onOpenChange={setAdding} profiles={profiles} providers={providers} sandboxes={sandboxes}
-        reload={async () => { const d = await load(); live.refresh(); return d }} />
-      <RotateDialog secret={rotating} onClose={() => setRotating(null)} onDone={refresh} />
+      {!model && <AddSecretDialog open={adding} onOpenChange={setAdding} profiles={profiles} providers={providers} sandboxes={sandboxes}
+        reload={async () => { const d = await load(); live.refresh(); return d }} />}
+      {model && adding && <LocationAction onClose={()=>setAdding(false)}>{(destination,onClose)=><AddSecretAtLocation model={model} location={destination} onClose={onClose} />}</LocationAction>}
+      <LocationProvider location={rotating?.location ?? location}><RotateDialog secret={rotating} onClose={() => setRotating(null)} onDone={refresh} /></LocationProvider>
       <AlertDialog open={Boolean(deleting)} onOpenChange={(open) => { if (!open) setDeleting(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -303,11 +318,21 @@ function ScopedSecretsView() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" disabled={Boolean(deleting?.attachedTo.length)} onClick={async () => {
-              try { await api.deleteSecret(deleting.name); toast.success(`Deleted ${deleting.name}`); refresh() } catch (e) { toast.error(e.message) } finally { setDeleting(null) }
+              try { await (model ? model.apiFor(deleting.location) : api).deleteSecret(deleting.name); toast.success(`Deleted ${deleting.name}`); refresh() } catch (e) { toast.error(e.message) } finally { setDeleting(null) }
             }}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
   )
+}
+
+function AddSecretAtLocation({model,location,onClose}) {
+  const api=useApi()
+  const [data,setData]=React.useState(null)
+  const [error,setError]=React.useState(null)
+  React.useEffect(()=>{let alive=true;api.secrets().then(value=>{if(alive)setData(value)}).catch(e=>{if(alive)setError(e.message)});return()=>{alive=false}},[api])
+  if(!data)return <Dialog open onOpenChange={open=>{if(!open)onClose()}}><DialogContent><DialogHeader><DialogTitle>Add secret</DialogTitle><DialogDescription>{error || "Loading credentials…"}</DialogDescription></DialogHeader></DialogContent></Dialog>
+  return <AddSecretDialog open onOpenChange={open=>{if(!open)onClose()}} profiles={data?.profiles ?? []} providers={data?.providers ?? []}
+    sandboxes={model.inventory.sandboxes.filter(item=>item.location.id===location.id)} reload={async()=>{const result=await api.secrets();model.refresh();return result}} />
 }

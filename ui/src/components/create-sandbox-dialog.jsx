@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { CopyCommand } from "@/components/copy-command"
 import { GroupPicker } from "@/components/group-picker"
@@ -27,7 +28,7 @@ import { SANDBOX_ROOT, formatBytes, uploadCommand } from "@/lib/files"
 import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { agentAccessFor } from "../../shared/agent-access.js"
+import { AGENT_ACCESS, agentAccessFor, connectorAgents } from "../../shared/agent-access.js"
 
 const locationKey = (location) => location?.id ?? location?.context
 const PRIMARY_QUICK_AGENTS = ["claude", "codex", "cursor", "pi", "antigravity", "opencode"]
@@ -181,6 +182,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   const [agentIds, setAgentIds] = React.useState([])
   const [openIn, setOpenIn] = React.useState("shell")
   const [quickProviders, setQuickProviders] = React.useState({})
+  const [connectors, setConnectors] = React.useState([])
   const [error, setError] = React.useState(null)
   const [policyDraft, setPolicyDraft] = React.useState(null)
   const [start, setStart] = React.useState("empty")
@@ -213,7 +215,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     }).catch((e) => { if (current) setError(e.message) })
     setName("")
     setMode(initialImageTemplate ? "template" : "quick")
-    setAgentIds([]); setOpenIn("shell"); setQuickProviders({})
+    setAgentIds([]); setOpenIn("shell"); setQuickProviders({}); setConnectors([])
     setSetupIds([])
     setImageTemplate(initialImageTemplate?.name || "")
     setImages(initialImageTemplate ? [initialImageTemplate] : [])
@@ -238,7 +240,6 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
 
   const chosenImage = mode === "template" ? images.find((t) => t.name === imageTemplate) : null
   const selectedAgents = QUICK_AGENTS.filter((agent) => agentIds.includes(agent.id))
-  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds) : chosenImage?.managed ? chosenImage.recipe : null)
   const attachedProviders = mode === "quick" ? [...new Set(selectedAgents.flatMap((agent) => {
     const chosenProvider = quickProviders[agent.id]
     return compatibleProviders(providers, agent.id).some((provider) => provider.name === chosenProvider) ? [chosenProvider] : []
@@ -246,6 +247,10 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
   const templateAgents = chosenImage?.managed && chosenImage.recipe.source === "build" ? AGENTS.filter((agent) => chosenImage.recipe.agents.includes(agent.id)) : null
 
   const setupAgentIds = mode === "quick" ? agentIds : (templateAgents ?? []).map((agent) => agent.id)
+  // Connectors come with a subscription sign-in, so an attached API key rules them out.
+  const keyed = mode === "quick" ? Object.keys(quickProviders).filter((id) => quickProviders[id]) : []
+  const chosenConnectors = connectorAgents(setupAgentIds).filter((id) => connectors.includes(id) && !keyed.includes(id))
+  const agentAccess = agentAccessFor(mode === "quick" ? quickRecipe(agentIds) : chosenImage?.managed ? chosenImage.recipe : null, { connectors: chosenConnectors })
   const setupTargets = setupTargetsFor(setupAgentIds)
   const hasSetups = mode === "quick" ? setupIds.length > 0 : Boolean(chosenImage?.recipe?.setups?.length)
   const missingSetupAgent = hasSetups && !setupTargets.length
@@ -290,7 +295,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     }
     const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
     const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
-    const setups = setupIds, accessReview = setupAccessReview, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
+    const setups = setupIds, accessReview = setupAccessReview, chosenConnectorIds = chosenConnectors, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
     sandboxCreations.start({ name: sandboxName, location, task: async ({ signal, progress, build, creating }) => {
       let environment = template, launchSetupIds = [], launchAccessReview = null, buildName = null
       const cancelBuild = () => { if (buildName) void api.cancelImageBuild(buildName).catch((e) => toast.error(e.message)) }
@@ -309,7 +314,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
       } finally { signal.removeEventListener("abort", cancelBuild) }
       if (signal.aborted) throw new DOMException("Cancelled", "AbortError")
       creating()
-      const created = await api.create({ name: sandboxName, imageTemplate: environment.name, includeTemplateAccess: !quick, ...session, providers, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets: targets, groups, ...files })
+      const created = await api.create({ name: sandboxName, imageTemplate: environment.name, includeTemplateAccess: !quick, ...session, providers, setups: launchSetupIds, setupAccessReview: launchAccessReview, setupTargets: targets, connectors: chosenConnectorIds, groups, ...files })
       if (created.seed) toast(`${created.seed.kind === "folder" ? "Uploading" : "Cloning"} ${created.seed.source}`, { description: `Into ${created.seed.dest} once the sandbox starts. Progress is in its Files tab.` })
       for (const door of created.opened ?? []) toast(`Opened ${door.name || "default"} on port ${door.port}`, { description: door.url ?? undefined })
       return { ...created, image: environment.image, providers, createdAt: new Date().toISOString(), ...(location ? { location } : {}) }
@@ -419,6 +424,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                   </Select>
                 </div>
               })}
+              <ConnectorChoices agents={agentIds} keyed={keyed} value={connectors} onChange={setConnectors} />
             </TabsContent>
             <TabsContent value="template" className="grid gap-4">
               <div className="grid gap-1.5">
@@ -433,6 +439,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                 {!images.length && <p className={`text-[11px] ${showMissing ? "text-destructive" : "text-muted-foreground"}`}>No ready templates. Use Quick setup or create one in Templates.</p>}
                 {chosenImage && <p className="text-[11px] text-muted-foreground">{templateAgents ? `Included tools: ${[...templateAgents.map((agent) => agent.name), ...(chosenImage.recipe.customAgents ?? []).map((agent) => agent.name), "Terminal"].join(", ")}` : "Installed tools are not reported by this template."}</p>}
               </div>
+              <ConnectorChoices agents={setupAgentIds} value={connectors} onChange={setConnectors} />
             </TabsContent>
 
             {mode === "template" && <div className="grid gap-1.5">
@@ -513,7 +520,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
                         <ul className="mt-2 space-y-1">
                           {profile.endpoints.map((endpoint) => <li key={endpoint.host} className="flex flex-wrap items-baseline justify-between gap-x-3 text-[11px]">
                             <span className="break-all font-mono">{endpoint.host}:{endpoint.ports.join(",")}</span>
-                            <span className="text-muted-foreground">{endpoint.tlsSkip ? "TLS passthrough" : endpoint.allow?.length ? `${endpoint.allow.map((a) => a.method).join(", ")} only` : endpoint.access === "read-only" ? "Read only" : "Read & write"}</span>
+                            <span className="text-muted-foreground">{endpoint.tlsSkip ? "TLS passthrough" : endpoint.allow?.length ? `${endpoint.allow.map((a) => a.method).join(", ")} only` : endpoint.access === "read-only" ? "Read only" : "Read & write"}{endpoint.deny?.length ? ` · ${endpoint.deny.length} paths blocked` : ""}</span>
                           </li>)}
                         </ul>
                         {profile.authentication && <p className="mt-2 text-[11px]">{profile.authentication}</p>}
@@ -547,4 +554,21 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
       }} />
     </>
   )
+}
+
+// Connectors (remote MCPs) the agent's subscription account already has.
+// Choosing them opens only the vendor's connector proxy for that agent.
+function ConnectorChoices({ agents, keyed = [], value, onChange }) {
+  const offered = connectorAgents(agents)
+  if (!offered.length) return null
+  return <fieldset className="min-w-0">
+    <legend className="mb-1.5 text-xs font-medium">Connectors</legend>
+    <div className="grid gap-2">
+      {offered.map((id) => <label key={id} className="flex cursor-pointer items-center gap-2 text-xs has-disabled:cursor-default has-disabled:text-muted-foreground">
+        <Checkbox disabled={keyed.includes(id)} checked={value.includes(id) && !keyed.includes(id)} onCheckedChange={(on) => onChange(on ? [...value, id] : value.filter((item) => item !== id))} />
+        <span className="min-w-0 flex-1 truncate">Use my {AGENT_ACCESS[id].connectors.name}</span>
+        {keyed.includes(id) && <span className="text-[11px]">Subscription only</span>}
+      </label>)}
+    </div>
+  </fieldset>
 }

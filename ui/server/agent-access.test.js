@@ -112,3 +112,20 @@ test('VS Code Server adds a GET-only download rule for its two Microsoft hosts, 
   }
   assert.throws(() => addAgentAccess({ networkPolicies: {} }, agentAccessRules({ source: 'build', agents: [], runtimes: ['vscode'] }), { blocked: ['update.code.visualstudio.com'] }), /organization blocks/)
 })
+
+test('Subscription connectors stay closed unless chosen, then open only the vendor connector path', async () => {
+  const both = { source: 'build', agents: ['claude', 'codex', 'opencode'] }
+  const hosts = (rules, name) => rules.find(r => r.name === name).endpoints.map(e => e.host)
+  const chatgpt = (rules) => rules.find(r => r.name === 'agent-codex').endpoints.find(e => e.host === 'chatgpt.com')
+  const off = agentAccessRules(both)
+  assert(!hosts(off, 'agent-claude').includes('mcp-proxy.anthropic.com'))
+  assert.deepEqual(chatgpt(off).deny.map(d => d.path), ['/backend-api/ps/mcp', '/backend-api/ps/mcp/**', '/backend-api/connectors/**'])
+  const on = agentAccessRules(both, { connectors: ['claude', 'codex'] })
+  assert(hosts(on, 'agent-claude').includes('mcp-proxy.anthropic.com'))
+  assert.equal(chatgpt(on).deny, undefined)
+  assert.deepEqual(hosts(on, 'agent-opencode'), hosts(off, 'agent-opencode'))
+  const { policy } = await planSandbox({ template: 'locked-down', agentRules: off })
+  assert.deepEqual(policy.networkPolicies['agent-codex'].endpoints.find(e => e.host === 'chatgpt.com').denyRules.map(d => d.path), ['/backend-api/ps/mcp', '/backend-api/ps/mcp/**', '/backend-api/connectors/**'])
+  assert.throws(() => agentAccessRules(both, { connectors: ['opencode'] }), /only for/)
+  assert.throws(() => agentAccessRules({ source: 'build', agents: ['codex'] }, { connectors: ['claude'] }), /only for/)
+})

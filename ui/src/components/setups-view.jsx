@@ -16,6 +16,7 @@ import { terminalHref } from '@/lib/sandbox-session'
 import { LocationProvider, useApi, useLocation } from '@/lib/location-context'
 import { GroupPicker } from '@/components/group-picker'
 import { LocationBadge } from '@/components/location-badge'
+import { PlacementBadge } from '@/components/placement-badge'
 import { Notice } from '@/components/notice'
 import { importNeedsAttention, inactiveItems, providedCredentials } from '@/lib/import-setup'
 import { POLICY_HANDOFF } from '@/components/egress-view'
@@ -23,6 +24,10 @@ import { setupImports } from '@/lib/setup-imports'
 import { inSetupPolicy, policyRows, setupAccess } from '@/lib/setup-network'
 import { canPrepareAtLaunch, cannotRun, isPackagePending, launchableItem, launchRequirements } from '../../shared/setup-launch.js'
 import { SearchInput } from "@/components/ui/search-input"
+import { useInventory } from '@/lib/inventory'
+import { useLocationData } from '@/lib/location-data'
+import { resourceKey } from '@/lib/locations'
+import { LocationStep } from '@/components/location-step'
 
 const SOURCES = [{ id: 'codex', name: 'Codex', logo: 'codex' }, { id: 'claude', name: 'Claude Code', logo: 'claudecode' }, { id: 'cursor', name: 'Cursor', logo: 'cursor' }]
 const count = (setup, kind) => setup.items.filter((item) => item.kind === kind).length
@@ -71,15 +76,32 @@ function SetupItemTabs({ items, children }) {
   </Tabs>
 }
 
-export function SetupsView(props) {
+function CombinedSetupsView(props) {
+  const model = useLocationData(['setups'])
+  return <ScopedSetupsView {...props} model={model} />
+}
+
+export function SetupsView({ combined, ...props }) {
   const location = useLocation()
+  if (combined) return <CombinedSetupsView {...props} />
   return <ScopedSetupsView key={location?.id ?? location?.context ?? 'default'} {...props} />
 }
 
-function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
+function ScopedSetupsView({ sandbox = null, setupIds = [], model }) {
   const api = useApi()
-  const location = useLocation()
-  const [setups, setSetups] = React.useState(null)
+  const scopedLocation = useLocation()
+  const { locations } = useInventory()
+  const [defaultContext, setDefaultContext] = React.useState(null)
+  const location = scopedLocation ?? locations.find(item => item.context === defaultContext && item.target === (api.target ?? 'local')) ?? null
+  React.useEffect(() => {
+    if (scopedLocation) return
+    let alive = true
+    api.contextKey().then(context => { if (alive) setDefaultContext(context) }).catch(() => {})
+    return () => { alive = false }
+  }, [api, scopedLocation])
+  const [singleSetups, setSetups] = React.useState(null)
+  const setups = React.useMemo(() => model ? model.sources.flatMap(source => (source.data?.setups ?? []).map(setup=>({...setup,location:source.location}))) : singleSetups, [model?.sources, singleSetups])
+  const apiFor = setup => model && setup.location ? model.apiFor(setup.location) : api
   const [error, setError] = React.useState('')
   const [importing, setImporting] = React.useState(false)
   const [selected, setSelected] = React.useState(null)
@@ -93,11 +115,11 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
   const [network, setNetwork] = React.useState(null)
   const refresh = React.useCallback(async () => {
     setRefreshing(true)
-    try { setSetups(await api.setups()); setError('') } catch (e) { setError(e.message) }
+    try { if (model) await model.refresh(); else setSetups(await api.setups()); setError('') } catch (e) { setError(e.message) }
     finally { setRefreshing(false) }
-  }, [api])
+  }, [api, model?.refresh])
   const importJobs = React.useSyncExternalStore(setupImports.subscribe, setupImports.getSnapshot)
-  const completedImports = importJobs.filter(job => job.status === 'saved' && job.location?.context === location?.context).map(job => job.id).join(',')
+  const completedImports = importJobs.filter(job => job.status === 'saved' && (model || job.location?.context === location?.context)).map(job => job.id).join(',')
   React.useEffect(() => { refresh() }, [refresh, completedImports])
   const shown = React.useMemo(() => (setups || []).filter((setup) => {
     const matches = [setup.name, ...setup.items.flatMap(item => [item.name, ...(item.sources || [])])].join(' ').toLowerCase().includes(query.trim().toLowerCase())
@@ -116,7 +138,7 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
     </div>
     {error && <div className="space-y-2 border-b px-4 py-3 sm:px-6"><ErrorMessage>{error}</ErrorMessage><Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>Try again</Button></div>}
     <div className="flex-1">
-      {!setups && !error ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground"><Spinner />Loading setups…</div>
+      {(!setups || (model?.loading && !setups.length)) && !error ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground"><Spinner />Loading setups…</div>
         : setups && !shown.length ? <div className="px-4 py-16 text-center">
           <FolderInput className="mx-auto mb-3 size-6 text-muted-foreground" strokeWidth={1.5} />
           <p className="text-sm font-medium">{sandbox && !filtering ? 'No setups in this sandbox' : setups.length ? 'No matching setups' : 'No setups yet'}</p>
@@ -127,39 +149,45 @@ function ScopedSetupsView({ sandbox = null, setupIds = [] }) {
           <Table aria-label="MCPs & Skills" className="min-w-[740px] text-xs">
             <TableHeader><TableRow className="hover:bg-transparent">
               <TableHead scope="col" aria-sort={descending ? 'descending' : 'ascending'} className="h-9 px-4 text-[11px] font-normal text-muted-foreground sm:pl-6"><button className="flex items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDescending(value => !value)}>Name{descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}</button></TableHead>
-              {['Source agents', 'MCPs', 'Skills', 'Created'].map(label => <TableHead key={label} scope="col" className="h-9 px-4 text-[11px] font-normal text-muted-foreground">{label}</TableHead>)}
+              {['Source', 'Source agents', 'MCPs', 'Skills', 'Created'].map(label => <TableHead key={label} scope="col" className="h-9 px-4 text-[11px] font-normal text-muted-foreground">{label}</TableHead>)}
               <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
             </TableRow></TableHeader>
             <TableBody>{shown.map(setup => {
               const sources = SOURCES.filter(source => setup.items.some(item => item.sources?.includes(source.id)))
-              return <TableRow key={setup.id} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelected(setup)}>
-                <TableCell className="max-w-72 px-4 py-2 sm:pl-6"><button aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              return <TableRow key={resourceKey(setup)} className={setup.location?.connected === false ? "opacity-60" : "cursor-pointer hover:bg-muted/40"} onClick={() => { if(setup.location?.connected !== false)setSelected(setup) }}>
+                <TableCell className="max-w-72 px-4 py-2 sm:pl-6"><button disabled={setup.location?.connected === false} aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><Package className="size-3.5" strokeWidth={1.5} /></span>
                   <span className="truncate font-mono text-xs font-medium group-hover:underline">{setup.name}</span>
                 </button></TableCell>
+                <TableCell className="px-4 py-2">{(setup.location ?? location) ? <PlacementBadge location={setup.location ?? location} /> : <span className="text-[11px] text-muted-foreground">Loading…</span>}</TableCell>
                 <TableCell className="px-4 py-2"><div className="flex items-center gap-2">{sources.map(source => <img key={source.id} src={`/logos/agents/${source.logo}.svg`} alt={source.name} title={source.name} className="size-4 object-contain" />)}{!sources.length && <span className="text-muted-foreground">Not reported</span>}</div></TableCell>
                 <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><Plug aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'mcp')}</span></TableCell>
                 <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><FileText aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'skill')}</span></TableCell>
                 <TableCell className="px-4 py-2 text-[11px] text-muted-foreground">{setup.createdAt ? absoluteTime(setup.createdAt) : 'Not reported'}</TableCell>
-                <TableCell className="px-4 py-2 text-right sm:pr-6"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
+                <TableCell className="px-4 py-2 text-right sm:pr-6"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" disabled={setup.location?.connected === false} aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
               </TableRow>
             })}</TableBody>
           </Table>
         </BlurFade>}
     </div>
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-6"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Saved locally · Available in templates and sandboxes</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground sm:px-6"><span><strong className="font-medium text-foreground">{shown.length}</strong>{filtering ? ` of ${setups?.length || 0}` : ''} {setups?.length === 1 ? 'setup' : 'setups'}</span><span>Available in templates and sandboxes</span></div>
     {deleting && <Dialog open onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null) }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Delete “{deleting.name}”?</DialogTitle><DialogDescription>This deletes the setup and its egress policy. MCPs already installed in sandboxes stay, but lose access to the websites that policy allowed. Templates that use this setup need another setup before reuse.</DialogDescription></DialogHeader><ErrorMessage>{deleteError}</ErrorMessage><div className="flex justify-end gap-2"><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={deleteBusy} onClick={async () => {
       setDeleteBusy(true); setDeleteError('')
       try {
-        await api.deleteSetup(deleting.id, deleting.revision)
-        setSetups((current) => current.filter((entry) => entry.id !== deleting.id))
-        setSelected((current) => current?.id === deleting.id ? null : current)
+        await apiFor(deleting).deleteSetup(deleting.id, deleting.revision)
+        if(model)refresh(); else setSetups((current) => current.filter((entry) => resourceKey(entry) !== resourceKey(deleting)))
+        setSelected((current) => current && resourceKey(current) === resourceKey(deleting) ? null : current)
         setDeleting(null)
       } catch (e) { setDeleteError(e.message) } finally { setDeleteBusy(false) }
     }}>{deleteBusy && <Spinner />}Delete setup</Button></div></DialogContent></Dialog>}
-    {importing && <ImportSetup initialReview={importing.review} initialName={importing.name} onClose={() => setImporting(false)} onSaved={(saved) => { setImporting(false); refresh(); setNetwork(networkOutcome(saved)) }} />}
-    {network && <SetupNetworkDialog policy={network} onClose={() => setNetwork(null)} />}
-    {selected && <SetupDetail setup={selected} sandbox={sandbox} onPrepare={async () => { try { const review = await api.prepareSavedSetup(selected.id); setImporting({ review, name: selected.name + " (updated)" }); setSelected(null) } catch (e) { setError(e.message) } }} onUpdated={(updated) => { setSelected(updated); setSetups((current) => current.map((entry) => entry.id === updated.id ? updated : entry)) }} onClose={() => setSelected(null)} />}
+    {importing && <LocationProvider location={importing.location ?? location}><ImportSetup initialReview={importing.review} initialName={importing.name} onClose={() => setImporting(false)} onSaved={(saved, destination = importing.location ?? location) => {
+      setImporting(false)
+      if (!model && destination && (destination.context !== location?.context || destination.target !== location?.target)) {
+        window.dispatchEvent(new CustomEvent('openrod-navigate', { detail: { view: 'setups', location: destination } }))
+      } else { refresh(); setNetwork(networkOutcome(saved) ? { ...networkOutcome(saved), location: destination } : null) }
+    }} /></LocationProvider>}
+    {network && <LocationProvider location={network.location ?? location}><SetupNetworkDialog policy={network} onClose={() => setNetwork(null)} /></LocationProvider>}
+    {selected && <LocationProvider location={selected.location ?? location}><SetupDetail setup={selected} sandbox={sandbox} onPrepare={async () => { try { const review = await apiFor(selected).prepareSavedSetup(selected.id); setImporting({ review, name: selected.name + " (updated)", location:selected.location ?? location }); setSelected(null) } catch (e) { setError(e.message) } }} onUpdated={(updated) => { setSelected({...updated,location:selected.location}); if(model)refresh(); else setSetups((current) => current.map((entry) => entry.id === updated.id ? updated : entry)) }} onClose={() => setSelected(null)} /></LocationProvider>}
   </div>
 }
 
@@ -301,7 +329,34 @@ function ExtraHosts({ item, choice, disabled, onChange }) {
   </div>
 }
 
-function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My setup", initialJob = null }) {
+function ImportSetup(props) {
+  // Review tokens and preparations belong to their original gateway. Only a
+  // fresh import may choose a destination; retries keep their existing owner.
+  return props.initialReview || props.initialJob ? <ImportSetupForm {...props} /> : <NewSetupImport {...props} />
+}
+
+function NewSetupImport({ onClose, onSaved, ...props }) {
+  const { locations, refresh } = useInventory()
+  const [destination, setDestination] = React.useState(null)
+  const [pendingGateway, setPendingGateway] = React.useState(null)
+  React.useEffect(() => {
+    if (!pendingGateway) return
+    const connected = locations.find(item => item.gateway === pendingGateway && item.connected)
+    if (connected) { setDestination(connected); setPendingGateway(null) }
+  }, [pendingGateway, locations])
+  if (destination) return <LocationProvider location={destination}>
+    <ImportSetupForm {...props} onClose={onClose} onChangeLocation={() => setDestination(null)} onSaved={saved => onSaved(saved, destination)} />
+  </LocationProvider>
+  return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+    <DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-xl">
+      <LocationStep locations={locations} allowRemote subject="setup" connecting={Boolean(pendingGateway)}
+        onPick={id => { const selected = locations.find(item => (item.id ?? item.context) === id && item.connected); if (selected) setDestination(selected) }}
+        onConnected={job => { setPendingGateway(job.gateway); refresh() }} onCancel={onClose} />
+    </DialogContent>
+  </Dialog>
+}
+
+function ImportSetupForm({ onClose, onSaved, onChangeLocation, initialReview = null, initialName = "My setup", initialJob = null }) {
   const api = useApi()
   const location = useLocation()
   const [sources, setSources] = React.useState([])
@@ -364,6 +419,7 @@ function ImportSetup({ onClose, onSaved, initialReview = null, initialName = "My
     <DialogContent className="flex max-h-[90svh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
       <DialogHeader className="shrink-0 px-6 pb-4 pt-6 pr-12"><DialogTitle>{review ? 'Import setup' : scan ? 'Choose what to bring' : 'Bring my setup'}</DialogTitle><DialogDescription>{review ? 'Import downloads and checks your MCPs, then saves the setup.' : scan ? 'Select the MCPs and skills to import. Items found in more than one agent are listed once.' : 'Choose the agents to import MCPs and skills from.'}</DialogDescription></DialogHeader>
       <div className="min-h-0 space-y-5 overflow-y-auto px-6 pb-5">
+      <div className="flex items-center justify-between gap-2"><LocationBadge location={location} />{onChangeLocation && !jobId.current && <Button size="sm" variant="ghost" disabled={busy || preparing} onClick={onChangeLocation}>Change</Button>}</div>
       {!scan && !review && <>
         <div className="grid gap-2 sm:grid-cols-3">{SOURCES.map((s) => <button key={s.id} type="button" aria-pressed={sources.includes(s.id)} onClick={() => setSources((v) => v.includes(s.id) ? v.filter((x) => x !== s.id) : [...v, s.id])} className={`flex items-center gap-2 rounded-xl border px-3 py-4 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring ${sources.includes(s.id) ? 'border-ring bg-muted' : 'bg-card'}`}><span className="flex size-7 items-center justify-center rounded-lg border bg-muted/30"><img src={`/logos/agents/${s.logo}.svg`} alt="" className="size-4" /></span>{s.name}{sources.includes(s.id) && <Check className="ml-auto size-3.5" />}</button>)}</div>
       </>}

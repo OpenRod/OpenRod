@@ -4,7 +4,7 @@ export const locationLabel = (location) => location?.label ?? (location?.target 
 // can coincide on independent gateways.
 export const resourceKey = (record) => JSON.stringify([[record.location?.target ?? 'local', record.location?.context ?? ''], record.id ?? record.name])
 
-// Selecting a local gateway is a job; reload only after it has switched the context.
+// Selecting a local gateway is a job; continue only after the context switches.
 export async function connectLocalGateway(api, name, interval = 1000) {
   let job = await api.connect({ localGateway: name })
   while (job.status === 'working') {

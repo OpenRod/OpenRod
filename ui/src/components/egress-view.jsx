@@ -1,3 +1,10 @@
+import { egressRows,combinedEgressInventory } from '@/lib/egress-inventory'
+import { useLocationData } from '@/lib/location-data'
+import { LocationProvider } from '@/lib/location-context'
+import { LiveProvider } from '@/lib/live'
+import { PlacementBadge } from '@/components/placement-badge'
+import { LocationAction } from '@/components/location-action'
+import { resourceKey } from '@/lib/locations'
 import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
@@ -90,6 +97,11 @@ const BLOCK_COLS = "grid-cols-[minmax(0,1.6fr)_7.5rem_5rem_minmax(0,1fr)_13.5rem
 const BOX_COLS = "grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_8rem_5rem_1rem]"
 const POLICY_COLS = "grid-cols-[1rem_minmax(0,1.1fr)_4.5rem_minmax(0,1.5fr)_minmax(0,1fr)_7.5rem_5rem]"
 
+const LOCATION_DEST_COLS = "grid-cols-[minmax(0,2fr)_5.5rem_minmax(0,1fr)_8rem_7rem_5rem_1rem]"
+const LOCATION_BLOCK_COLS = "grid-cols-[minmax(0,1.6fr)_5.5rem_7.5rem_5rem_minmax(0,1fr)_13.5rem]"
+const LOCATION_BOX_COLS = "grid-cols-[minmax(0,1.2fr)_5.5rem_minmax(0,1.3fr)_8rem_5rem_1rem]"
+const LOCATION_POLICY_COLS = "grid-cols-[1rem_minmax(0,1.1fr)_5.5rem_4.5rem_minmax(0,1.5fr)_minmax(0,1fr)_7.5rem_5rem]"
+
 function DestinationRow({ d, total, onOpen }) {
   const [open, setOpen] = React.useState(false)
   const reduceMotion = useReducedMotion()
@@ -99,13 +111,14 @@ function DestinationRow({ d, total, onOpen }) {
   return (
     <li>
       <button onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={detailsId}
-        className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", open && "bg-muted/60", DEST_COLS)}>
+        className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", open && "bg-muted/60", d.location ? LOCATION_DEST_COLS : DEST_COLS)}>
         <span className="flex min-w-0 items-center gap-3">
           <HostTile host={d.host} className="size-6 text-[13px]" />
           <span className="min-w-0">
             <span className="block truncate font-mono text-[11px]" title={d.host}>{d.host}<span className="ml-2 text-faint">{[...d.ports].map((p) => `:${p}`).join(" ")}</span></span>
           </span>
         </span>
+        {d.location && <PlacementBadge location={d.location} />}
         <span className="flex flex-wrap gap-1">{sources.map((s) => <SourcePill key={s} source={s} />)}</span>
         <span className="text-[12px] text-muted-foreground">{d.access.size === 1 ? ACCESS_LABEL[[...d.access][0]] ?? [...d.access][0] : "Mixed"}</span>
         <span className="block"><Coverage n={d.sandboxes.size} total={total} /></span>
@@ -151,7 +164,7 @@ function DestinationRow({ d, total, onOpen }) {
 
 function BlockedRow({ b, onDecide }) {
   return (
-    <li className={cn("grid items-center gap-4 px-6 py-2", BLOCK_COLS)}>
+    <li className={cn("grid items-center gap-4 px-6 py-2", b.location ? LOCATION_BLOCK_COLS : BLOCK_COLS)}>
       <span className="flex min-w-0 items-center gap-3">
         <HostTile host={b.host} tone="denied" className="size-6 text-[13px]" />
         <span className="min-w-0">
@@ -159,12 +172,13 @@ function BlockedRow({ b, onDecide }) {
           <span className="block text-[11.5px] text-muted-foreground">:{b.port}{b.lastAt ? ` · ${relativeTime(b.lastAt)}` : ""}</span>
         </span>
       </span>
+      {b.location && <PlacementBadge location={b.location} />}
       <span className="text-[12px] tabular-nums">{plural(b.sandboxes.size, "sandbox", "sandboxes")}</span>
       <span className="text-[12px] tabular-nums text-red-600/90">{b.attempts}×</span>
       <span className="truncate font-mono text-[11.5px] text-muted-foreground">{[...b.programs].map(program).join(", ") || "-"}</span>
       <span className="flex items-center justify-end gap-1.5">
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--action)] px-2.5 text-[12px] font-medium text-[var(--action-foreground)] outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
+          <DropdownMenuTrigger disabled={b.location?.connected === false} className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--action)] px-2.5 text-[12px] font-medium text-[var(--action-foreground)] outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
             Allow<ChevronDown className="size-3 opacity-70" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
@@ -181,7 +195,7 @@ function BlockedRow({ b, onDecide }) {
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="sm" className="h-7 rounded-lg px-2.5 text-[12px] text-muted-foreground hover:text-red-700" onClick={() => onDecide("block-org", b)} title="Add to the shared blocked hosts">
+        <Button disabled={b.location?.connected === false} variant="ghost" size="sm" className="h-7 rounded-lg px-2.5 text-[12px] text-muted-foreground hover:text-red-700" onClick={() => onDecide("block-org", b)} title="Add to the shared blocked hosts">
           Block everywhere
         </Button>
       </span>
@@ -231,19 +245,21 @@ function RuleSelection({ label, checked, mixed = false, disabled, onChange }) {
     className="block size-4 cursor-pointer rounded border-border accent-[var(--action)] focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed" />
 }
 
-function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, onClearBlocked, selected, onSelect, onSelectAll, onDelete, deleting }) {
+function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, onClearBlocked, selected, onSelect, onSelectAll, onDelete, deleting, location, showHeader = true }) {
+  const columns = location ? LOCATION_POLICY_COLS : POLICY_COLS
+  const span = location ? "col-span-6" : "col-span-5"
   const blocked = org?.org?.blocked ?? []
   const matchingSelected = policies.filter((p) => selected.has(p.id)).length
   const allSelected = policies.length > 0 && matchingSelected === policies.length
   return (
     <>
-      <ColumnHead className={POLICY_COLS}><RuleSelection label="Select all matching network rules" checked={allSelected} mixed={matchingSelected > 0 && !allSelected} disabled={deleting || !policies.length} onChange={onSelectAll} /><span>Rule</span><span>Action</span><span>Destinations</span><span>Groups</span><span>Enforced</span><span className="text-right">Actions</span></ColumnHead>
+      {showHeader && <ColumnHead className={columns}><RuleSelection label="Select all matching network rules" checked={allSelected} mixed={matchingSelected > 0 && !allSelected} disabled={deleting || !policies.length} onChange={onSelectAll} /><span>Rule</span>{location && <span>Source</span>}<span>Action</span><span>Destinations</span><span>Groups</span><span>Enforced</span><span className="text-right">Actions</span></ColumnHead>}
       <ul className="divide-y divide-border/60">
         {blocked.length > 0 && (
-          <li className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", POLICY_COLS)}>
+          <li className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", columns)}>
             <span />
-            <button onClick={onEditBlocked} aria-label="Edit blocked everywhere" className="col-span-5 grid grid-cols-subgrid items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <span className="flex min-w-0 items-center gap-2.5"><ShieldOff aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">Blocked everywhere</span></span>
+            <button disabled={deleting} onClick={onEditBlocked} aria-label="Edit blocked everywhere" className={cn(span,"grid grid-cols-subgrid items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring")}>
+              <span className="flex min-w-0 items-center gap-2.5"><ShieldOff aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">Blocked everywhere</span></span>{location && <PlacementBadge location={location} />}
               <ActionPill action="block" />
               <Hosts hosts={blocked} />
               <span className="truncate text-xs text-muted-foreground">Every sandbox · beats every rule</span>
@@ -256,10 +272,10 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMember
           const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, groups: groupFor({ assignments }, s.name), setups: setupMembers?.[s.name] ?? [] }))
           const enforced = targets.filter((s) => s.status === "loaded" && s.rules.some((r) => r.key === `egress_${p.id}`)).length
           return (
-            <li key={p.id} className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", POLICY_COLS, selected.has(p.id) && "bg-accent/40")}>
+            <li key={p.id} className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", columns, selected.has(p.id) && "bg-accent/40")}>
               <RuleSelection label={`Select ${p.name}`} checked={selected.has(p.id)} disabled={deleting} onChange={() => onSelect(p.id)} />
-              <button onClick={() => onEdit(p)} disabled={deleting} aria-label={`Edit ${p.name}`} className="col-span-5 grid grid-cols-subgrid items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <span className="flex min-w-0 items-center gap-2.5"><ShieldCheck aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">{p.name}</span></span>
+              <button onClick={() => onEdit(p)} disabled={deleting} aria-label={`Edit ${p.name}`} className={cn(span,"grid grid-cols-subgrid items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring")}>
+                <span className="flex min-w-0 items-center gap-2.5"><ShieldCheck aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">{p.name}</span></span>{location && <PlacementBadge location={location} />}
                 <ActionPill action={p.action} />
                 <Hosts hosts={p.destinations} />
                 <span className="truncate text-xs text-muted-foreground">{p.appliesTo.everyone || p.appliesTo.sandboxes.length || !p.appliesTo.groups.length ? <span className="text-amber-700" title={`Current scope: ${appliesToText(p, groups) || "none"}`}>Assign a group</span> : appliesToText(p, groups)}</span>
@@ -274,7 +290,7 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMember
   )
 }
 
-function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, onClearBlocked, forSandbox, onClearSandbox }) {
+function FleetSummary({ model, fleet, org, events, onOpen, onOpenGlobal, onDecide, onNavigate, onRefresh, onEditPolicy, onAddPolicy, onEditBlocked, onClearBlocked, forSandbox, onClearSandbox }) {
   const api = useApi()
   const [selected, setSelected] = React.useState(() => new Set())
   const [deleteTargets, setDeleteTargets] = React.useState(null)
@@ -300,59 +316,14 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
   const points = React.useMemo(() => bucketEgress(events, 15, now), [events, now])
   const sandboxes = fleet.sandboxes
   const total = sandboxes.length
-  const policies = org?.policies ?? []
+  const policies = model ? model.sources.flatMap(source=>(source.data?.org?.policies ?? []).map(policy=>({...policy,location:source.location}))) : org?.policies ?? []
   const groups = org?.groups ?? []
+  const policyKey = policy => model ? resourceKey(policy) : policy.id
 
   const { destinations, blocked, perSandbox } = React.useMemo(() => {
-    const dest = new Map()
-    const allowedBy = new Map()
-    const perSandbox = new Map()
-    for (const s of sandboxes) {
-      const hosts = new Set()
-      const counts = {}
-      for (const r of s.rules) {
-        const src = sourceOf(r.key)
-        counts[src] = (counts[src] ?? 0) + 1
-        for (const e of r.endpoints) {
-          if (e.blocked) continue
-          hosts.add(e.host)
-          const d = dest.get(e.host) ?? { host: e.host, sources: new Set(), access: new Set(), ports: new Set(), sandboxes: new Set(), grants: [], hits: 0, hitsBySandbox: new Map() }
-          d.sources.add(src); d.access.add(e.access); e.ports.forEach((p) => d.ports.add(p)); d.sandboxes.add(s.name)
-          let grant = d.grants.find((g) => g.sandbox === s.name && g.key === r.key)
-          if (!grant) {
-            grant = { sandbox: s.name, key: r.key, source: src, access: [], ports: [] }
-            d.grants.push(grant)
-          }
-          grant.access.push(e.access)
-          grant.ports.push(...e.ports)
-          dest.set(e.host, d)
-        }
-      }
-      allowedBy.set(s.name, hosts)
-      perSandbox.set(s.name, { counts, blocked: 0 })
-    }
-    const block = new Map()
-    for (const e of events) {
-      if (e.kind !== "audit" || !e.verdict) continue
-      const host = hostOf(e.destination)
-      if (!host || isIp(host)) continue
-      if (e.verdict === "allowed") { const d = dest.get(host); if (d) { d.hits += 1; d.hitsBySandbox.set(e.sandbox, (d.hitsBySandbox.get(e.sandbox) ?? 0) + 1) }; continue }
-      if (e.verdict !== "denied" || allowedBy.get(e.sandbox)?.has(host)) continue
-      const b = block.get(host) ?? { host, port: portOf(e.destination), sandboxes: new Set(), attempts: 0, programs: new Set(), lastAt: null }
-      b.attempts += 1; b.sandboxes.add(e.sandbox)
-      if (e.binary) b.programs.add(e.binary)
-      if (e.at && (!b.lastAt || e.at > b.lastAt)) b.lastAt = e.at
-      block.set(host, b)
-      const p = perSandbox.get(e.sandbox); if (p) p.blocked += 1
-    }
-    // Hosts a block already decides are not waiting for anyone.
-    const decided = blockPatterns([...(org?.org?.blocked ?? []), ...(org?.policies ?? []).filter((p) => p.action === "block").flatMap((p) => p.destinations)])
-    return {
-      destinations: [...dest.values()].sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.hits - a.hits || a.host.localeCompare(b.host)),
-      blocked: [...block.values()].filter((b) => !decided.some((pattern) => hostMatches(pattern, b.host))).sort((a, b) => b.sandboxes.size - a.sandboxes.size || b.attempts - a.attempts),
-      perSandbox,
-    }
-  }, [sandboxes, events, org])
+    if(model)return combinedEgressInventory(model.sources)
+    return egressRows(sandboxes,events,org)
+  }, [sandboxes, events, org, model?.sources])
 
   const enforced = sandboxes.filter((s) => s.status === "loaded").length
   const needle = query.trim().toLowerCase()
@@ -364,17 +335,18 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
   // Opened for one sandbox: only the policies that reach it.
   const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, groups: groupFor(org, forSandbox), setups: org?.setupMembers?.[forSandbox] ?? [] })
-  const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, groups)].join(" ").toLowerCase().includes(needle))
-  const selectedPolicies = policies.filter((p) => selected.has(p.id))
-  const matchingSelected = filteredPolicies.filter((p) => selected.has(p.id)).length
+  const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, model ? model.sources.find(source=>source.location.id===p.location.id)?.data?.org?.groups ?? [] : groups)].join(" ").toLowerCase().includes(needle))
+  const selectedPolicies = policies.filter((p) => selected.has(policyKey(p)))
+  const matchingSelected = filteredPolicies.filter((p) => selected.has(policyKey(p))).length
   function toggleSelected(id) {
     setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }
   function toggleMatching() {
     setSelected((current) => {
       const next = new Set(current)
-      const all = filteredPolicies.every((p) => current.has(p.id))
-      for (const p of filteredPolicies) { if (all) next.delete(p.id); else next.add(p.id) }
+      const eligible = filteredPolicies.filter(policy=>policy.location?.connected !== false)
+      const all = eligible.every((p) => current.has(policyKey(p)))
+      for (const p of eligible) { if (all) next.delete(policyKey(p)); else next.add(policyKey(p)) }
       return next
     })
   }
@@ -383,7 +355,12 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
     deletionInFlight.current = true
     setDeleting(true); setDeleteErrors([])
     try {
-      const result = await deleteNetworkPolicies(deleteTargets, (id) => api.deletePolicy(id))
+      const targets = model ? deleteTargets.map(policy=>({...policy,id:policyKey(policy)})) : deleteTargets
+      const result = await deleteNetworkPolicies(targets, (id) => {
+        if(!model)return api.deletePolicy(id)
+        const policy=deleteTargets.find(policy=>policyKey(policy)===id)
+        return model.apiFor(policy.location).deletePolicy(policy.id)
+      })
       setSelected((current) => {
         const next = new Set(current)
         result.deleted.forEach((id) => next.delete(id))
@@ -438,7 +415,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
       {view === "rules" && selectedPolicies.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent/30 px-6 py-2">
         <span role="status" className="mr-auto text-xs"><strong>{selectedPolicies.length}</strong> selected{selectedPolicies.length > matchingSelected && <span className="text-muted-foreground"> · {selectedPolicies.length - matchingSelected} outside current filters</span>}</span>
         <Button variant="ghost" size="sm" disabled={deleting} onClick={() => setSelected(new Set())}>Clear selection</Button>
-        <Button variant="destructive" size="sm" disabled={deleting} onClick={() => setDeleteTargets([...selectedPolicies])}><Trash2 className="size-3.5" />{deleting ? "Deleting…" : "Delete selected"}</Button>
+        <Button variant="destructive" size="sm" disabled={deleting || selectedPolicies.some(policy=>policy.location?.connected === false)} onClick={() => setDeleteTargets([...selectedPolicies])}><Trash2 className="size-3.5" />{deleting ? "Deleting…" : "Delete selected"}</Button>
       </div>}
       {sandboxes.some((s) => s.source === "global") && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-50/60 px-6 py-2 text-xs text-amber-800">
         <AlertTriangle className="size-3.5" /><span className="mr-auto">A global policy overrides every sandbox's network rules.</span>
@@ -449,29 +426,34 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
         <ul className="mt-1 max-h-28 overflow-auto">{deleteErrors.map((error) => <li key={error.id}><strong className="text-foreground">{error.name}</strong>: {error.message}</li>)}</ul>
       </Notice>}
       <div ref={scroll} tabIndex={0} role="region" aria-label="Egress inventory results" className="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-        {count === 0 && !(view === "rules" && !filtering && org?.org?.blocked?.length) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
+        {count === 0 && !(view === "rules" && !filtering && (org?.org?.blocked?.length || model?.sources.some(source=>source.data?.org?.org?.blocked?.length))) ? <div className="py-20 text-center"><Globe2 className="mx-auto mb-3 size-6 text-muted-foreground" /><p className="text-sm">{filtering ? "No matching results" : view === "rules" ? (forSandbox ? `No rule applies to ${forSandbox} yet` : "No network rules yet") : view === "blocked" ? "No blocked hosts to review" : view === "sandboxes" ? "No sandboxes yet" : "No open destinations"}</p><p className="mt-2 text-xs text-muted-foreground">{!filtering && view === "rules" ? "Sandboxes are locked down: nothing leaves them until a rule allows it." : !filtering && view === "destinations" ? "Destinations appear when a sandbox policy allows access." : !filtering && view === "blocked" ? "Blocked connection attempts will appear here." : ""}</p>{filtering ? <Button variant="outline" className="mt-4" onClick={clear}>Clear filters</Button> : view === "rules" && <Button className="mt-4 bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={onAddPolicy}><Plus />Add rule</Button>}</div> : (
           <div className="min-w-[960px] bg-card">
-            {view === "rules" && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} setupMembers={org?.setupMembers} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} onClearBlocked={onClearBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
+            {view === "rules" && model && model.sources.map((source,index)=>{
+              const ownOrg=source.data?.org,ownPolicies=filteredPolicies.filter(policy=>policy.location.id===source.location.id)
+              return <PolicyRows key={source.location.id} location={source.location} showHeader={index===0} policies={ownPolicies} org={filtering ? null : ownOrg} sandboxes={source.data?.fleetPolicy?.sandboxes ?? []} groups={ownOrg?.groups ?? []} assignments={ownOrg?.assignments} setupMembers={ownOrg?.setupMembers} onEdit={onEditPolicy} onEditBlocked={()=>onEditBlocked(source.location)} onClearBlocked={()=>onClearBlocked(source.location)} selected={new Set(ownPolicies.filter(policy=>selected.has(policyKey(policy))).map(policy=>policy.id))} onSelect={id=>toggleSelected(policyKey(ownPolicies.find(policy=>policy.id===id)))} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting || !source.location.connected} />
+            })}
+            {view === "rules" && !model && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} setupMembers={org?.setupMembers} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} onClearBlocked={onClearBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
             {view === "destinations" && <>
-              <ColumnHead className={DEST_COLS}><span>Destination</span><span>Source</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
-              <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={d.host} d={d} total={total} onOpen={onOpen} />)}</ul>
+              <ColumnHead className={model ? LOCATION_DEST_COLS : DEST_COLS}><span>Destination</span>{model && <span>Source</span>}<span>{model ? "Granted by" : "Source"}</span><span>Access</span><span>Sandboxes</span><span className="text-right">Requests</span><span /></ColumnHead>
+              <ul className="divide-y divide-border/60">{filteredDestinations.slice(0, limit).map((d) => <DestinationRow key={resourceKey({name:d.host,location:d.location})} d={d} total={model ? model.sources.find(source=>source.location.id===d.location.id)?.data?.fleetPolicy?.sandboxes?.length ?? 0 : total} onOpen={name=>{if(d.location?.connected !== false)onOpen(name,d.location)}} />)}</ul>
             </>}
             {view === "blocked" && <>
-              <ColumnHead className={BLOCK_COLS}><span>Destination</span><span>Sandboxes</span><span>Attempts</span><span>Program</span><span className="text-right">Actions</span></ColumnHead>
-              <ul className="divide-y divide-border/60">{filteredBlocked.slice(0, limit).map((b) => <BlockedRow key={b.host} b={b} onDecide={onDecide} />)}</ul>
+              <ColumnHead className={model ? LOCATION_BLOCK_COLS : BLOCK_COLS}><span>Destination</span>{model && <span>Source</span>}<span>Sandboxes</span><span>Attempts</span><span>Program</span><span className="text-right">Actions</span></ColumnHead>
+              <ul className="divide-y divide-border/60">{filteredBlocked.slice(0, limit).map((b) => <BlockedRow key={resourceKey({name:b.host,location:b.location})} b={b} onDecide={(kind,row)=>{if(b.location?.connected !== false)onDecide(kind,row,b.location)}} />)}</ul>
             </>}
             {view === "sandboxes" && <>
-              <ColumnHead className={BOX_COLS}><span>Sandbox</span><span>Rules by source</span><span>Policy</span><span className="text-right">Blocked</span><span /></ColumnHead>
+              <ColumnHead className={model ? LOCATION_BOX_COLS : BOX_COLS}><span>Sandbox</span>{model && <span>Source</span>}<span>Rules by source</span><span>Policy</span><span className="text-right">Blocked</span><span /></ColumnHead>
           <ul className="divide-y divide-border/70">
             {filteredBoxes.slice(0, limit).map((s) => {
-              const info = perSandbox.get(s.name) ?? { counts: {}, blocked: 0 }
+              const info = perSandbox.get(model ? resourceKey({name:s.name,location:s.location}) : s.name) ?? { counts: {}, blocked: 0 }
               return (
-                <li key={s.name}>
-                  <button onClick={() => onOpen(s.name)} className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", BOX_COLS)}>
+                <li key={resourceKey(s)}>
+                  <button disabled={s.location?.connected === false} onClick={() => onOpen(s.name,s.location)} className={cn("grid min-h-10 w-full items-center gap-4 px-6 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60", model ? LOCATION_BOX_COLS : BOX_COLS)}>
                     <span className="flex min-w-0 items-center gap-2.5">
                       <span className={cn("size-2 shrink-0 rounded-[3px]", styleOf(s.phase).cell)} aria-hidden="true" />
                       <span className="truncate font-mono text-xs">{s.name}</span>
                     </span>
+                    {s.location && <PlacementBadge location={s.location} />}
                     <span className="items-center gap-3 flex">
                       {SOURCE_ORDER.filter((k) => info.counts[k]).map((k) => (
                         <span key={k} className="flex items-center gap-1.5 text-[12px] tabular-nums" title={SOURCE[k].label}><span className={cn("size-1.5 rounded-full", SOURCE[k].swatch)} />{info.counts[k]}</span>
@@ -502,7 +484,7 @@ function FleetSummary({ fleet, org, events, onOpen, onOpenGlobal, onDecide, onNa
             <AlertDialogTitle>Delete {plural(deleteTargets?.length ?? 0, "network rule")}?</AlertDialogTitle>
             <AlertDialogDescription>Removes these rules and updates the affected sandboxes. Deleting an allow rule can remove access; deleting a block rule can permit access allowed by other rules. Each sandbox must keep at least one network rule across its groups.</AlertDialogDescription>
           </AlertDialogHeader>
-          <ul aria-label="Network rules to delete" className="max-h-48 overflow-auto rounded-md border border-border p-3 text-xs">{deleteTargets?.map((p) => <li key={p.id} className="break-all py-1">{p.name}</li>)}</ul>
+          <ul aria-label="Network rules to delete" className="max-h-48 overflow-auto rounded-md border border-border p-3 text-xs">{deleteTargets?.map((p) => <li key={policyKey(p)} className="flex items-center gap-2 break-all py-1">{p.location && <PlacementBadge location={p.location} />}{p.name}</li>)}</ul>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" disabled={deleting || !deleteTargets?.length} onClick={deleteSelected}>{deleting ? "Deleting…" : "Delete rules"}</AlertDialogAction>
@@ -918,18 +900,19 @@ const takePolicyHandoff = () => {
   try { const d = JSON.parse(sessionStorage.getItem(POLICY_HANDOFF) ?? "null"); sessionStorage.removeItem(POLICY_HANDOFF); return d } catch { return null }
 }
 
-export function EgressView(props) {
+export function EgressView({combined,...props}) {
   const location = useLocation()
+  if(combined)return <CombinedEgressView {...props} />
   return <ScopedEgressView key={location?.id ?? location?.context ?? "default"} {...props} />
 }
 
-function ScopedEgressView({ onNavigate: navigate }) {
+function ScopedEgressView({ onNavigate: navigate, initialScope, initialGlobal = false }) {
   const api = useApi()
   const location = useLocation()
   const onNavigate = (view) => navigate(view, location)
   const live = useLive()
-  const [scope, setScope] = React.useState(null)
-  const [showGlobal, setShowGlobal] = React.useState(false)
+  const [scope, setScope] = React.useState(initialScope ?? null)
+  const [showGlobal, setShowGlobal] = React.useState(initialGlobal)
   // Other pages hand over one sandbox to show the rules that reach it.
   const [forSandbox, setForSandbox] = React.useState(() => {
     try { const s = sessionStorage.getItem(SANDBOX_HANDOFF); sessionStorage.removeItem(SANDBOX_HANDOFF); return s } catch { return null }
@@ -1085,4 +1068,45 @@ function ScopedEgressView({ onNavigate: navigate }) {
       </AlertDialog>
     </div>
   )
+}
+
+function CombinedEgressView({onNavigate,requestedLocation}) {
+  const model=useLocationData(['fleetPolicy','org','activity'])
+  const [editor,setEditor]=React.useState(null)
+  const [creating,setCreating]=React.useState(false)
+  const [detail,setDetail]=React.useState(null)
+  const [blocked,setBlocked]=React.useState(null)
+  const [handoff,setHandoff]=React.useState(takePolicyHandoff)
+  React.useEffect(()=>{const take=()=>setHandoff(takePolicyHandoff());window.addEventListener(POLICY_HANDOFF,take);return()=>window.removeEventListener(POLICY_HANDOFF,take)},[])
+  React.useEffect(()=>{
+    if(!handoff || model.loading)return
+    const owner=handoff.location ?? requestedLocation ?? model.locations.find(location=>location.connected && !location.remote)
+    const org=model.sources.find(source=>source.location.id===owner?.id)?.data?.org
+    if(!owner?.connected || !org)return
+    const initial=handoff.new ? newPolicy({appliesTo:{everyone:false,groups:[],sandboxes:[],...handoff.new.appliesTo}}) : org.policies.find(policy=>policy.id===handoff.edit)
+    if(initial){setEditor({initial,location:owner});setHandoff(null)}
+  },[handoff,model.sources,model.loading,requestedLocation])
+  React.useEffect(()=>{
+    let name,allow
+    try {name=sessionStorage.getItem(SANDBOX_HANDOFF);sessionStorage.removeItem(SANDBOX_HANDOFF);allow=JSON.parse(sessionStorage.getItem(ALLOW_HANDOFF) ?? 'null')}catch{}
+    if(name || allow?.sandbox){const owner=requestedLocation;if(owner?.connected)setDetail({location:owner,name:name ?? allow.sandbox})}
+  },[requestedLocation])
+  const sourceFor=location=>model.sources.find(source=>source.location.id===location?.id)
+  const boxes=model.sources.flatMap(source=>(source.data?.fleetPolicy?.sandboxes ?? []).map(box=>({...box,location:source.location})))
+  const events=model.sources.flatMap(source=>source.data?.activity?.events ?? [])
+  function policyDialog(location,initial,onClose) {
+    const source=sourceFor(location),org=source?.data?.org
+    return <LocationProvider location={location}><PolicyDialog open onOpenChange={open=>{if(!open)onClose()}} initial={initial} groups={org?.groups ?? []} sandboxes={(source?.data?.fleetPolicy?.sandboxes ?? []).map(box=>box.name)} assignments={org?.assignments ?? {}} setupMembers={org?.setupMembers ?? {}} knownPrograms={[...new Set((source?.data?.activity?.events ?? []).map(event=>event.binary).filter(Boolean))]} onGroupCreated={model.refresh} onSaved={()=>{model.refresh();toast.success('Saved rule')}} /></LocationProvider>
+  }
+  if(model.loading && !model.sources.length)return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading egress…</p>
+  return <>
+    <FleetSummary model={model} fleet={{sandboxes:boxes}} events={events} org={null} onRefresh={model.refresh} onNavigate={onNavigate} onOpen={(name,location)=>setDetail({name,location})} onOpenGlobal={()=>setCreating('global')} onEditPolicy={initial=>setEditor({initial,location:initial.location})} onAddPolicy={()=>setCreating({initial:newPolicy()})} onEditBlocked={location=>setBlocked({location,org:sourceFor(location)?.data?.org?.org})} onClearBlocked={location=>setBlocked({location,org:{...sourceFor(location)?.data?.org?.org,blocked:[]}})} onDecide={(kind,row,location)=>{
+      if(kind.startsWith('allow')) {const org=sourceFor(location)?.data?.org;setEditor({location,initial:newPolicy({name:row.host,destinations:[row.host],appliesTo:{everyone:false,groups:kind==='allow-one'?groupFor(org,[...row.sandboxes][0]):[],sandboxes:[]}})})}
+      else {const org=sourceFor(location)?.data?.org?.org;setBlocked({location,org:{...org,blocked:[...(org?.blocked ?? []),row.host]}})}
+    }} />
+    {creating && <LocationAction onClose={()=>setCreating(false)}>{(location,onClose)=>creating==='global' ? <Sheet open onOpenChange={open=>{if(!open)onClose()}}><SheetContent className="overflow-auto sm:max-w-4xl"><SheetHeader><SheetTitle>Global policy</SheetTitle><SheetDescription><PlacementBadge location={location} /></SheetDescription></SheetHeader><LocationProvider location={location}><LiveProvider><ScopedEgressView onNavigate={onNavigate} initialGlobal /></LiveProvider></LocationProvider></SheetContent></Sheet> : policyDialog(location,creating.initial,onClose)}</LocationAction>}
+    {editor && policyDialog(editor.location,editor.initial,()=>setEditor(null))}
+    {blocked && <LocationProvider location={blocked.location}><BlockedHostsDialog open onOpenChange={open=>{if(!open)setBlocked(null)}} org={blocked.org ?? {...sourceFor(blocked.location)?.data?.org?.org,...(blocked.clear?{blocked:[]}: {})}} onSaved={()=>{model.refresh();toast.success('Saved blocked hosts')}} /></LocationProvider>}
+    {detail && <Sheet open onOpenChange={open=>{if(!open){setDetail(null);model.refresh()}}}><SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-5xl"><SheetHeader className="shrink-0 border-b px-6 py-4"><SheetTitle>{detail.name}</SheetTitle><SheetDescription><PlacementBadge location={detail.location} /></SheetDescription></SheetHeader><div className="min-h-0 flex-1"><LocationProvider location={detail.location}><LiveProvider><ScopedEgressView onNavigate={onNavigate} initialScope={detail.name} /></LiveProvider></LocationProvider></div></SheetContent></Sheet>}
+  </>
 }

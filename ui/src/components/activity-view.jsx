@@ -1,3 +1,8 @@
+import { useLocationData } from '@/lib/location-data'
+import { LocationApiProvider } from '@/lib/location-context'
+import { combinedActivityApi } from '@/lib/combined-activity'
+import { PlacementBadge } from '@/components/placement-badge'
+import { LocationAction } from '@/components/location-action'
 import { SelectField } from "@/components/ui/select-field"
 import * as React from "react"
 import { ArrowDown, ArrowUp, Check, Copy, Filter, Pause, Play, X, SlidersHorizontal, Download, Webhook, ChevronDown, Trash2 } from "lucide-react"
@@ -23,7 +28,7 @@ import { activityKey, activityRow, filterActivity } from "@/lib/activity-invento
 import { Notice } from "@/components/notice"
 
 const PAGE_SIZE = 50
-const COLUMNS = [{ id: 'time', label: 'Time', width: 150 }, { id: 'severity', label: 'Security severity', width: 150 }, { id: 'logLevel', label: 'Log level', width: 110 }, { id: 'sandbox', label: 'Sandbox', width: 125 }, { id: 'agent', label: 'Observed agent', width: 145 }, { id: 'action', label: 'Activity', width: 200 }, { id: 'verdict', label: 'Decision', width: 125 }, { id: 'destination', label: 'Target', width: 260 }]
+const COLUMNS = [{ id: 'time', label: 'Time', width: 150 }, { id: 'severity', label: 'Security severity', width: 150 }, { id: 'logLevel', label: 'Log level', width: 110 }, { id: 'source', label: 'Source', width: 110 }, { id: 'sandbox', label: 'Sandbox', width: 125 }, { id: 'agent', label: 'Observed agent', width: 145 }, { id: 'action', label: 'Activity', width: 200 }, { id: 'verdict', label: 'Decision', width: 125 }, { id: 'destination', label: 'Target', width: 260 }]
 const AGENT_LABELS = Object.fromEntries(AGENTS.map((agent) => [agent.name, { name: agent.name, logo: `/logos/agents/${agent.logo}.svg` }]))
 const RANGE = { all: 'Available history', 15: 'Last 15 minutes', 60: 'Last hour', 1440: 'Last 24 hours', custom: 'Custom range' }
 const control = 'h-8 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -72,17 +77,28 @@ function download(events, context, format) {
   link.href = url; link.download = format === 'ocsf' ? 'openshell-activity-ocsf.json' : 'openshell-activity.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function ActivityView() {
+function CombinedActivityView() {
+  const base = useApi()
+  const model = useLocationData([])
+  const locations = React.useRef(model.locations); locations.current = model.locations
+  const signature = JSON.stringify(model.locations.map(item=>[item.id,item.connected]))
+  const api = React.useMemo(()=>combinedActivityApi(base,()=>locations.current,model.apiFor),[base,model.apiFor])
+  if(model.inventory.loading)return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading activity…</p>
+  return <LocationApiProvider api={api}><ScopedActivityView combined sourceRevision={signature} /></LocationApiProvider>
+}
+
+export function ActivityView({combined}) {
   const location = useLocation()
+  if(combined)return <CombinedActivityView />
   return <ScopedActivityView key={location?.id ?? location?.context ?? "default"} />
 }
 
-function ScopedActivityView() {
+function ScopedActivityView({combined,sourceRevision}) {
   const api = useApi()
   const location = useLocation()
   const live = useDemoFleet(useLive())
   const [initial] = React.useState(readInvestigation)
-  const [visibleColumns, setVisibleColumns] = React.useState(['time', 'sandbox', 'agent', 'action', 'verdict', 'destination'])
+  const [visibleColumns, setVisibleColumns] = React.useState(['time', 'source', 'sandbox', 'agent', 'action', 'verdict', 'destination'])
   const columns = COLUMNS.filter((c) => visibleColumns.includes(c.id))
   const [saved, setSaved] = React.useState(readSaved)
   const [viewName, setViewName] = React.useState('')
@@ -111,7 +127,7 @@ function ScopedActivityView() {
   const investigation = { query: deferredQuery, direction, sandboxes, verdicts, agents, filters, range, from: from && Number.isFinite(Date.parse(from)) ? new Date(from).toISOString() : from, to: to && Number.isFinite(Date.parse(to)) ? new Date(to).toISOString() : to, sort }
   const pageQuery = JSON.stringify(investigation)
   const [demoPagination, setDemoPagination] = React.useState({ query: pageQuery, page: 0 })
-  const history = useActivityHistory({ ...investigation, limit: PAGE_SIZE }, { paused: Boolean(held), demo: live.demo, activityRevision: live.activityRevision })
+  const history = useActivityHistory({ ...investigation, limit: PAGE_SIZE }, { paused: Boolean(held), demo: live.demo, activityRevision: combined ? `${live.activityRevision}:${sourceRevision}` : live.activityRevision })
   React.useEffect(() => { setChecked(new Set()); setSelected(null) }, [live.activityRevision])
   React.useEffect(() => { setChecked(new Set()) }, [deferredQuery, direction, sandboxes, verdicts, agents, filters, range, from, to])
   async function reviewDeletion(mode, ids) {
@@ -153,6 +169,7 @@ function ScopedActivityView() {
     setExporting(true)
     try {
       if (live.demo) { download(filterActivity(rows, { ...exportQuery, now: anchor }).map((r) => r.event), { ...exportQuery, demo: true }, exportFormat); setExportOptions(null); return }
+      if(combined) { const result=await api.activity({...exportQuery,exportAll:true}); download(result.events.map(({originalId,id,...event})=>({...event,id:originalId})),exportQuery,exportFormat);setExportOptions(null);return }
       const link = document.createElement('a')
       link.href = api.url("/activity/export", { format: exportFormat, query: JSON.stringify(exportQuery), context: await api.contextKey(), ...(location ? { location: "1" } : {}) })
       link.download = exportFormat === 'ocsf' ? 'openshell-activity-ocsf.json' : 'openshell-activity.json'
@@ -239,7 +256,7 @@ function ScopedActivityView() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {(history.error || live.historyError) && !live.demo && <Notice id="activity:history-error" tone="error" title="History unavailable" actions={<Button size="xs" variant="outline" onClick={history.refresh}>Retry</Button>}>{history.error || live.historyError}</Notice>}
+      {(history.error || (!combined && live.historyError)) && !live.demo && <Notice id="activity:history-error" tone="error" title="History unavailable" actions={<Button size="xs" variant="outline" onClick={history.refresh}>Retry</Button>}>{history.error || (!combined && live.historyError)}</Notice>}
       {range === 'custom' && <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs"><label className="flex items-center gap-2">From<input type="datetime-local" aria-label="From time" className={control} value={from} onInput={(e) => change(setFrom)(e.currentTarget.value)} /></label><label className="flex items-center gap-2">To<input type="datetime-local" aria-label="To time" className={control} value={to} onInput={(e) => change(setTo)(e.currentTarget.value)} /></label><span className="text-muted-foreground">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>{invalidRange && <span role="alert" className="text-red-600">Choose a start or end time; the end must follow the start.</span>}</div>}
       {Boolean(filtering) && <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-6 py-2">{chips.map((chip) => <button key={chip.label} onClick={chip.clear} title={`Remove ${chip.label}`} className="flex max-w-72 items-center gap-2 rounded border border-border bg-muted/40 px-2 py-1 text-[11px]"><span className="truncate">{chip.label}</span><X className="size-3 shrink-0" /></button>)}<Button size="xs" variant="ghost" onClick={clear}>Clear all</Button></div>}
       <div className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-6 py-2 text-[11px] text-muted-foreground">
@@ -253,8 +270,8 @@ function ScopedActivityView() {
       <div ref={virtual.ref} onScroll={(e) => { virtual.onScroll(e); if (e.currentTarget.scrollTop > 0) hold() }} tabIndex={0} role="region" aria-label="Activity events" className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         <table style={{ minWidth: columns.reduce((sum, c) => sum + c.width, live.demo ? 0 : 40) }} className="w-full table-fixed border-separate border-spacing-0 text-xs" aria-label="Activity" aria-rowcount={shown.length + 1}>
           <colgroup>{!live.demo && <col style={{ width: 52 }} />}{columns.map((c) => <col key={c.id} style={{ width: c.width }} />)}</colgroup>
-          <thead className="sticky top-0 z-10 bg-muted"><tr>{!live.demo && <th scope="col" className="h-10 border-b border-border pr-3 pl-4 text-left sm:pl-6"><input type="checkbox" aria-label="Select logs on this page" disabled={!shown.length || shown.length > 5000} checked={shown.length > 0 && shown.every((row) => checked.has(row.key))} ref={(node) => { if (node) node.indeterminate = shown.some((row) => checked.has(row.key)) && !shown.every((row) => checked.has(row.key)) }} onChange={(e) => { hold(); setChecked(e.target.checked ? new Set(shown.map((row) => row.key)) : new Set()) }} /></th>}{columns.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'} className="h-10 border-b border-border px-3 text-left font-medium text-muted-foreground"><div className="flex items-center gap-1"><button className="flex h-9 flex-1 items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => change(setSort)({ key: c.id, direction: sort.key === c.id && sort.direction === 'asc' ? 'desc' : 'asc' })}>{c.label}{sort.key === c.id && (sort.direction === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>
-            <Popover><PopoverTrigger aria-label={`Filter ${c.label}`} className={`rounded p-1 hover:bg-accent ${(c.id === 'time' ? range !== 'all' : c.id === 'sandbox' ? sandboxes.length : c.id === 'verdict' ? verdicts.length : c.id === 'agent' ? agents.length || filters.agent?.value : filters[c.id]?.value) ? 'bg-accent text-foreground' : ''}`}><Filter className="size-3" /></PopoverTrigger><PopoverContent align="start">
+          <thead className="sticky top-0 z-10 bg-muted"><tr>{!live.demo && <th scope="col" className="h-10 border-b border-border pr-3 pl-4 text-left sm:pl-6"><input type="checkbox" aria-label="Select logs on this page" disabled={!shown.length || shown.length > 5000} checked={shown.length > 0 && shown.every((row) => checked.has(row.key))} ref={(node) => { if (node) node.indeterminate = shown.some((row) => checked.has(row.key)) && !shown.every((row) => checked.has(row.key)) }} onChange={(e) => { hold(); setChecked(e.target.checked ? new Set(shown.filter(row=>row.event.location?.connected !== false).map((row) => row.key)) : new Set()) }} /></th>}{columns.map((c) => <th key={c.id} scope="col" aria-sort={sort.key === c.id ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'} className="h-10 border-b border-border px-3 text-left font-medium text-muted-foreground"><div className="flex items-center gap-1"><button className="flex h-9 flex-1 items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={c.id === "source"} onClick={() => change(setSort)({ key: c.id, direction: sort.key === c.id && sort.direction === 'asc' ? 'desc' : 'asc' })}>{c.label}{sort.key === c.id && (sort.direction === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}</button>
+            {c.id !== "source" && <Popover><PopoverTrigger aria-label={`Filter ${c.label}`} className={`rounded p-1 hover:bg-accent ${(c.id === 'time' ? range !== 'all' : c.id === 'sandbox' ? sandboxes.length : c.id === 'verdict' ? verdicts.length : c.id === 'agent' ? agents.length || filters.agent?.value : filters[c.id]?.value) ? 'bg-accent text-foreground' : ''}`}><Filter className="size-3" /></PopoverTrigger><PopoverContent align="start">
               <p className="text-xs font-medium">Filter {c.label.toLowerCase()}</p>
               {c.id === 'agent' ? <div role="group" aria-label="Observed agents" className="max-h-64 overflow-y-auto">
                 <div className="mb-1 flex items-center justify-between px-2 text-[11px] text-muted-foreground"><span>{agents.length ? `${agents.length} selected` : 'All agents'}</span><button className="underline" onClick={() => { hold(); setAgents([]); setFilters(({ agent, ...rest }) => rest) }}>Clear</button></div>
@@ -267,14 +284,14 @@ function ScopedActivityView() {
                 <SelectField aria-label={`${c.label} match mode`} className={control} value={filters[c.id]?.mode ?? 'contains'} onChange={(e) => change(setFilters)({ ...filters, [c.id]: { value: filters[c.id]?.value ?? '', mode: e.target.value } })}><option value="equals">Equals</option><option value="contains">Contains</option><option value="excludes">Excludes</option></SelectField>
                 <Input aria-label={`${c.label} filter value`} placeholder={`Filter ${c.label.toLowerCase()}…`} value={filters[c.id]?.value ?? ''} onChange={(e) => change(setFilters)({ ...filters, [c.id]: { mode: filters[c.id]?.mode ?? 'contains', value: e.target.value } })} className="h-8 text-xs" />
               </>}
-            </PopoverContent></Popover>
+            </PopoverContent></Popover>}
           </div></th>)}</tr></thead>
           <tbody>
             {virtual.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={columns.length + (live.demo ? 0 : 1)} style={{ height: virtual.paddingTop, padding: 0 }} /></tr>}
             {shown.slice(virtual.start, virtual.end).map((row, i) => <tr key={row.key} aria-rowindex={virtual.start + i + 2} onClick={() => { hold(); setSelected(row) }} className={`group cursor-pointer hover:bg-muted/70 ${selected?.key === row.key ? 'bg-accent' : 'bg-card'}`}>
-              {!live.demo && <td className="h-12 border-b border-border/60 pr-3 pl-4 sm:pl-6" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select log ${row.values.sandbox} ${row.values.time}`} checked={checked.has(row.key)} disabled={!checked.has(row.key) && checked.size >= 5000} onChange={() => toggleChecked(row.key)} /></td>}
+              {!live.demo && <td className="h-12 border-b border-border/60 pr-3 pl-4 sm:pl-6" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select log ${row.values.sandbox} ${row.values.time}`} checked={checked.has(row.key)} disabled={row.event.location?.connected === false || (!checked.has(row.key) && checked.size >= 5000)} onChange={() => toggleChecked(row.key)} /></td>}
               {columns.map((c) => <td key={c.id} className={`h-12 border-b border-border/60 px-3 py-0 font-mono text-[11px] ${c.id === 'verdict' ? row.values.verdict === 'denied' ? 'text-red-600' : row.values.verdict === 'allowed' ? 'text-emerald-700' : 'text-muted-foreground' : c.id === 'destination' ? 'text-foreground' : 'text-muted-foreground'}`}>
-                {c.id === 'time' ? <button aria-label={`Inspect event ${row.values.sandbox} ${row.values.time}`} aria-haspopup="dialog" className="h-8 w-full truncate text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(e) => { e.stopPropagation(); hold(); setSelected(row) }}>{timestamp(row.values.time)}</button> : c.id === 'action' ? <span className="block truncate" title={`${row.values.category} · ${row.values.action} · ${row.values.process}`}><span className="block truncate text-foreground">{row.values.category} · {row.event.method || row.event.action || 'Not reported'}</span><span className="block truncate text-[10px]">{row.values.process || row.event.detail || row.event.message || 'Process not reported'}</span></span> : c.id === 'agent' && row.agent ? <span className="font-sans text-foreground"><AgentLabel agent={row.agent} /></span> : <span className="block truncate" title={row.values[c.id]}>{row.values[c.id] || '-'}</span>}
+                {c.id === 'source' ? <PlacementBadge location={row.event.location ?? location} /> : c.id === 'time' ? <button aria-label={`Inspect event ${row.values.sandbox} ${row.values.time}`} aria-haspopup="dialog" className="h-8 w-full truncate text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(e) => { e.stopPropagation(); hold(); setSelected(row) }}>{timestamp(row.values.time)}</button> : c.id === 'action' ? <span className="block truncate" title={`${row.values.category} · ${row.values.action} · ${row.values.process}`}><span className="block truncate text-foreground">{row.values.category} · {row.event.method || row.event.action || 'Not reported'}</span><span className="block truncate text-[10px]">{row.values.process || row.event.detail || row.event.message || 'Process not reported'}</span></span> : c.id === 'agent' && row.agent ? <span className="font-sans text-foreground"><AgentLabel agent={row.agent} /></span> : <span className="block truncate" title={row.values[c.id]}>{row.values[c.id] || '-'}</span>}
               </td>)}
             </tr>)}
             {virtual.end < shown.length && <tr aria-hidden="true"><td colSpan={columns.length + (live.demo ? 0 : 1)} style={{ height: (shown.length - virtual.end) * 48, padding: 0 }} /></tr>}
@@ -311,7 +328,8 @@ function ScopedActivityView() {
       {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
       <AlertDialogFooter><AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={deleteBusy || !deletion?.count || Boolean(deleteError)} onClick={confirmDeletion}>{deleteBusy ? 'Deleting…' : `Delete ${deletion?.count.toLocaleString()} log${deletion?.count === 1 ? '' : 's'}`}</AlertDialogAction></AlertDialogFooter>
     </AlertDialogContent></AlertDialog>
-    <Sheet open={destinationsOpen} onOpenChange={setDestinationsOpen}><SheetContent className="gap-0 data-[side=right]:w-full sm:data-[side=right]:max-w-2xl"><SheetHeader className="border-b border-border pr-12"><SheetTitle className="flex items-center gap-2"><Webhook aria-hidden="true" className="size-4 text-muted-foreground" strokeWidth={1.5} />Webhooks</SheetTitle><SheetDescription>Send activity to an HTTPS endpoint.</SheetDescription></SheetHeader>{destinationsOpen && <ActivityDestinations />}</SheetContent></Sheet>
+    <Sheet open={destinationsOpen && !combined} onOpenChange={setDestinationsOpen}><SheetContent className="gap-0 data-[side=right]:w-full sm:data-[side=right]:max-w-2xl"><SheetHeader className="border-b border-border pr-12"><SheetTitle className="flex items-center gap-2"><Webhook aria-hidden="true" className="size-4 text-muted-foreground" strokeWidth={1.5} />Webhooks</SheetTitle><SheetDescription>Send activity to an HTTPS endpoint.</SheetDescription></SheetHeader>{destinationsOpen && <ActivityDestinations />}</SheetContent></Sheet>
+    {combined && destinationsOpen && <LocationAction subject="resource" onClose={()=>setDestinationsOpen(false)}>{(location,onClose)=><Sheet open onOpenChange={open=>{if(!open)onClose()}}><SheetContent className="overflow-auto sm:max-w-xl"><SheetHeader><SheetTitle>Webhooks</SheetTitle><SheetDescription><PlacementBadge location={location} /></SheetDescription></SheetHeader><ActivityDestinations /></SheetContent></Sheet>}</LocationAction>}
     <Sheet open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelected(null) }}><SheetContent className="w-full gap-0 sm:max-w-lg"><SheetHeader className="border-b border-border pr-12"><SheetTitle>Event details</SheetTitle><SheetDescription>Full values from this event. The activity view stays paused.</SheetDescription></SheetHeader>{selected && <div className="min-h-0 flex-1 space-y-5 overflow-auto p-5">
       <div className="flex flex-wrap gap-2">{[[selected.event.scope ? 'scope' : 'sandbox', selected.event.scope || selected.values.sandbox, 'Sandbox timeline'], ['destination', selected.values.destination, 'Same target'], ['process', selected.values.process, 'Same executable'], ['policy', selected.values.policy, 'Same policy'], ['session', selected.values.session, 'Same session'], ['correlation', selected.values.correlation, 'Same correlation']].filter(([, value]) => value).map(([key, value, label]) => <Button key={key} size="xs" variant="outline" onClick={() => pivot(key, value)}>{label}</Button>)}</div>
       {!live.demo && <Button size="sm" variant="destructive" disabled={deleteBusy} onClick={() => reviewDeletion('selected', [selected.key])}><Trash2 />Delete log</Button>}
