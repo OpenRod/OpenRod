@@ -4,7 +4,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { identityContext, requestPath } from './security.js'
 import {readJson,safeWorkspaceTarget} from './remote-http.js'
 import { signWorkerRequest } from './worker-auth.js'
-import { workerPrefix, workerAuthHeader } from './cloud-deployment.js'
+import { workerPrefix, workerAuthHeader, workerNameHeader } from './cloud-deployment.js'
 const fail=(message,status=503)=>Object.assign(Error(message),{status})
 const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value))}
 const hash=value=>createHash('sha256').update(value).digest('hex')
@@ -49,7 +49,7 @@ export function cloudRouter(security,machines,handoffs,auth,{artifact=process.en
    const pathname=requestPath(req)
    if(pathname==='/internal/worker-artifact') {
     if(req.method!=='GET')throw fail('Not found',404)
-    const record=await machines.store.byName(req.headers['x-openrod-worker']??(security.config.workerProtocol==='legacy'?req.headers['x-legacy-worker']:undefined))
+    const record=await machines.store.byName(req.headers['x-openrod-worker']??(security.config.workerProtocol==='legacy'?req.headers[workerNameHeader('legacy')]:undefined))
     const supplied=req.headers.authorization?.replace(/^Bearer /,'')??''
     if(!record||supplied.length!==record.key.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(record.key))||!artifact)throw fail('Not found',404)
     res.writeHead(200,{'Content-Type':'application/gzip','Cache-Control':'no-store'});const file=fs.createReadStream(artifact);file.on('error',()=>res.destroy());res.once('close',()=>file.destroy());file.pipe(res);return

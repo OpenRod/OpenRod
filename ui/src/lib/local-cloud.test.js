@@ -16,13 +16,10 @@ test('connection parser accepts only exact loopback origins and valid nonce/chal
 test('exchange messages require exact popup, cloud origin, nonce and short code', () => {
   const popup = {}, value = { source: popup, origin: 'https://cloud.example.test', data: { type: 'openrod-local-connected', nonce: 'nonce', code: 'a'.repeat(64) + '.' + 'b'.repeat(64) } }
   assert.equal(connect.isLocalConnectedMessage(value, popup, 'nonce', CLOUD), true)
-  const legacy = { ...value, data: { ...value.data, type: 'legacy-local-connected' } }
-  assert.equal(connect.isLocalConnectedMessage(legacy, popup, 'nonce', CLOUD), true)
-  for (const message of [value, legacy]) {
-    assert.equal(connect.isLocalConnectedMessage({ ...message, source: {} }, popup, 'nonce', CLOUD), false)
-    assert.equal(connect.isLocalConnectedMessage({ ...message, origin: 'https://evil.example' }, popup, 'nonce', CLOUD), false)
-    assert.equal(connect.isLocalConnectedMessage(message, popup, 'wrong-nonce', CLOUD), false)
-  }
+  assert.equal(connect.isLocalConnectedMessage({ ...value, data: { ...value.data, type: 'other-local-connected' } }, popup, 'nonce', CLOUD), false)
+  assert.equal(connect.isLocalConnectedMessage({ ...value, source: {} }, popup, 'nonce', CLOUD), false)
+  assert.equal(connect.isLocalConnectedMessage({ ...value, origin: 'https://evil.example' }, popup, 'nonce', CLOUD), false)
+  assert.equal(connect.isLocalConnectedMessage(value, popup, 'wrong-nonce', CLOUD), false)
   assert.equal(connect.isLocalConnectedMessage(value, popup, 'nonce'), false)
   for (const patch of [{ source: {} }, { origin: 'https://evil.example' }, { data: { ...value.data, nonce: 'other' } }, { data: { ...value.data, code: '' } }]) assert.equal(connect.isLocalConnectedMessage({ ...value, ...patch }, popup, 'nonce', CLOUD), false)
 })
@@ -170,11 +167,11 @@ test('late cancelled redemption cannot disconnect a newer successful sign-in', a
   assert.equal(current.listeners.size,0)
 })
 
-test('legacy and current cloud return messages redeem only once and close the popup', async () => {
+test('a cloud return message redeems only once and closes the popup', async () => {
   const calls = [], identity = {connected:true,user:{uid:'user'}}
   const flow = signInHarness(async path => { calls.push(path); return path === 'start' ? {nonce:'attempt',url:CLOUD} : identity })
   await flush()
-  flow.receive('attempt', 'legacy-local-connected')
+  flow.receive('attempt', 'openrod-local-connected')
   flow.receive('attempt', 'openrod-local-connected')
   assert.equal(await flow.attempt.promise, identity)
   assert.equal(flow.popup.closed, true)

@@ -20,12 +20,12 @@ export function cloudConfig(env = process.env) {
   const mode = env.OPENROD_MODE ?? 'local'
   if (!['local', 'cloud', 'worker'].includes(mode)) throw Error('OPENROD_MODE must be local, cloud or worker')
   if (mode === 'local') return { mode }
-  const protocol = workerProtocol(env.OPENROD_WORKER_PROTOCOL)
+  const protocol = workerProtocol(env.OPENROD_WORKER_PROTOCOL, env)
   if (mode === 'worker') {
     if (!/^[a-f0-9]{64}$/.test(env.OPENROD_WORKER_KEY ?? '') || !env.OPENROD_WORKER_UID || !env.OPENROD_PUBLIC_ORIGIN) throw Error('Worker mode requires its owner, key and public origin')
     const origin = new URL(env.OPENROD_PUBLIC_ORIGIN)
     if (origin.protocol !== 'https:' || origin.origin !== env.OPENROD_PUBLIC_ORIGIN) throw Error('Invalid worker public origin')
-    return {mode, key: env.OPENROD_WORKER_KEY, owner: env.OPENROD_WORKER_UID, origin: origin.origin, host: origin.host, workerProtocol: protocol}
+    return {mode, key: env.OPENROD_WORKER_KEY, owner: env.OPENROD_WORKER_UID, origin: origin.origin, host: origin.host, workerProtocol: protocol, authHeader: workerAuthHeader(protocol, env)}
   }
   for (const key of ['OPENROD_ORG_ID', 'OPENROD_PUBLIC_ORIGIN', 'GOOGLE_CLOUD_PROJECT', 'OPENROD_FIREBASE_API_KEY', 'OPENROD_FIREBASE_AUTH_DOMAIN']) if (!env[key]?.trim()) throw Error(`Cloud mode requires ${key}`)
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(env.OPENROD_ORG_ID)) throw Error('Invalid OPENROD_ORG_ID')
@@ -36,7 +36,8 @@ export function cloudConfig(env = process.env) {
   const sessionCookie = env.OPENROD_SESSION_COOKIE ?? '__Host-openrod_session'
   if (!/^__Host-[A-Za-z0-9_-]{1,64}$/.test(sessionCookie)) throw Error('OPENROD_SESSION_COOKIE must be a __Host- cookie name')
   const proxyClientIpHeader = env.OPENROD_PROXY_CLIENT_IP_HEADER ?? 'x-openrod-client-ip'
-  if (!['x-openrod-client-ip', 'x-legacy-client-ip'].includes(proxyClientIpHeader)) throw Error('Invalid OPENROD_PROXY_CLIENT_IP_HEADER')
+  // Only a dedicated header the loopback proxy overwrites, never X-Forwarded-For.
+  if (!/^x-[a-z0-9]+(?:-[a-z0-9]+)*-client-ip$/.test(proxyClientIpHeader)) throw Error('Invalid OPENROD_PROXY_CLIENT_IP_HEADER')
   return { mode, org: env.OPENROD_ORG_ID, origin: origin.origin, host: origin.host, workerProtocol: protocol, sessionCookie, proxyClientIpHeader, firebase: { apiKey: env.OPENROD_FIREBASE_API_KEY, authDomain: env.OPENROD_FIREBASE_AUTH_DOMAIN, projectId: env.GOOGLE_CLOUD_PROJECT } }
 }
 // Selecting cloud/worker is an explicit deployment choice. Their configuration
@@ -66,7 +67,7 @@ export function createSecurity(config, auth, revocations = { has: () => false, a
     checkBoundary(req)
     if (config.mode === 'local') return null
     if (config.mode === 'worker') {
-      const identity = verifyWorkerRequest(config.key, config.owner, req, Date.now(), workerAuthHeader(config.workerProtocol))
+      const identity = verifyWorkerRequest(config.key, config.owner, req, Date.now(), config.authHeader ?? workerAuthHeader(config.workerProtocol))
       verified.set(req, identity)
       return identity
     }

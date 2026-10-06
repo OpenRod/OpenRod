@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { ownerLabel, workerOwnerHash } from './cloud-deployment.js'
+import { legacyHeaderPrefix, ownerLabel, workerOwnerHash } from './cloud-deployment.js'
 export function workerDeploymentConfig(config, env=process.env) {
  const project=config.firebase.projectId,zone=env.OPENROD_WORKER_ZONE??'us-east1-b',subnet=env.OPENROD_WORKER_SUBNET
  const artifactOrigin=env.OPENROD_WORKER_ARTIFACT_ORIGIN,artifactHash=env.OPENROD_WORKER_ARTIFACT_SHA256
@@ -26,7 +26,7 @@ export async function createCompute(config, credential, {env=process.env, reques
   return value
  }
  return {get:name=>request('GET',`${base}/instances/${name}`),async create(record){
-  const settings=Buffer.from(JSON.stringify({key:record.key,uid:record.uid,origin:config.origin,artifactOrigin,artifactHash,name:record.name,workerProtocol:config.workerProtocol??'current'})).toString('base64')
+  const settings=Buffer.from(JSON.stringify({key:record.key,uid:record.uid,origin:config.origin,artifactOrigin,artifactHash,name:record.name,workerProtocol:config.workerProtocol??'current',...(config.workerProtocol==='legacy'?{legacyHeaderPrefix:legacyHeaderPrefix(process.env.OPENROD_LEGACY_HEADER_PREFIX)}:{})})).toString('base64')
   const script=Buffer.from(source.replace('__OPENROD_WORKER_SETTINGS__',settings)).toString('base64')
   const startup=`#!/usr/bin/env bash
 set -euo pipefail

@@ -14,10 +14,7 @@ export function LocalConnect({ children, user, logout }) {
     const timer = setTimeout(() => { if (active) setError('Could not return to your local console. Close this window and connect again from OpenRod.') }, 30_000)
     authorization.current.then(({ code }) => {
       if (!active) return
-      // Older local consoles still use the original transport message name.
-      for (const type of ['openrod-local-connected', 'legacy-local-connected']) {
-        window.opener.postMessage({ type, nonce: handoff.nonce, code }, handoff.origin)
-      }
+      window.opener.postMessage({ type: 'openrod-local-connected', nonce: handoff.nonce, code }, handoff.origin)
     }).catch(e => { clearTimeout(timer); if (active) setError(e.message) })
     return () => { active = false; clearTimeout(timer) }
   }, [handoff, valid])

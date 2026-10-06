@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createMachineStore, machineName, createMachineManager, workerReady } from './machines.js'
+import { workerOwnerHash } from './cloud-deployment.js'
 import { EventEmitter } from 'node:events'
 function database() {
  const data=new Map();let queue=Promise.resolve()
@@ -79,7 +80,7 @@ test('configured legacy fleet identity reuses its existing owner record without 
  const original=await store.reserve({uid:'alice'})
  assert.equal(original.name,machineName('alice','legacy-user'))
  let creates=0
- const manager=createMachineManager(createMachineStore(db,{prefix:'legacy-user',maxMachines:1}),{get:async()=>({status:'RUNNING',labels:{legacy_owner:original.name.slice(9)},networkInterfaces:[{networkIP:'10.80.0.3'}]}),create:async()=>{creates++}},{ownerLabel:'legacy_owner',allowProvisioning:false,ready:async()=>true})
+ const manager=createMachineManager(createMachineStore(db,{prefix:'legacy-user',maxMachines:1}),{get:async()=>({status:'RUNNING',labels:{legacy_owner:workerOwnerHash('alice')},networkInterfaces:[{networkIP:'10.80.0.3'}]}),create:async()=>{creates++}},{ownerLabel:'legacy_owner',allowProvisioning:false,ready:async()=>true})
  assert.equal((await manager.prepare({uid:'alice'})).status,'ready')
  assert.equal((await store.get('alice')).key,original.key)
  await assert.rejects(manager.prepare({uid:'bob'}),/temporarily unavailable/)

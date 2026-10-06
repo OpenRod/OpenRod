@@ -17,7 +17,7 @@ export function localConnectFromHash(hash) {
   } catch { return null }
 }
 export function isLocalConnectedMessage(event, popup, nonce, cloud = CLOUD_ORIGIN) {
-  return Boolean(cloud && popup && event.source === popup && event.origin === cloud && ['openrod-local-connected', 'legacy-local-connected'].includes(event.data?.type) && event.data.nonce === nonce && typeof event.data.code === 'string' && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(event.data.code))
+  return Boolean(cloud && popup && event.source === popup && event.origin === cloud && event.data?.type === 'openrod-local-connected' && event.data.nonce === nonce && typeof event.data.code === 'string' && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(event.data.code))
 }
 export async function localCloudRequest(path, body, {signal, owner = currentCloudOwner()} = {}) {
   const response = await fetch(`/api/local-cloud/${path}`, {

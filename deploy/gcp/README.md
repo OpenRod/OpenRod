@@ -97,18 +97,22 @@ Existing fleet identities are configuration, independent of OpenRod branding. Pr
 These explicit settings support a pre-OpenRod deployment without copying or renaming its registry:
 
 ```dotenv
-OPENROD_FIRESTORE_DATABASE=legacy-cloud
-OPENROD_WORKER_PREFIX=legacy-user
+OPENROD_FIRESTORE_DATABASE=existing-database
+OPENROD_WORKER_PREFIX=existing-user
 OPENROD_WORKER_PROTOCOL=legacy
-OPENROD_WORKER_OWNER_LABEL=legacy_owner
-OPENROD_WORKER_NETWORK_TAG=legacy-user-worker
-OPENROD_SESSION_COOKIE=__Host-legacy_session
+OPENROD_LEGACY_HEADER_PREFIX=x-existing
+OPENROD_WORKER_OWNER_LABEL=existing_owner
+OPENROD_WORKER_NETWORK_TAG=existing-user-worker
+OPENROD_SESSION_COOKIE=__Host-existing_session
 OPENROD_SESSION_FILE=/absolute/existing/state/sessions.sqlite
-OPENROD_PROXY_CLIENT_IP_HEADER=x-legacy-client-ip
 OPENROD_PROVISIONING_ENABLED=false
 ```
 
-`legacy` selects the existing signed worker transport header. It does not weaken owner, origin, signature or expiration checks. Updated workers can temporarily use the same protocol while the control plane and fleet roll forward. `OPENROD_PROXY_CLIENT_IP_HEADER` independently selects the header your loopback reverse proxy overwrites; use its default `x-openrod-client-ip` with the current nginx configuration. Never trust a forwarded-IP header the proxy passes through unchanged. Convert the root-owned deployment environment from its prior variable names into the corresponding `OPENROD_*` names without printing its values. Keep new provisioning disabled until a matching reviewed OpenRod worker artifact and firewall tag have been installed.
+`legacy` makes the control plane and workers sign and verify requests with the earlier header names, `<prefix>-worker-auth` and `<prefix>-worker`, where `OPENROD_LEGACY_HEADER_PREFIX` is that earlier prefix. It does not weaken owner, origin, signature or expiration checks. Set both variables on the control plane and on every existing worker; workers it provisions receive the prefix in their bootstrap settings. Updated workers can temporarily use the same protocol while the control plane and fleet roll forward.
+
+`OPENROD_PROXY_CLIENT_IP_HEADER` names the client-IP header your loopback reverse proxy overwrites. Keep its default `x-openrod-client-ip` with the included nginx configuration. Another `x-…-client-ip` name is accepted only when your proxy sets that header on every request; never trust a forwarded-IP header the proxy passes through unchanged.
+
+Session revocations are kept in `OPENSHELL_CONSOLE_DATA_DIR/cloud-sessions.sqlite`. When upgrading a deployment whose revocations live elsewhere, set `OPENROD_SESSION_FILE` to that file, or sessions signed out before the upgrade stay valid until they expire. Convert the root-owned deployment environment from its prior variable names into the corresponding `OPENROD_*` names without printing its values. Keep new provisioning disabled until a matching reviewed OpenRod worker artifact and firewall tag have been installed.
 
 Stage the application in a separate release directory and bind staged services to a different loopback port. Leave live services and their environment files unchanged. For worker smoke tests, create a separate gateway workspace (names are limited to 19 characters) and set **both** `OPENSHELL_WORKSPACE` and a separate `OPENSHELL_CONSOLE_DATA_DIR` in the staged worker environment. A separate state directory alone does not isolate network-policy synchronization from live sandboxes.
 

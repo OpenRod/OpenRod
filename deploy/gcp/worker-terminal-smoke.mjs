@@ -13,7 +13,7 @@ const env = Object.fromEntries(fs.readFileSync(envFile, 'utf8').split('\n').filt
 }))
 const port = Number(portValue)
 if (env.OPENROD_MODE !== 'worker' || env.OPENSHELL_WORKSPACE !== workspace || workspace === 'default' || !Number.isInteger(port) || port < 1024 || port > 65535) throw Error('Use an isolated staging worker workspace and valid port')
-const origin = new URL(env.OPENROD_PUBLIC_ORIGIN), authHeader = workerAuthHeader(env.OPENROD_WORKER_PROTOCOL)
+const origin = new URL(env.OPENROD_PUBLIC_ORIGIN), authHeader = workerAuthHeader(env.OPENROD_WORKER_PROTOCOL, env)
 const headersFor = (method, target, uid = env.OPENROD_WORKER_UID) => ({ host: origin.host, origin: origin.origin, 'x-openshell-console': '1', [authHeader]: signWorkerRequest(env.OPENROD_WORKER_KEY, { uid, expires: Date.now() + 60000 }, { method, url: target }) })
 async function request(method, target, body, { raw = false, anonymous = false, uid } = {}) {
   const input = body === undefined ? undefined : Buffer.from(JSON.stringify(body))
