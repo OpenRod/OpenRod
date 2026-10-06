@@ -2,7 +2,9 @@ import * as React from 'react'
 import { createApi } from '@/lib/api'
 import { useApi, useCompute } from '@/lib/compute'
 import { useInventory } from '@/lib/inventory'
-import { readLocationData } from './location-data-reader.js'
+import { locationLabel } from '@/lib/locations'
+import { Button } from '@/components/ui/button'
+import { readLocationData, unreadSources } from './location-data-reader.js'
 
 const readings = new Map()
 export function useLocationData(methods) {
@@ -34,5 +36,16 @@ export function useLocationData(methods) {
     return () => { generation.current++; clearInterval(timer) }
   }, [refresh, signature, inventory.loading])
   const sources = React.useMemo(() => snapshot?.scope === scope ? snapshot.sources.map(source => ({...source, location: {...source.location, connected: source.location.connected && currentLocations.current.some(location => location.id === source.location.id && location.connected)}})) : [], [snapshot, scope, signature])
-  return { sources, loading: inventory.loading || loading, refresh, apiFor, locations: inventory.locations, inventory, error: sources.filter(source=>source.error).map(source=>`${source.location.label}: ${source.error}`).join('; ') }
+  const status = React.useMemo(() => unreadSources(sources, methodKey.split(',').filter(Boolean)), [sources, methodKey])
+  return { sources, status, loading: inventory.loading || loading, refresh, apiFor, locations: inventory.locations, inventory, error: sources.filter(source=>source.error).map(source=>`${source.location.label}: ${source.error}`).join('; ') }
+}
+
+// Names each source a combined page could not read, without blocking the rest.
+export function SourceStatus({ model, what, offline = true }) {
+  const { failed, offline: missing } = model.status
+  const names = missing.map(source => locationLabel(source.location))
+  return <>
+    {failed.map(source => <div key={source.location.id ?? source.location.context} role="alert" className="flex items-center gap-3 border-b border-border px-4 py-2 text-xs text-red-600 sm:px-6"><span className="min-w-0">{locationLabel(source.location)}: {source.error}</span><Button variant="outline" size="sm" className="shrink-0" onClick={model.refresh}>Retry</Button></div>)}
+    {offline && names.length > 0 && <p role="status" className="border-b border-border px-4 py-1.5 text-[11px] text-muted-foreground sm:px-6">{names.join(', ')} {names.length === 1 ? 'is' : 'are'} offline. Reconnect to see {names.length === 1 ? 'its' : 'their'} {what}.</p>}
+  </>
 }
