@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { agentAccessFor, agentAccessRules } from '../shared/agent-access.js'
+import { agentAccessFor, agentAccessRules, holdsApiKey } from '../shared/agent-access.js'
 import { planSandbox, addAgentAccess } from './org.js'
 import { ruleToProto } from './policy.js'
 
@@ -118,14 +118,23 @@ test('Subscription connectors stay closed unless chosen, then open only the vend
   const hosts = (rules, name) => rules.find(r => r.name === name).endpoints.map(e => e.host)
   const chatgpt = (rules) => rules.find(r => r.name === 'agent-codex').endpoints.find(e => e.host === 'chatgpt.com')
   const off = agentAccessRules(both)
-  assert(!hosts(off, 'agent-claude').includes('mcp-proxy.anthropic.com'))
+  assert(!hosts(off, 'agent-claude').some(host => host === 'mcp-proxy.anthropic.com'))
   assert.deepEqual(chatgpt(off).deny.map(d => d.path), ['/backend-api/ps/mcp', '/backend-api/ps/mcp/**', '/backend-api/connectors/**'])
   const on = agentAccessRules(both, { connectors: ['claude', 'codex'] })
-  assert(hosts(on, 'agent-claude').includes('mcp-proxy.anthropic.com'))
+  assert(hosts(on, 'agent-claude').some(host => host === 'mcp-proxy.anthropic.com'))
   assert.equal(chatgpt(on).deny, undefined)
   assert.deepEqual(hosts(on, 'agent-opencode'), hosts(off, 'agent-opencode'))
   const { policy } = await planSandbox({ template: 'locked-down', agentRules: off })
   assert.deepEqual(policy.networkPolicies['agent-codex'].endpoints.find(e => e.host === 'chatgpt.com').denyRules.map(d => d.path), ['/backend-api/ps/mcp', '/backend-api/ps/mcp/**', '/backend-api/connectors/**'])
   assert.throws(() => agentAccessRules(both, { connectors: ['opencode'] }), /only for/)
   assert.throws(() => agentAccessRules({ source: 'build', agents: ['codex'] }, { connectors: ['claude'] }), /only for/)
+})
+
+test('Only a secret holding an API key rules out subscription connectors', () => {
+  assert.equal(holdsApiKey({ type: 'claude-code', credentialKeys: ['ANTHROPIC_API_KEY'] }), true)
+  assert.equal(holdsApiKey({ type: 'claude-code', credentialKeys: ['CLAUDE_API_KEY'] }), true)
+  assert.equal(holdsApiKey({ type: 'codex', credentialKeys: ['CODEX_AUTH_ACCESS_TOKEN', 'CODEX_AUTH_REFRESH_TOKEN', 'CODEX_AUTH_ACCOUNT_ID'] }), false)
+  assert.equal(holdsApiKey({ type: 'codex', credentialKeys: ['OPENAI_API_KEY'] }), true)
+  assert.equal(holdsApiKey({ type: 'codex' }), false)
+  assert.equal(holdsApiKey(undefined), false)
 })
