@@ -47,7 +47,7 @@ test('imported rules group by referenced group content, not machine-local IDs',(
  const first={...policy,location:local,sourceOrg:{groups:[group]}}
  const second={...policy,location:cloud,appliesTo:{...policy.appliesTo,groups:['import-dev']},sourceOrg:{groups:[{...group,id:'import-dev'}]}}
  assert.equal(consolidateResources('network',[first,second]).length,1)
- assert.equal(consolidateResources('network',[first,{...second,sourceOrg:{groups:[{...group,id:'import-dev',description:'Changed'}]}}])[0].configurationCount,2)
+ assert.equal(consolidateResources('network',[first,{...second,sourceOrg:{groups:[{...group,id:'import-dev',description:'Changed'}]}}]).length,2)
 })
 test('rule propagation preserves destination group IDs and unrelated advanced settings',async()=>{
  const before={id:'web',name:'Web',action:'allow',destinations:['example.com'],appliesTo:{everyone:false,groups:['dev'],sandboxes:[],setups:[]},advanced:{ports:[443],programs:['/bin/a']},location:local}
@@ -66,15 +66,56 @@ test('mixed-version grammar copies appear once and preserve every source identit
  assert.equal(rows[0].configurationCount,2)
  assert.equal(consolidateResources('setups',[first,{...first,id:'duplicate'}]).length,2)
 })
-test('opposing network copies stay independently inspectable in a variant row', () => {
+test('opposing network copies have separate inventory rows', () => {
  const first={id:'web',name:'Web',action:'allow',location:local}
  const second={...first,id:'cloud-web',action:'block',location:cloud}
- const [row]=consolidateResources('network',[first,second])
- assert.equal(row.configurationCount,2)
- assert.deepEqual(row.copies.map(copy=>copy.action),['allow','block'])
+ const rows=consolidateResources('network',[first,second])
+ assert.equal(rows.length,2)
+ assert.deepEqual(rows.map(row=>row.action),['allow','block'])
+ assert.deepEqual(rows.map(row=>row.copies.length),[1,1])
+})
+test('a local-only destination edit splits a shared network rule and matching copies merge again', () => {
+ const first={id:'test-local',name:'test',action:'allow',destinations:['example.com'],appliesTo:{everyone:false,groups:['dev'],sandboxes:[],setups:[]},advanced:{ports:[443]},location:local,sourceOrg:{groups:[group]}}
+ const second={...first,id:'test-cloud',location:cloud,appliesTo:{...first.appliesTo,groups:['cloud-dev']},sourceOrg:{groups:[{...group,id:'cloud-dev'}]}}
+ assert.equal(consolidateResources('network',[first,second]).length,1)
+ const edited={...first,destinations:[...first.destinations,'haaretz.co.il']}
+ const rows=consolidateResources('network',[edited,second])
+ assert.equal(rows.length,2)
+ assert.deepEqual(rows.map(row=>row.copies.map(copy=>copy.location.id)),[['local'],['cloud']])
+ assert.deepEqual(rows.map(row=>row.destinations),[['example.com','haaretz.co.il'],['example.com']])
+ // Editing the split cloud row must not prompt to apply to the local row.
+ assert.deepEqual(matchingSources(rows[1],[edited,second]),[])
+ assert.deepEqual(matchingSources(rows[0],[edited,second]),[])
+ const merged=consolidateResources('network',[edited,{...second,destinations:['haaretz.co.il','example.com']}])
+ assert.equal(merged.length,1)
+ assert.equal(merged[0].copies.length,2)
+ assert.equal(merged[0].configurationCount,1)
+ // A later edit of the recombined row can offer its other source again.
+ assert.deepEqual(matchingSources(merged[0],merged[0].copies).map(copy=>copy.location.id),['cloud'])
+ assert.deepEqual(matchingSources({...merged[0].copies[1],copies:merged[0].copies},merged[0].copies).map(copy=>copy.location.id),['local'])
+})
+test('source prompts use row membership and exact IDs instead of same-name rows', () => {
+ const peer={...group,id:'cloud-dev',location:cloud}
+ const unrelated={...peer,id:'other-cloud-dev',description:'Independent'}
+ const row={...group,copies:[group,peer]}
+ assert.deepEqual(matchingSources(row,[group,peer,unrelated]),[peer])
+ assert.deepEqual(matchingSources({...group,copies:[group]},[group,peer]),[])
+ assert.deepEqual(matchingSources(group,[group,peer]),[])
+ assert.deepEqual(matchingSources(row,[group,unrelated]),[])
 })
 test('import bookkeeping does not split identical group definitions', () => {
  const rows=consolidateResources('groups',[group,{...group,id:'imported',location:cloud,localSource:{context:'old',generation:'old'}}])
  assert.equal(rows.length,1)
  assert.equal(rows[0].configurationCount,1)
+})
+test('identical network rules merge when their groups reference imported template IDs', () => {
+ const policy={id:'test',name:'test',action:'allow',destinations:['*.n12.co.il','haaretz.co.il'],appliesTo:{everyone:false,groups:['coding'],sandboxes:[],setups:[]},advanced:{ports:[443,80],programs:[],requests:'any',allow:[],deny:[],enforcement:'enforce',privateIps:[]}}
+ const coding={id:'coding',name:'Coding agents',description:'Claude Code working on repos',outside:'block',template:'claude-github-readonly'}
+ const first={...policy,location:local,sourceOrg:{groups:[coding]}}
+ const second={...policy,location:cloud,sourceOrg:{groups:[{...coding,template:'import-395c385b1bba811608edd93c39394cd4'}]}}
+ const rows=consolidateResources('network',[first,second])
+ assert.equal(rows.length,1)
+ assert.equal(rows[0].copies.length,2)
+ assert.equal(consolidateResources('network',[first,{...second,destinations:['*.n12.co.il']}]).length,2)
+ assert.equal(consolidateResources('network',[first,{...second,advanced:{...policy.advanced,ports:[443]}}]).length,2)
 })

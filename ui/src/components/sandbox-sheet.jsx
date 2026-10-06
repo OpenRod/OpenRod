@@ -316,7 +316,7 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
                   <div className="flex min-w-0 flex-col p-4 sm:p-5">
               <Section title="Access graph" className="flex flex-1 flex-col">
                 {detail?.policy ? <Perimeter compact fill agentStatus={agentInventoryLabel(sandbox)} agents={agents} name={name} phase={phase} allowed={allowed} denied={denied}
-                  owner={ownerOf(sandbox)} gateway={live.demo ? undefined : live.overview?.gateway}
+                  owner={ownerOf(sandbox, compute?.connected ? compute.user : null)} gateway={live.demo ? undefined : live.overview?.gateway}
                   secrets={(sandbox.providers ?? []).map((provider) => live.overview?.providers?.find((item) => item.name === provider) ?? { name: provider })} />
                   : <p className="rounded-lg border border-border p-5 text-sm text-muted-foreground">{live.demo ? "Policy data is unavailable for synthetic sandboxes." : error ? "The access graph is unavailable because the policy could not be loaded." : detail ? "No policy was reported by the gateway." : "Loading access graph…"}</p>}
               </Section>
@@ -330,7 +330,7 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
                         {job.status === 'waiting' ? 'Installing included MCPs and skills…' : `Included tools could not be activated: ${job.error} Open MCPs & Skills to retry.`}
                       </p>)}
                       <dl className="grid grid-cols-2 gap-4 lg:grid-cols-1">
-                        {[["Status", <span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} aria-hidden="true" />{PHASE_LABEL[phase] ?? "Unknown"}</span>], ["Owner", ownerOf(sandbox)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
+                        {[["Status", <span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${styleOf(phase).cell}`} aria-hidden="true" />{PHASE_LABEL[phase] ?? "Unknown"}</span>], ["Owner", ownerOf(sandbox, compute?.connected ? compute.user : null)], [agents.length === 1 ? "AI agent" : "AI agents", <AgentList agents={agents} status={agentInventoryLabel(sandbox)} />], ["Image", imageName(sandbox.image, sandbox.imageTemplateName)], ["Providers", sandbox.providers.join(", ") || "None"], ["Created", absoluteTime(sandbox.createdAt)], ["Policy", detail ? `v${detail.policyVersionNumber ?? sandbox.policyVersion} · ${detail.policySource ?? "sandbox"}` : "Not reported"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-xs">{value}</dd></div>)}
                       </dl>
                     </Section>
               {sandbox.problem && statusOf(phase) === "error" && (
@@ -406,7 +406,7 @@ function SandboxSheetContent({ name, sandbox: owningSandbox, onClose, onNavigate
               <TabsContent value="details" className="min-h-0 space-y-5 overflow-y-auto p-5">
               <dl className="grid grid-cols-1 gap-5  sm:grid-cols-2">
                 {[
-                  ["Owner", ownerOf(sandbox)],
+                  ["Owner", ownerOf(sandbox, compute?.connected ? compute.user : null)],
                   ["Image", imageName(sandbox.image, sandbox.imageTemplateName), true],
                   ...(sandbox.image && imageName(sandbox.image, sandbox.imageTemplateName) !== sandbox.image ? [["Image reference", sandbox.image, true]] : []),
                   ["Command", commandText(sandbox.command), true],

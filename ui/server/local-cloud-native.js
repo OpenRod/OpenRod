@@ -10,6 +10,7 @@ import { projectOf } from '../src/lib/sandbox-session.js'
 import { readJson, responseJson } from './remote-http.js'
 import { validateHostKeys } from './cloud-ssh.js'
 import { cloudOrigin } from './cloud-origin.js'
+import { tokenCookie } from './launch-token.js'
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const EDITORS = { cursor: { label: 'Cursor', binary: 'cursor', app: 'Cursor.app' }, vscode: { label: 'VS Code', binary: 'code', app: 'Visual Studio Code.app' } }
@@ -65,13 +66,14 @@ export function createLocalCloudNative(dependencies = {}) {
     if (requestedContext && ticket.context !== requestedContext) throw fail('Cloud workspace changed. Open the sandbox from OpenRod again.', 409)
     const alias = aliasFor(owner, name, context)
     assertActive(services, grant)
+    const authFile = dependencies.token ? path.join(directory, `cloud_ssh_auth_${ownerId(origin)}`) : null
     const config = [
       `Host ${alias}`, `  HostName ${alias}`, '  User sandbox', '  StrictHostKeyChecking yes',
       `  UserKnownHostsFile ${configQuote(hostsFile)}`, '  GlobalKnownHostsFile /dev/null',
       '  CheckHostIP no', '  UpdateHostKeys no', '  IdentityAgent none', '  IdentitiesOnly yes',
       '  PubkeyAuthentication no', '  PasswordAuthentication no', '  KbdInteractiveAuthentication no',
       '  ControlMaster no', '  ServerAliveInterval 15', '  ServerAliveCountMax 3',
-      `  ProxyCommand ${[node, helper, '--origin', origin, '--sandbox', name, '--owner', ownerId(owner), ...(context ? ['--context', context] : [])].map(proxyQuote).join(' ')}`,
+      `  ProxyCommand ${[node, helper, '--origin', origin, '--sandbox', name, '--owner', ownerId(owner), ...(authFile ? ['--auth-file', authFile] : []), ...(context ? ['--context', context] : [])].map(proxyQuote).join(' ')}`,
     ].join('\n') + '\n'
     await serial(async () => {
       assertActive(services, grant)
@@ -79,6 +81,10 @@ export function createLocalCloudNative(dependencies = {}) {
       const stat = await fs.lstat(directory)
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw fail('OpenRod SSH directory must be a regular directory.', 409)
       await fs.chmod(directory, 0o700)
+      if (authFile) {
+        assertActive(services, grant)
+        await writeManaged(authFile, JSON.stringify({ origin, cookie: tokenCookie(new URL(origin).port || '80', dependencies.token) }) + '\n')
+      }
       const oldHosts = await readManaged(hostsFile)
       assertActive(services, grant)
       await writeManaged(hostsFile, oldHosts.split('\n').filter(line => line && !line.startsWith(`${alias} `)).concat(keys.map(key => `${alias} ${key}`)).join('\n') + '\n')

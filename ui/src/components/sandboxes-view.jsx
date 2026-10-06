@@ -156,7 +156,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     inventory.refresh()
   }, [jobs])
   const all = React.useMemo(() => summarize(sandboxes), [sandboxes])
-  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), type: PLACEMENTS[placementOf(sandbox.location)].label, image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, locationLabel(sandbox.location), PLACEMENTS[placementOf(sandbox.location)].label, ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
+  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox, compute?.connected ? compute.user : null), type: PLACEMENTS[placementOf(sandbox.location)].label, image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, locationLabel(sandbox.location), PLACEMENTS[placementOf(sandbox.location)].label, ownerOf(sandbox, compute?.connected ? compute.user : null), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes, compute?.connected, compute?.user])
   // Every value a filterable column holds, with how many sandboxes have it.
   const columnValues = React.useMemo(() => Object.fromEntries(Object.entries(filterValue).map(([column, of]) => {
     const counts = new Map()

@@ -8,7 +8,9 @@ const omit = (value, keys) => Object.fromEntries(Object.entries(value).filter(([
 const metadata = ['location', 'copies', 'sourceOrg', 'sourceSetups', 'id', 'createdAt', 'updatedAt', 'revision', 'importedAt', 'importSource', 'localSource', 'configurationCount']
 export function resourceConfiguration(type, record) {
   if (type === 'network' && record.sourceOrg) {
-    const groupRef = id => { const group=record.sourceOrg.groups.find(group=>group.id===id); return group ? resourceConfiguration('groups',group) : {missing:id,source:record.location?.id} }
+    // Group template IDs are source-local references to separate policies, not
+    // part of this network rule. Imports assign new IDs to those templates.
+    const groupRef = id => { const group=record.sourceOrg.groups.find(group=>group.id===id); return group ? omit(resourceConfiguration('groups',group), ['template']) : {missing:id,source:record.location?.id} }
     const setupRef = id => { const setup=record.sourceSetups?.find(setup=>setup.id===id); return setup ? resourceConfiguration('setups',setup) : {missing:id,source:record.location?.id} }
     const sort = values => values.map(value=>canonical(value)).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))
     const value=omit(record,metadata)
@@ -22,9 +24,9 @@ export const configurationKey = (type, record) => JSON.stringify(canonical(resou
 export function consolidateResources(type, records) {
   const rows = []
   for (const record of records) {
-    // Inventory rows group named copies; configuration comparison remains strict
-    // for edits and explicitly reports differences instead of hiding copies.
-    const key = record.name
+    // Network rows describe one configuration. Same-named copies split when
+    // edited independently and merge again when their configurations match.
+    const key = type !== 'network' && record.name
       ? JSON.stringify([type, record.name])
       : configurationKey(type, record)
     const row = rows.find(row => row.key === key && !row.copies.some(copy => copy.location?.id === record.location?.id))
@@ -35,7 +37,12 @@ export function consolidateResources(type, records) {
 }
 export const resourceCopies = record => record?.copies ?? (record ? [record] : [])
 export function matchingSources(record, records) {
-  return records.filter(candidate => candidate.name === record.name && candidate.location?.id !== record.location?.id && records.filter(other => other.name === candidate.name && other.location?.id === candidate.location?.id).length === 1)
+  // Offer only peers from the row as it existed when editing began. A separate
+  // same-named row is independent, even if this edit makes it identical again.
+  const copies = resourceCopies(record)
+  return records.filter(candidate => candidate.location?.id !== record.location?.id
+    && copies.some(copy => copy.location?.id === candidate.location?.id && (copy.id ?? copy.name) === (candidate.id ?? candidate.name))
+    && records.filter(other => other.location?.id === candidate.location?.id && (other.id ?? other.name) === (candidate.id ?? candidate.name)).length === 1)
 }
 function mergeChanged(before, after, destination) {
   if (after && typeof after === 'object' && !Array.isArray(after)) {

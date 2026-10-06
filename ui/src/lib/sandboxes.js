@@ -59,7 +59,11 @@ export function destinationOf(chunk) {
 
 export const programName = (path) => (path ? path.split("/").pop() : "Unknown program")
 
-export const ownerOf = (sandbox) => sandbox.owner || sandbox.labels?.["openshell.console/owner"] || sandbox.labels?.owner || "Not reported"
+// Resolve only a matching authenticated account; keep stored ownership untouched.
+export function ownerOf(sandbox, user) {
+  const owner = sandbox.owner || sandbox.labels?.["openshell.console/owner"] || sandbox.labels?.owner
+  return (owner && owner === user?.uid && user.email) || owner || "Not reported"
+}
 export const creatorOf = (sandbox) => sandbox.createdBy || sandbox.labels?.["openshell.console/created-by"] || "Not reported"
 
 export function elapsedSince(value, now = Date.now()) {

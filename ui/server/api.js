@@ -363,7 +363,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     onReuse: () => logger.warn('The link OpenRod opened in your browser was used a second time. If that wasn’t you, another program may have opened the console first: stop OpenRod with Ctrl+C and start it again.'),
   }) : null
   const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
-  const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative() }) : null
+  const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative({ token }) }) : null
   const cloudOff = security.config.mode === 'local' && !cloudOrigin()
   const initialContext = contextSelection()
   const initialKey = contextKey(initialContext)
