@@ -1,4 +1,4 @@
-import { useLocationData } from '@/lib/location-data'
+import { SourceStatus, useLocationData } from '@/lib/location-data'
 import { LocationProvider } from '@/lib/location-context'
 import { LiveProvider } from '@/lib/live'
 import { PlacementBadge } from '@/components/placement-badge'
@@ -331,6 +331,7 @@ function CombinedIngressView() {
   const boxes = model.inventory.sandboxes.filter(box=>box.phase !== 'deleting' && box.name.toLowerCase().includes(query.toLowerCase()))
   return <div className="flex h-full min-h-0 flex-col">
     <div className="flex items-center gap-2 border-b px-4 py-3 sm:px-6"><SearchInput className="w-60" aria-label="Search ingress" placeholder="Search sandboxes…" value={query} onValueChange={setQuery} /></div>
+    <SourceStatus model={model} offline={false} />
     <div className="min-h-0 flex-1 overflow-auto"><table aria-label="Ingress" className="w-full min-w-[560px] text-left text-xs"><thead className="sticky top-0 border-b bg-muted text-muted-foreground"><tr>{['Sandbox','Source','Web services','Access'].map(label=><th key={label} className="h-9 px-6 font-normal">{label}</th>)}</tr></thead><tbody className="divide-y">{boxes.map(box=>{
       const source=model.sources.find(source=>source.location.id===box.location.id)
       const location=source?.location ?? box.location

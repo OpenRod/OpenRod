@@ -25,7 +25,7 @@ import { inSetupPolicy, policyRows, setupAccess } from '@/lib/setup-network'
 import { canPrepareAtLaunch, cannotRun, isPackagePending, launchableItem, launchRequirements } from '../../shared/setup-launch.js'
 import { SearchInput } from "@/components/ui/search-input"
 import { useInventory } from '@/lib/inventory'
-import { useLocationData } from '@/lib/location-data'
+import { SourceStatus, useLocationData } from '@/lib/location-data'
 import { resourceKey } from '@/lib/locations'
 import { LocationStep } from '@/components/location-step'
 
@@ -137,13 +137,15 @@ function ScopedSetupsView({ sandbox = null, setupIds = [], model }) {
       <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => setImporting(true)}><Plus />Bring my setup</Button>
     </div>
     {error && <div className="space-y-2 border-b px-4 py-3 sm:px-6"><ErrorMessage>{error}</ErrorMessage><Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>Try again</Button></div>}
+    {model && <SourceStatus model={model} what="setups" />}
     <div className="flex-1">
-      {(!setups || (model?.loading && !setups.length)) && !error ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground"><Spinner />Loading setups…</div>
+      {(!setups || (model?.loading && !model.sources.length)) && !error ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground"><Spinner />Loading setups…</div>
+        : model?.status.unavailable ? <p className="px-4 py-16 text-center text-sm text-muted-foreground">Setups unavailable</p>
         : setups && !shown.length ? <div className="px-4 py-16 text-center">
           <FolderInput className="mx-auto mb-3 size-6 text-muted-foreground" strokeWidth={1.5} />
           <p className="text-sm font-medium">{sandbox && !filtering ? 'No setups in this sandbox' : setups.length ? 'No matching setups' : 'No setups yet'}</p>
           <p className="mt-2 text-xs text-muted-foreground">{sandbox && !filtering ? 'Choose a setup from MCPs & Skills to enable it here.' : setups.length ? 'Try another name, tool, source agent, or status.' : 'Import MCPs and Skills from Codex, Claude Code, or Cursor.'}</p>
-          {(!sandbox || filtering) && <Button variant="outline" size="sm" className="mt-4" onClick={() => setups.length ? (setQuery(''), setStatus('all')) : setImporting(true)}>{setups.length ? 'Clear filters' : 'Bring my setup'}</Button>}
+          {(!sandbox || filtering) && (setups.length > 0 || !model?.status.any) && <Button variant="outline" size="sm" className="mt-4" onClick={() => setups.length ? (setQuery(''), setStatus('all')) : setImporting(true)}>{setups.length ? 'Clear filters' : 'Bring my setup'}</Button>}
         </div>
         : setups && <BlurFade duration={0.15} offset={0} blur="0px">
           <Table aria-label="MCPs & Skills" className="min-w-[740px] text-xs">
