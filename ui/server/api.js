@@ -526,7 +526,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           if (parts.length === 2 && parts[0] === 'announcements' && parts[1] === 'cloud') {
             if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
             await body(req)
-            return send(res, 200, await claimCloudAnnouncement({ user: identityContext.getStore()?.uid ?? 'local' }))
+            return send(res, 200, await claimCloudAnnouncement({ user: identityContext.getStore()?.uid ?? 'local', available: !cloudOff }))
           }
           // Connection discovery is available before any gateway is selected.
           // Job reads remain available after that job changes the context.

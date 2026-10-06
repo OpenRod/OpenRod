@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Cloud, Info, Laptop } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { CloudSoon } from '@/components/cloud-soon'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { createApi } from '@/lib/api'
@@ -45,7 +46,7 @@ export function ContinueInCloud({ name, sandbox }) {
     finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
   if (sandbox?.phase !== 'ready') return null
-  if (!compute?.available) return <Button variant="outline" size="sm" disabled title={compute?.status?.reason || "OpenRod Cloud is not configured."} className="w-full justify-start text-xs"><Cloud className="size-3.5" aria-hidden="true" />OpenRod Cloud unavailable</Button>
+  if (!compute?.available) return <CloudSoon className="w-full justify-start text-xs"><Cloud className="size-3.5" aria-hidden="true" />Continue in cloud</CloudSoon>
   return <div className="flex items-center gap-1">
     {dialog}
     <Button variant="outline" size="sm" className="flex-1 justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={copy}>

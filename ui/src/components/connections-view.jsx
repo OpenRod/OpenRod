@@ -171,7 +171,7 @@ export function ConnectionsView({ onCreateSandbox }) {
                   <p className="text-[13px] font-medium">{compute?.user?.email || 'OpenRod Cloud'}</p>
                   <p role="status" className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                     {cloudReady && <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-500" />}
-                    {compute?.checking ? 'Checking connection…' : cloudWorking ? compute?.connecting ? 'Signing in…' : 'Starting cloud machine…' : cloudReady ? `Connected · ${plural(inventory.sandboxes.filter(item => item.location?.cloud).length, 'sandbox', 'sandboxes')}` : compute?.connected ? 'Signed in · machine not ready' : compute?.available ? 'Not connected' : (compute?.status?.reason || 'Not configured on this computer.')}
+                    {compute?.checking ? 'Checking connection…' : cloudWorking ? compute?.connecting ? 'Signing in…' : 'Starting cloud machine…' : cloudReady ? `Connected · ${plural(inventory.sandboxes.filter(item => item.location?.cloud).length, 'sandbox', 'sandboxes')}` : compute?.connected ? 'Signed in · machine not ready' : compute?.available ? 'Not connected' : (compute?.status?.reason || 'Coming soon')}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5">

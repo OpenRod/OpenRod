@@ -9,7 +9,7 @@ const PREFIX='/api/cloud/local-connect'
 const cloudPath=req=>{try{const path=requestPath(req);return path.startsWith('/api/local-cloud/')||path.startsWith('/api/remote/')}catch{return false}}
 // Without a configured cloud origin every sign-in, relay and socket route refuses before any cloud request.
 function unavailableLocalCloud(){return {close(){},setNative(){},
- middleware(req,res,next){if(!cloudPath(req))return next();if(!isLocalApiRequest(req)){req.resume();return responseJson(res,403,{error:'Request rejected'})}if(requestPath(req)==='/api/local-cloud/status'&&req.method==='GET')return responseJson(res,200,{available:false,connected:false,reason:'OpenRod Cloud is not configured on this computer.'});req.resume();responseJson(res,409,{error:CLOUD_SOON})},
+ middleware(req,res,next){if(!cloudPath(req))return next();if(!isLocalApiRequest(req)){req.resume();return responseJson(res,403,{error:'Request rejected'})}if(requestPath(req)==='/api/local-cloud/status'&&req.method==='GET')return responseJson(res,200,{available:false,connected:false,reason:CLOUD_SOON});req.resume();responseJson(res,409,{error:CLOUD_SOON})},
  upgrade(req,socket){if(!cloudPath(req))return false;socket.on('error',()=>{});socket.end(`HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n${JSON.stringify({error:CLOUD_SOON})}`);return true},
 }}
 export function createLocalCloud({origin=cloudOrigin(),allowTestHttp=false,native}={}) {

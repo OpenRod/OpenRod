@@ -190,7 +190,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   const slide = reduce ? {} : { initial: { opacity: 0, x: view === "remote" ? 24 : -24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: view === "remote" ? -24 : 24 }, transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] } }
   const localCaption = local ? (local.connected ? "Local gateway" : "Disconnected") : locals?.length ? `Use ${locals[0].name}` : locals ? (missingCli ? "OpenShell isn’t installed" : "No local gateway running") : "Checking…"
 
-  const cloudCaption = cloudBusy ? cloudStage : cloud?.connected ? "Ready to use" : compute?.checking ? "Checking connection…" : !compute?.available ? "Not configured" : compute?.connected ? "Start cloud machine" : "Connect your account"
+  const cloudCaption = cloudBusy ? cloudStage : cloud?.connected ? "Ready to use" : compute?.checking ? "Checking connection…" : !compute?.available ? "Coming soon" : compute?.connected ? "Start cloud machine" : "Connect your account"
 
   return <div className="flex min-h-0 flex-col gap-6 rounded-xl bg-popover p-7 ring-1 ring-foreground/10">
     <DialogHeader className="gap-3">

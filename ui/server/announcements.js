@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto'
 import { stateDirectory } from './paths.js'
 
 // Lives outside the npm package and browser origin, so npx upgrades, ports,
-// and browser changes do not replay the announcement for this OS user.
-export async function claimCloudAnnouncement({ directory = stateDirectory(), user = 'local' } = {}) {
+// and browser changes do not replay the announcement for this OS user. While
+// cloud is unavailable it stays unclaimed for the release that offers it.
+export async function claimCloudAnnouncement({ directory = stateDirectory(), user = 'local', available = true } = {}) {
+  if (!available) return { show: false }
   const owner = createHash('sha256').update(user).digest('hex')
   const folder = path.join(directory, 'announcements', owner)
   await fs.mkdir(folder, { recursive: true, mode: 0o700 })
