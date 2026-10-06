@@ -63,7 +63,6 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const inheritedLocation = useLocation()
   const [selectedContext, setSelectedContext] = React.useState(null)
   const defaultContext = locationKey(inheritedLocation) ?? selectedContext
-  const locationFilter = locationKey(inheritedLocation) ?? ""
   const [creationLocation, setCreationLocation] = React.useState(null)
   const [handoff, setHandoff] = React.useState(null)
   const canConnect = allowRemote
@@ -73,8 +72,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     return () => { alive = false }
   }, [api])
   const defaultLocation = locations.find((location) => locationKey(location) === defaultContext)
-  const availableLocation = locations.find((location) => locationKey(location) === locationFilter && location.connected)
-    ?? (defaultLocation?.connected ? defaultLocation : null)
+  const availableLocation = (defaultLocation?.connected ? defaultLocation : null)
     ?? locations.find((location) => location.target === api.target && !location.remote && location.connected)
     ?? locations.find((location) => location.target === api.target && location.connected)
   const chosenLocation = locations.find((location) => locationKey(location) === locationKey(creationLocation)) ?? creationLocation ?? availableLocation
@@ -168,8 +166,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const ordered = React.useMemo(() => {
     const q = deferredQuery.trim().toLowerCase()
     const since = filters.createdAt ? now - Number(filters.createdAt) * 86400000 : null
-    const matched = indexed.filter((row) => (!locationFilter || locationKey(row.sandbox.location) === locationFilter)
-      && Object.entries(filterValue).every(([column, of]) => !filters[column].length || filters[column].includes(of(row)))
+    const matched = indexed.filter((row) => Object.entries(filterValue).every(([column, of]) => !filters[column].length || filters[column].includes(of(row)))
       && (since === null || Date.parse(row.sandbox.createdAt) >= since)
       && (!q || row.search.includes(q)))
     const value = (row) => sort.key === "owner" || sort.key === "image" || sort.key === "type" ? row[sort.key] : sort.key === "startedAt" ? row.sandbox.phase === "ready" ? row.sandbox.startedAt : null : row.sandbox[sort.key]
@@ -180,7 +177,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
       const delta = collator.compare(av ?? "", bv ?? "")
       return (sort.direction === "asc" ? delta : -delta) || collator.compare(a.sandbox.name, b.sandbox.name)
     })
-  }, [indexed, filters, locationFilter, deferredQuery, sort, now])
+  }, [indexed, filters, deferredQuery, sort, now])
   // Keep selection tied to identity across sorting, filters, and live updates.
   React.useEffect(() => {
     const available = new Set(sandboxes.filter((sandbox) => sandbox.location?.connected && !live.demo).map(keyOf))
@@ -245,7 +242,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     }
   }
   const virtual = useVirtualRows({ count: ordered.length, rowHeight: ROW_HEIGHT })
-  React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, filters, locationFilter, sort])
+  React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, filters, sort])
   const points = React.useMemo(() => bucketBoxes(sandboxes, 30, now), [sandboxes, now])
   const clearFilters = () => { setQuery(""); setFilters(NO_FILTERS) }
   const filtering = query || Object.values(filters).some((value) => value.length)
