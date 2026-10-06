@@ -11,7 +11,7 @@ import { useCompute, useApi } from '@/lib/compute'
 import { useInventory } from '@/lib/inventory'
 import { createApi } from '@/lib/api'
 import { localCloudRequest } from '@/lib/local-cloud'
-import { IMPORT_TYPES, DEFAULT_IMPORT_TYPES, activityImportQuery, importRunning, importFinished, importSelection, importSourceId, importPercent } from '@/lib/resource-imports'
+import { IMPORT_TYPES, DEFAULT_IMPORT_TYPES, groupImportResources, activityImportQuery, importRunning, importFinished, importSelection, importSourceId, importPercent } from '@/lib/resource-imports'
 import { locationLabel } from '@/lib/locations'
 
 const labels = { ...Object.fromEntries(IMPORT_TYPES.map(type => [type.id, type.label])), policyTemplates: 'Base policy' }
@@ -136,6 +136,10 @@ export function ResourceImportDialog({ request, onClose }) {
   const stage = job ? 'result' : bundle ? 'select' : 'source'
   const frozen = Boolean(busy) || importRunning(job)
   function reset() { setBundle(null); setJob(null); setSelected([]); setConflicts({}); setActivity(value => ({ from: value.from, to: value.to })); setError('') }
+  const selectionRow = item => <label key={item.key} className="flex items-start gap-3 p-3"><Checkbox aria-label={`Import ${item.name}`} checked={included.includes(item.key)} disabled={frozen || (!selected.includes(item.key) && included.includes(item.key))} onCheckedChange={checked => setSelected(values => checked ? [...values, item.key] : values.filter(value => value !== item.key))} /><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{item.name}</span><span className="text-[11px] text-muted-foreground">{included.includes(item.key) && !selected.includes(item.key) ? 'Required dependency' : ''}</span>{item.type === 'setups' && ['mcp', 'skill'].map(kind => {
+              const entries = (item.data?.items ?? []).filter(entry => entry.kind === kind)
+              return entries.length > 0 && <span key={kind} className="mt-1 block text-[11px] leading-relaxed text-muted-foreground"><span className="font-medium">{kind === 'mcp' ? 'MCPs' : 'Skills'}:</span> {entries.map(entry => entry.name).join(', ')}</span>
+            })}{item.warnings?.map((warning, i) => <span key={i} className="mt-1 block text-[11px] text-amber-700 dark:text-amber-400">{warning}</span>)}</span></label>
   const description = job ? `${job.counts?.completed ?? 0} of ${job.items.length} resources complete. Your source stays available.` : bundle ? 'Choose what to copy. Required dependencies are included in the review.' : 'Copy saved configuration between your computer, connected hosts, and OpenRod Cloud.'
   return <Dialog open onOpenChange={value => { if (!value && !busy) onClose() }}><DialogContent className="gap-4 sm:max-w-xl">
     <DialogHeader className="pr-6"><DialogTitle>{job ? statusLabel(job.status) : 'Import data'}</DialogTitle><DialogDescription className="text-xs leading-relaxed">{description}</DialogDescription></DialogHeader>
@@ -158,7 +162,13 @@ export function ResourceImportDialog({ request, onClose }) {
         <p className="flex items-center gap-2 text-xs"><span>{locationLabel(source)}</span><ArrowRight className="size-3 text-muted-foreground" /><span>{locationLabel(destination)}</span></p>
         {!bundle.resources.length && <p className="py-8 text-center text-xs text-muted-foreground">No saved resources were found for these categories. For MCPs and skills, use Bring my setup on the source first.</p>}
         <div className="flex items-center justify-between text-[11px] text-muted-foreground"><span>{included.length} selected{included.length > selected.length ? ` · ${included.length - selected.length} required dependencies` : ''}</span><Button variant="ghost" size="sm" disabled={frozen} onClick={() => setSelected(selected.length ? [] : bundle.resources.filter(item => types.includes(item.type)).map(item => item.key))}>{selected.length ? 'Clear selection' : 'Select all'}</Button></div>
-        <div className="divide-y rounded-lg border">{bundle.resources.map(item => <label key={item.key} className="flex items-start gap-3 p-3"><Checkbox aria-label={`Import ${item.name}`} checked={included.includes(item.key)} disabled={frozen || (!selected.includes(item.key) && included.includes(item.key))} onCheckedChange={checked => setSelected(values => checked ? [...values, item.key] : values.filter(value => value !== item.key))} /><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{item.name}</span><span className="text-[11px] text-muted-foreground">{labels[item.type]}{included.includes(item.key) && !selected.includes(item.key) ? ' · Required dependency' : ''}</span>{item.warnings?.map((warning, i) => <span key={i} className="mt-1 block text-[11px] text-amber-700 dark:text-amber-400">{warning}</span>)}</span></label>)}</div>
+        <div className="space-y-5">{groupImportResources(bundle.resources).map(section => <section key={section.id} aria-labelledby={`import-section-${section.id}`} className="space-y-2">
+          <h3 id={`import-section-${section.id}`} className="flex items-center justify-between text-xs font-semibold"><span>{section.label}</span><span className="text-[11px] font-normal tabular-nums text-muted-foreground">{section.items.filter(item => included.includes(item.key)).length} / {section.items.length}</span></h3>
+          {section.groups ? <div className="space-y-3">{section.groups.map(group => <section key={group.id} aria-labelledby={`import-subsection-${group.id}`} className="space-y-1.5">
+            <h4 id={`import-subsection-${group.id}`} className="text-[11px] font-medium text-muted-foreground">{group.label}</h4>
+            <div className="divide-y rounded-lg border">{group.items.map(selectionRow)}</div>
+          </section>)}</div> : <div className="divide-y rounded-lg border">{section.items.map(selectionRow)}</div>}
+        </section>)}</div>
         {selection.error && <p role="alert" className="text-xs text-destructive">{selection.error}</p>}
         {bundle.pages?.activity && <p className="text-[11px] text-muted-foreground">{bundle.pages.activity.exported} of {bundle.pages.activity.total} matching activity events in this batch.{bundle.pages.activity.nextOffset != null ? ' After importing, load the next batch to continue with older history.' : ''}</p>}
         {bundle.excluded?.length > 0 && <details className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">{bundle.excluded.length} excluded or needing attention</summary><ul className="mt-2 space-y-1">{bundle.excluded.map((item, i) => <li key={i}>{item.name ?? labels[item.type] ?? item.type}: {item.reason}</li>)}</ul></details>}

@@ -35,3 +35,19 @@ test('activity remains opt-in and bounded history requests preserve their snapsh
   assert.throws(() => activityImportQuery({ from: 'bad' }), /valid activity date/)
   assert.throws(() => activityImportQuery({ from: '2026-10-03T00:00:00Z', to: '2026-10-01T00:00:00Z' }), /start must be before/)
 })
+
+test('selection categories keep mixed setups and dependency resources exactly once', async () => {
+  const { groupImportResources } = await import('./resource-imports.js')
+  const resources = [
+    { key: 'mcp', type: 'setups', data: {items:[{kind:'mcp'}]} },
+    { key: 'skill', type: 'setups', data: {items:[{kind:'skill'}]} },
+    { key: 'mixed', type: 'setups', data: {items:[{kind:'mcp'},{kind:'skill'}]} },
+    { key: 'empty', type: 'setups' }, { key: 'policy', type: 'policyTemplates' },
+    { key: 'network', type: 'network' }, { key: 'group', type: 'groups' }, { key: 'future', type: 'future' },
+  ]
+  const grouped = groupImportResources(resources)
+  assert.deepEqual(grouped.map(section => section.id), ['groups', 'network', 'setups', 'policyTemplates', 'other'])
+  assert.deepEqual(grouped.find(section => section.id === 'setups').groups.map(group => [group.id, group.items.map(item => item.key)]), [['mcps',['mcp']],['skills',['skill']],['mixed',['mixed']],['saved',['empty']]])
+  assert.deepEqual(grouped.flatMap(section => section.items).map(item => item.key).sort(), resources.map(item => item.key).sort())
+  assert.deepEqual(groupImportResources([]), [])
+})

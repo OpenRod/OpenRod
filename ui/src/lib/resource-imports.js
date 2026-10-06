@@ -47,3 +47,17 @@ export function importPercent(job) {
   const done = job.items.filter(item => ['created', 'completed', 'reused', 'skipped', 'blocked', 'failed', 'cancelled'].includes(item.status)).length
   return Math.round(done / job.items.length * 100)
 }
+
+// A saved setup is the import unit. Mixed setups stay together so their
+// dependencies and selection keys remain intact.
+export function groupImportResources(resources) {
+  const sections = [...IMPORT_TYPES, { id: 'policyTemplates', label: 'Base policies' }].map(type => ({ ...type, items: resources.filter(item => item.type === type.id) }))
+  const other = resources.filter(item => !sections.some(section => section.id === item.type))
+  if (other.length) sections.push({ id: 'other', label: 'Other resources', items: other })
+  return sections.filter(section => section.items.length).map(section => {
+    if (section.id !== 'setups') return section
+    const kinds = item => new Set((item.data?.items ?? []).map(value => value.kind))
+    const category = item => { const types = kinds(item); return types.has('mcp') && types.has('skill') ? 'mixed' : types.has('mcp') ? 'mcps' : types.has('skill') ? 'skills' : 'saved' }
+    return { ...section, groups: [{ id: 'mcps', label: 'MCPs' }, { id: 'skills', label: 'Skills' }, { id: 'mixed', label: 'MCPs & Skills together' }, { id: 'saved', label: 'Saved setups' }].map(group => ({ ...group, items: section.items.filter(item => category(item) === group.id) })).filter(group => group.items.length) }
+  })
+}
