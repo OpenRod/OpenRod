@@ -92,7 +92,7 @@ export function describePolicy(p, groups = []) {
   return `Allows ${requests}${except} to ${hosts || "…"} on port${a.ports.length === 1 ? "" : "s"} ${joinAnd(a.ports.map(String))}, ${programs}.${audit} ${scope}`
 }
 
-export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, setupMembers = {}, knownPrograms = [], onSaved, onGroupCreated }) {
+export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups = [], sandboxes = [], assignments = {}, setupMembers = {}, knownPrograms = [], onSaved, onGroupCreated, sourceControl }) {
   const api = useApi()
   const isNew = !initial?.id
   const [form, setForm] = React.useState(() => toForm(initial))
@@ -148,6 +148,7 @@ export function PolicyDialog({ open, onOpenChange, initial, groups: savedGroups 
             <DialogDescription className="text-xs">Sandboxes start locked down: nothing leaves them unless a rule allows it. A block beats every allow.</DialogDescription>
           </DialogHeader>
 
+          <fieldset disabled={busy || JSON.stringify(form)!==JSON.stringify(toForm(initial)) || Boolean(destination || program)}>{sourceControl}</fieldset>
           {isNew && (
             <div className="flex flex-wrap gap-1.5">
               <span className="self-center text-[11px] text-muted-foreground">Start from</span>

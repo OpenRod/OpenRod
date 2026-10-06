@@ -25,6 +25,6 @@ export function useLocation() {
   return React.useContext(LocationContext)?.location ?? null
 }
 
-export function LocationApiProvider({api, children}) {
-  return <LocationContext.Provider value={{location:null,api}}>{children}</LocationContext.Provider>
+export function LocationApiProvider({api, location = null, children}) {
+  return <LocationContext.Provider value={{location,api}}>{children}</LocationContext.Provider>
 }

@@ -1,3 +1,5 @@
+import { consolidateResources } from '@/lib/resource-sources'
+import { SourceChips, SourceSwitcher, SourceEditProvider, useSourceChanges } from '@/components/resource-sources'
 import { egressRows,combinedEgressInventory } from '@/lib/egress-inventory'
 import { useLocationData } from '@/lib/location-data'
 import { LocationProvider } from '@/lib/location-context'
@@ -245,7 +247,7 @@ function RuleSelection({ label, checked, mixed = false, disabled, onChange }) {
     className="block size-4 cursor-pointer rounded border-border accent-[var(--action)] focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed" />
 }
 
-function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, onClearBlocked, selected, onSelect, onSelectAll, onDelete, deleting, location, showHeader = true }) {
+function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMembers, onEdit, onEditBlocked, onClearBlocked, selected, onSelect, onSelectAll, onDelete, deleting, location, sources, selectionSummary, showHeader = true }) {
   const columns = location ? LOCATION_POLICY_COLS : POLICY_COLS
   const span = location ? "col-span-6" : "col-span-5"
   const blocked = org?.org?.blocked ?? []
@@ -253,7 +255,7 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMember
   const allSelected = policies.length > 0 && matchingSelected === policies.length
   return (
     <>
-      {showHeader && <ColumnHead className={columns}><RuleSelection label="Select all matching network rules" checked={allSelected} mixed={matchingSelected > 0 && !allSelected} disabled={deleting || !policies.length} onChange={onSelectAll} /><span>Rule</span>{location && <span>Source</span>}<span>Action</span><span>Destinations</span><span>Groups</span><span>Enforced</span><span className="text-right">Actions</span></ColumnHead>}
+      {showHeader && <ColumnHead className={columns}><RuleSelection label="Select all matching network rules" checked={selectionSummary?.all ?? allSelected} mixed={selectionSummary?.mixed ?? (matchingSelected > 0 && !allSelected)} disabled={deleting || (selectionSummary ? !selectionSummary.count : !policies.length)} onChange={onSelectAll} /><span>Rule</span>{location && <span>Source</span>}<span>Action</span><span>Destinations</span><span>Groups</span><span>Enforced</span><span className="text-right">Actions</span></ColumnHead>}
       <ul className="divide-y divide-border/60">
         {blocked.length > 0 && (
           <li className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", columns)}>
@@ -269,19 +271,29 @@ function PolicyRows({ policies, org, sandboxes, groups, assignments, setupMember
           </li>
         )}
         {policies.map((p) => {
-          const targets = sandboxes.filter((s) => appliesTo(p, { name: s.name, groups: groupFor({ assignments }, s.name), setups: setupMembers?.[s.name] ?? [] }))
-          const enforced = targets.filter((s) => s.status === "loaded" && s.rules.some((r) => r.key === `egress_${p.id}`)).length
+          const copies = p.copies ?? [p]
+          const coverage = copies.map(copy => {
+            const source = sources?.find(source => source.location.id === copy.location?.id)
+            const ownOrg = source?.data?.org
+            const targets = (source?.data?.fleetPolicy?.sandboxes ?? sandboxes).filter(box => appliesTo(copy, { name: box.name, groups: groupFor({ assignments: ownOrg?.assignments ?? assignments }, box.name), setups: (ownOrg?.setupMembers ?? setupMembers)?.[box.name] ?? [] }))
+            return { total: targets.length, enforced: targets.filter(box => box.status === "loaded" && box.rules.some(rule => rule.key === `egress_${copy.id}`)).length }
+          })
+          const targetCount = coverage.reduce((sum, value) => sum + value.total, 0)
+          const enforced = coverage.reduce((sum, value) => sum + value.enforced, 0)
+          const actions = [...new Set(copies.map(copy => copy.action))]
+          const destinations = [...new Set(copies.flatMap(copy => copy.destinations))]
+          const scopes = [...new Set(copies.map(copy => appliesToText(copy, copy.sourceOrg?.groups ?? groups)))]
           return (
             <li key={p.id} className={cn("grid min-h-10 items-center gap-4 px-6 py-2 transition-colors hover:bg-muted/60", columns, selected.has(p.id) && "bg-accent/40")}>
               <RuleSelection label={`Select ${p.name}`} checked={selected.has(p.id)} disabled={deleting} onChange={() => onSelect(p.id)} />
-              <button onClick={() => onEdit(p)} disabled={deleting} aria-label={`Edit ${p.name}`} className={cn(span,"grid grid-cols-subgrid items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring")}>
-                <span className="flex min-w-0 items-center gap-2.5"><ShieldCheck aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">{p.name}</span></span>{location && <PlacementBadge location={location} />}
-                <ActionPill action={p.action} />
-                <Hosts hosts={p.destinations} />
-                <span className="truncate text-xs text-muted-foreground">{p.appliesTo.everyone || p.appliesTo.sandboxes.length || !p.appliesTo.groups.length ? <span className="text-amber-700" title={`Current scope: ${appliesToText(p, groups) || "none"}`}>Assign a group</span> : appliesToText(p, groups)}</span>
-                {targets.length ? <Coverage n={enforced} total={targets.length} /> : <span className="text-[12px] text-faint">No sandboxes</span>}
+              <button onClick={() => onEdit(p)} disabled={deleting} aria-label={`Edit ${p.name}`} title={location ? `Details shown for ${location.label}. Open to choose a source.` : undefined} className={cn(span,"grid grid-cols-subgrid items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring")}>
+                <span className="flex min-w-0 items-center gap-2.5"><ShieldCheck aria-hidden="true" strokeWidth={1.5} className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate text-xs font-medium">{p.name}</span></span>{location && <SourceChips record={p} />}
+                <span className="flex flex-wrap gap-1">{actions.map(action => <ActionPill key={action} action={action} />)}</span>
+                <Hosts hosts={destinations} />
+                <span className="truncate text-xs text-muted-foreground">{scopes.length > 1 ? <span title={scopes.join("\n")}>Varies by source</span> : p.appliesTo.everyone || p.appliesTo.sandboxes.length || (!p.appliesTo.groups.length && !p.appliesTo.setups?.length) ? <span className="text-amber-700" title={`Current scope: ${appliesToText(p, groups) || "none"}`}>Assign a group</span> : appliesToText(p, groups)}</span>
+                {targetCount ? <Coverage n={enforced} total={targetCount} /> : <span className="text-[12px] text-faint">No sandboxes</span>}
               </button>
-              <Button variant="ghost" size="sm" className="h-7 justify-self-end px-2 text-xs text-muted-foreground hover:text-destructive" aria-label={`Delete ${p.name}`} disabled={deleting} onClick={() => onDelete([p])}><Trash2 className="size-3.5" />Delete</Button>
+              <Button variant="ghost" size="sm" className="h-7 justify-self-end px-2 text-xs text-muted-foreground hover:text-destructive" aria-label={`Delete ${p.name}`} title={location ? `Delete from ${location.label}` : undefined} disabled={deleting} onClick={() => onDelete([p])}><Trash2 className="size-3.5" />Delete</Button>
             </li>
           )
         })}
@@ -316,7 +328,7 @@ function FleetSummary({ model, fleet, org, events, onOpen, onOpenGlobal, onDecid
   const points = React.useMemo(() => bucketEgress(events, 15, now), [events, now])
   const sandboxes = fleet.sandboxes
   const total = sandboxes.length
-  const policies = model ? model.sources.flatMap(source=>(source.data?.org?.policies ?? []).map(policy=>({...policy,location:source.location}))) : org?.policies ?? []
+  const policies = model ? consolidateResources('network',model.sources.flatMap(source=>(source.data?.org?.policies ?? []).map(policy=>({...policy,location:source.location,sourceOrg:source.data.org,sourceSetups:source.data.setups})))) : org?.policies ?? []
   const groups = org?.groups ?? []
   const policyKey = policy => model ? resourceKey(policy) : policy.id
 
@@ -335,7 +347,7 @@ function FleetSummary({ model, fleet, org, events, onOpen, onOpenGlobal, onDecid
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))
   // Opened for one sandbox: only the policies that reach it.
   const reaches = (p) => !forSandbox || appliesTo(p, { name: forSandbox, groups: groupFor(org, forSandbox), setups: org?.setupMembers?.[forSandbox] ?? [] })
-  const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || [p.name, p.action, ...p.destinations, appliesToText(p, model ? model.sources.find(source=>source.location.id===p.location.id)?.data?.org?.groups ?? [] : groups)].join(" ").toLowerCase().includes(needle))
+  const filteredPolicies = policies.filter((p) => reaches(p)).filter((p) => !needle || (p.copies ?? [p]).some(copy => [copy.name, copy.action, ...copy.destinations, appliesToText(copy, copy.sourceOrg?.groups ?? groups)].join(" ").toLowerCase().includes(needle)))
   const selectedPolicies = policies.filter((p) => selected.has(policyKey(p)))
   const matchingSelected = filteredPolicies.filter((p) => selected.has(policyKey(p))).length
   function toggleSelected(id) {
@@ -430,7 +442,7 @@ function FleetSummary({ model, fleet, org, events, onOpen, onOpenGlobal, onDecid
           <div className="min-w-[960px] bg-card">
             {view === "rules" && model && model.sources.map((source,index)=>{
               const ownOrg=source.data?.org,ownPolicies=filteredPolicies.filter(policy=>policy.location.id===source.location.id)
-              return <PolicyRows key={source.location.id} location={source.location} showHeader={index===0} policies={ownPolicies} org={filtering ? null : ownOrg} sandboxes={source.data?.fleetPolicy?.sandboxes ?? []} groups={ownOrg?.groups ?? []} assignments={ownOrg?.assignments} setupMembers={ownOrg?.setupMembers} onEdit={onEditPolicy} onEditBlocked={()=>onEditBlocked(source.location)} onClearBlocked={()=>onClearBlocked(source.location)} selected={new Set(ownPolicies.filter(policy=>selected.has(policyKey(policy))).map(policy=>policy.id))} onSelect={id=>toggleSelected(policyKey(ownPolicies.find(policy=>policy.id===id)))} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting || !source.location.connected} />
+              return <PolicyRows key={source.location.id} sources={model.sources} selectionSummary={{all:filteredPolicies.length > 0 && matchingSelected === filteredPolicies.length,mixed:matchingSelected > 0 && matchingSelected < filteredPolicies.length,count:filteredPolicies.length}} location={source.location} showHeader={index===0} policies={ownPolicies} org={filtering ? null : ownOrg} sandboxes={source.data?.fleetPolicy?.sandboxes ?? []} groups={ownOrg?.groups ?? []} assignments={ownOrg?.assignments} setupMembers={ownOrg?.setupMembers} onEdit={onEditPolicy} onEditBlocked={()=>onEditBlocked(source.location)} onClearBlocked={()=>onClearBlocked(source.location)} selected={new Set(ownPolicies.filter(policy=>selected.has(policyKey(policy))).map(policy=>policy.id))} onSelect={id=>toggleSelected(policyKey(ownPolicies.find(policy=>policy.id===id)))} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting || !source.location.connected} />
             })}
             {view === "rules" && !model && <PolicyRows policies={filteredPolicies} org={filtering ? null : org} sandboxes={sandboxes} groups={groups} assignments={org?.assignments} setupMembers={org?.setupMembers} onEdit={onEditPolicy} onEditBlocked={onEditBlocked} onClearBlocked={onClearBlocked} selected={selected} onSelect={toggleSelected} onSelectAll={toggleMatching} onDelete={setDeleteTargets} deleting={deleting} />}
             {view === "destinations" && <>
@@ -1071,7 +1083,9 @@ function ScopedEgressView({ onNavigate: navigate, initialScope, initialGlobal = 
 }
 
 function CombinedEgressView({onNavigate,requestedLocation}) {
-  const model=useLocationData(['fleetPolicy','org','activity'])
+  const model=useLocationData(['fleetPolicy','org','activity','setups'])
+  const records=model.sources.flatMap(source=>(source.data?.org?.policies ?? []).map(policy=>({...policy,location:source.location,sourceOrg:source.data.org,sourceSetups:source.data.setups})))
+  const sourceChanges=useSourceChanges(records,model.apiFor,model.refresh)
   const [editor,setEditor]=React.useState(null)
   const [creating,setCreating]=React.useState(false)
   const [detail,setDetail]=React.useState(null)
@@ -1096,7 +1110,7 @@ function CombinedEgressView({onNavigate,requestedLocation}) {
   const events=model.sources.flatMap(source=>source.data?.activity?.events ?? [])
   function policyDialog(location,initial,onClose) {
     const source=sourceFor(location),org=source?.data?.org
-    return <LocationProvider location={location}><PolicyDialog open onOpenChange={open=>{if(!open)onClose()}} initial={initial} groups={org?.groups ?? []} sandboxes={(source?.data?.fleetPolicy?.sandboxes ?? []).map(box=>box.name)} assignments={org?.assignments ?? {}} setupMembers={org?.setupMembers ?? {}} knownPrograms={[...new Set((source?.data?.activity?.events ?? []).map(event=>event.binary).filter(Boolean))]} onGroupCreated={model.refresh} onSaved={()=>{model.refresh();toast.success('Saved rule')}} /></LocationProvider>
+    return <LocationProvider location={location}><SourceEditProvider record={{...initial,location}} type="network" offer={sourceChanges.offer}><PolicyDialog key={resourceKey({...initial,location})} sourceControl={initial.copies && <SourceSwitcher record={{...initial,location}} onChange={copy=>setEditor({initial:{...copy,...records.find(item=>resourceKey(item)===resourceKey(copy)),copies:initial.copies,configurationCount:initial.configurationCount},location:copy.location})} />} open onOpenChange={open=>{if(!open)onClose()}} initial={initial} groups={org?.groups ?? []} sandboxes={(source?.data?.fleetPolicy?.sandboxes ?? []).map(box=>box.name)} assignments={org?.assignments ?? {}} setupMembers={org?.setupMembers ?? {}} knownPrograms={[...new Set((source?.data?.activity?.events ?? []).map(event=>event.binary).filter(Boolean))]} onGroupCreated={model.refresh} onSaved={()=>{model.refresh();toast.success('Saved rule')}} /></SourceEditProvider></LocationProvider>
   }
   if(model.loading && !model.sources.length)return <p role="status" className="py-16 text-center text-sm text-muted-foreground">Loading egress…</p>
   return <>
@@ -1106,6 +1120,7 @@ function CombinedEgressView({onNavigate,requestedLocation}) {
     }} />
     {creating && <LocationAction onClose={()=>setCreating(false)}>{(location,onClose)=>creating==='global' ? <Sheet open onOpenChange={open=>{if(!open)onClose()}}><SheetContent className="overflow-auto sm:max-w-4xl"><SheetHeader><SheetTitle>Global policy</SheetTitle><SheetDescription><PlacementBadge location={location} /></SheetDescription></SheetHeader><LocationProvider location={location}><LiveProvider><ScopedEgressView onNavigate={onNavigate} initialGlobal /></LiveProvider></LocationProvider></SheetContent></Sheet> : policyDialog(location,creating.initial,onClose)}</LocationAction>}
     {editor && policyDialog(editor.location,editor.initial,()=>setEditor(null))}
+    {sourceChanges.dialog}
     {blocked && <LocationProvider location={blocked.location}><BlockedHostsDialog open onOpenChange={open=>{if(!open)setBlocked(null)}} org={blocked.org ?? {...sourceFor(blocked.location)?.data?.org?.org,...(blocked.clear?{blocked:[]}: {})}} onSaved={()=>{model.refresh();toast.success('Saved blocked hosts')}} /></LocationProvider>}
     {detail && <Sheet open onOpenChange={open=>{if(!open){setDetail(null);model.refresh()}}}><SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-5xl"><SheetHeader className="shrink-0 border-b px-6 py-4"><SheetTitle>{detail.name}</SheetTitle><SheetDescription><PlacementBadge location={detail.location} /></SheetDescription></SheetHeader><div className="min-h-0 flex-1"><LocationProvider location={detail.location}><LiveProvider><ScopedEgressView onNavigate={onNavigate} initialScope={detail.name} /></LiveProvider></LocationProvider></div></SheetContent></Sheet>}
   </>
