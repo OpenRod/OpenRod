@@ -15,3 +15,8 @@ test('an unreachable or missing Local still asks, so it can be connected', () =>
   assert.equal(directLocation([{ ...local, connected: false }]), null)
   assert.equal(directLocation([]), null)
 })
+test('Cloud next to This computer keeps the choice', () => {
+  const cloud = { target: 'cloud', context: '["cloud","default"]', remote: false, connected: true }
+  assert.equal(directLocation([local, cloud]), null)
+  assert.equal(directLocation([cloud, local]), null)
+})

@@ -1,7 +1,6 @@
-// Without a Remote (connected or saved) there is nothing to choose: a new
-// resource goes straight to the location the picker would offer first.
+// With only one reachable place to put it, a new resource goes straight there.
+// Any other location (a Remote, connected or saved, or Cloud) keeps the choice.
 export function directLocation(locations) {
-  if (locations.some(location => location.remote)) return null
-  const local = locations.find(location => !location.remote)
-  return local?.connected ? local : null
+  const [only] = locations
+  return locations.length === 1 && !only.remote && only.connected ? only : null
 }
