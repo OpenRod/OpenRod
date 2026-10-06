@@ -3,11 +3,12 @@ import { LocalConnect } from './local-connect'
 import { LocalReturn } from './local-return'
 import { CloudMachine } from './cloud-machine'
 import * as React from 'react'
-import { initializeApp, getApps } from 'firebase/app'
-import { getAuth, GoogleAuthProvider, inMemoryPersistence, setPersistence, signInWithPopup, signOut } from 'firebase/auth'
 import { LINK_REQUIRED } from '@/lib/api'
 import { CloudSignIn } from './cloud-sign-in'
 import { cloudSignInError } from '@/lib/cloud-sign-in-error'
+
+// Only cloud sign-in needs Firebase, so the local console never downloads it.
+const firebaseSdk = () => Promise.all([import('firebase/app'), import('firebase/auth')])
 
 async function authRequest(path, body) {
   const response = await fetch(`/api/auth/${path}`, {
@@ -57,22 +58,26 @@ export function AuthGate({ children }) {
     window.addEventListener(LINK_REQUIRED, locked)
     return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); window.removeEventListener(LINK_REQUIRED, locked) }
   }, [])
+  // Loaded with the sign-in screen, so the click still opens Google's popup directly.
+  React.useEffect(() => { if (config?.firebase && !user) firebaseSdk().catch(() => {}) }, [config?.firebase, user])
   async function login() {
     if (signingIn || !config?.firebase) return
     setSigningIn(true); setError('')
-    let auth
+    let auth, sdk
     try {
+      const [{ initializeApp, getApps }, firebaseAuth] = await firebaseSdk()
+      sdk = firebaseAuth
       const app = getApps().find(app => app.name === 'openrod-cloud') ?? initializeApp(config.firebase, 'openrod-cloud')
-      auth = getAuth(app)
-      await setPersistence(auth, inMemoryPersistence)
-      const provider = new GoogleAuthProvider()
+      auth = sdk.getAuth(app)
+      await sdk.setPersistence(auth, sdk.inMemoryPersistence)
+      const provider = new sdk.GoogleAuthProvider()
       provider.setCustomParameters({ prompt: 'select_account' })
-      const credential = await signInWithPopup(auth, provider)
+      const credential = await sdk.signInWithPopup(auth, provider)
       const session = await authRequest('session', { idToken: await credential.user.getIdToken(true) })
       setUser(session.user)
     } catch (reason) {
       setError(cloudSignInError(reason))
-    } finally { if (auth) await signOut(auth).catch(() => {}); setSigningIn(false) }
+    } finally { if (auth) await sdk.signOut(auth).catch(() => {}); setSigningIn(false) }
   }
   async function logout() {
     try { await authRequest('logout', {}) } catch (e) { setError(e.message) }
