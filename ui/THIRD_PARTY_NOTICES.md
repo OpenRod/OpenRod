@@ -43,7 +43,7 @@ SOFTWARE.
 
 ## Bundled into the web interface (dist/)
 
-35 packages compiled into the browser bundle, including fonts. Packages that are also runtime dependencies are listed in the next section.
+36 packages compiled into the browser bundle, including fonts. Packages that are also runtime dependencies are listed in the next section.
 
 ### @base-ui/react@1.8.0
 
@@ -109,35 +109,35 @@ SOFTWARE.
 
 ### @firebase/app@0.16.2
 
-License: Apache-2.0
+License: Apache-2.0  
 Source: https://github.com/firebase/firebase-js-sdk.git
 
 No license file is included in the package; its manifest declares `Apache-2.0`.
 
 ### @firebase/auth@1.13.6
 
-License: Apache-2.0
+License: Apache-2.0  
 Source: https://github.com/firebase/firebase-js-sdk.git
 
 No license file is included in the package; its manifest declares `Apache-2.0`.
 
 ### @firebase/component@0.7.5
 
-License: Apache-2.0
+License: Apache-2.0  
 Source: https://github.com/firebase/firebase-js-sdk.git
 
 No license file is included in the package; its manifest declares `Apache-2.0`.
 
 ### @firebase/logger@0.5.2
 
-License: Apache-2.0
+License: Apache-2.0  
 Source: https://github.com/firebase/firebase-js-sdk.git
 
 No license file is included in the package; its manifest declares `Apache-2.0`.
 
 ### @firebase/util@1.15.3
 
-License: Apache-2.0
+License: Apache-2.0  
 Source: https://github.com/firebase/firebase-js-sdk.git
 
 No license file is included in the package; its manifest declares `Apache-2.0`.
@@ -425,6 +425,31 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+### canvas-confetti@1.9.4
+
+License: ISC  
+Source: https://github.com/catdad/canvas-confetti.git
+
+LICENSE:
+
+```text
+ISC License
+
+Copyright (c) 2020, Kiril Vatev
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
 ### class-variance-authority@0.7.1
 
 License: Apache-2.0  
@@ -677,7 +702,7 @@ SOFTWARE.
 
 ### firebase@12.19.0
 
-License: Apache-2.0
+License: Apache-2.0  
 Source: https://github.com/firebase/firebase-js-sdk.git
 
 No license file is included in the package; its manifest declares `Apache-2.0`.
@@ -715,7 +740,7 @@ SOFTWARE.
 
 ### idb@7.1.1
 
-License: ISC
+License: ISC  
 Source: git://github.com/jakearchibald/idb.git
 
 LICENSE:
