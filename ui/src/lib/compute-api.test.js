@@ -79,6 +79,46 @@ test('automatic context discovery is pinned to the API compute target', async ()
   } finally {globalThis.fetch=oldFetch;setComputeTarget('local')}
 })
 
+test('working location scopes context discovery and all page reads and edits despite the saved SSH default', async () => {
+  const calls = [], oldFetch = globalThis.fetch
+  const localContext = '["local-gw","default"]', remoteContext = '["ssh-gw","team"]'
+  globalThis.fetch = async (path, options) => {
+    calls.push({ path, options })
+    return { ok: true, json: async () => ({ gateway: options.headers?.['x-openshell-context'] === localContext ? 'local-gw' : 'ssh-gw', workspace: 'default' }) }
+  }
+  try {
+    const local = module.createApi('local', undefined, localContext)
+    assert.equal((await local.context()).gateway, 'local-gw')
+    await local.org(); await local.fleetPolicy(); await local.ingress(); await local.secrets(); await local.activity(); await local.setups()
+    await local.saveGroup({ name: 'test' }); await local.savePolicy({ name: 'test' }); await local.createSecret({ name: 'test' }); await local.saveSetup('scan', 'test', true)
+    for (const { options } of calls) {
+      assert.equal(options.headers['x-openshell-context'], localContext)
+      assert.equal(options.headers['x-openshell-location'], '1')
+    }
+    // Selecting Local must not redirect an existing remote sandbox's actions.
+    await local.forContext(remoteContext).lifecycle('same-name', 'stop')
+    assert.equal(calls.at(-1).options.headers['x-openshell-context'], remoteContext)
+  } finally { globalThis.fetch = oldFetch }
+})
+
+test('connection management never inherits an offline owner or requests its context', async () => {
+  const calls = [], oldFetch = globalThis.fetch
+  globalThis.fetch = async (path, options) => { calls.push({ path, options }); return { ok: true, json: async () => ({}) } }
+  try {
+    for (const api of [module.createApi('local'), module.createApi('local', undefined, '["offline-ssh","default"]')]) {
+      await api.connections(); await api.connectionJob('job'); await api.connect({ localGateway: 'local-gw' })
+      await api.installConnectionDocker('job'); await api.installConnectionRuntime('job'); await api.uploadConnectionPackage('job', new Uint8Array([1]))
+      await api.scanSshHost({}); await api.addSshHost('token'); await api.removeSshHost('ssh'); await api.restoreSshHost('ssh'); await api.forgetRemote(); await api.disconnectRemote()
+    }
+    assert.equal(calls.length, 24)
+    for (const { path, options } of calls) {
+      assert.ok(path.startsWith('/api/os/connections'))
+      assert.equal(options.headers['x-openshell-context'], undefined)
+      assert.equal(options.headers['x-openshell-location'], undefined)
+    }
+  } finally { globalThis.fetch = oldFetch }
+})
+
 test('first sign-in preserves its workflow, but disconnect and account replacement retire it', () => {
   const first = advanceComputeOwner({uid:null,revision:0},'alice')
   assert.equal(first.revision,0)

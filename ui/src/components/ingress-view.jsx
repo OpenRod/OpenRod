@@ -1,3 +1,10 @@
+import { SourceStatus, useLocationData } from '@/lib/location-data'
+import { LocationProvider } from '@/lib/location-context'
+import { LiveProvider } from '@/lib/live'
+import { PlacementBadge } from '@/components/placement-badge'
+import { resourceKey } from '@/lib/locations'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import { SearchInput } from '@/components/ui/search-input'
 import * as React from "react"
 import { Check, Copy, DoorClosed, DoorOpen, ExternalLink, Globe, KeyRound, TerminalSquare, Timer, X } from "lucide-react"
 import { toast } from "sonner"
@@ -195,12 +202,13 @@ function collapseVisits(events) {
   return out
 }
 
-export function IngressView() {
+export function IngressView({combined}) {
   const location = useLocation()
+  if(combined)return <CombinedIngressView />
   return <ScopedIngressView key={location?.id ?? location?.context ?? "default"} />
 }
 
-function ScopedIngressView() {
+function ScopedIngressView({selectedSandbox}) {
   const api = useApi()
   const location = useLocation()
   const scopeKey = location ? `ingress-scope:${location.context}` : "ingress-scope"
@@ -208,7 +216,7 @@ function ScopedIngressView() {
   const now = useNow()
   const sandboxes = (live.sandboxes ?? []).filter((s) => s.phase !== "deleting")
   const [scope, setScope] = React.useState(() => { try { return sessionStorage.getItem(scopeKey) } catch { return null } })
-  const selected = sandboxes.find((s) => s.name === scope)?.name ?? sandboxes[0]?.name ?? null
+  const selected = selectedSandbox ?? sandboxes.find((s) => s.name === scope)?.name ?? sandboxes[0]?.name ?? null
   React.useEffect(() => { try { if (selected) sessionStorage.setItem(scopeKey, selected) } catch { /* optional */ } }, [selected, scopeKey])
 
   const [data, setData] = React.useState(null)
@@ -230,7 +238,7 @@ function ScopedIngressView() {
 
   return (
     <div className="flex h-full min-h-0">
-      <nav aria-label="Sandbox" className="hidden w-56 shrink-0 overflow-y-auto border-r border-border bg-background p-3 md:block">
+      {!selectedSandbox && <nav aria-label="Sandbox" className="hidden w-56 shrink-0 overflow-y-auto border-r border-border bg-background p-3 md:block">
         <p className="px-2 pb-2 text-[10px] font-bold tracking-widest text-faint uppercase">Sandboxes</p>
         {sandboxes.map((s) => (
           <button key={s.id} onClick={() => setScope(s.name)} aria-current={selected === s.name}
@@ -240,7 +248,7 @@ function ScopedIngressView() {
             {openBy[s.name] ? <span className="rounded bg-emerald-50 px-1 font-mono text-[10px] text-emerald-800" title="Open services">{openBy[s.name]} open</span> : <span className="font-mono text-[10px] text-muted-foreground">closed</span>}
           </button>
         ))}
-      </nav>
+      </nav>}
 
       <div className="min-w-0 flex-1 overflow-y-auto">
         {error ? <div role="alert" className="grid justify-items-center gap-3 py-16 text-center text-sm text-muted-foreground">
@@ -252,9 +260,9 @@ function ScopedIngressView() {
           : (
             <div className="mx-auto grid max-w-6xl gap-6 px-4 py-5 sm:px-6 xl:grid-cols-[minmax(0,1fr)_17rem]">
               <div className="min-w-0 space-y-6">
-                <SelectField value={selected} onChange={(e) => setScope(e.target.value)} className="h-8 rounded-md border border-input bg-transparent px-2 font-mono text-xs md:hidden" aria-label="Sandbox">
+                {!selectedSandbox && <SelectField value={selected} onChange={(e) => setScope(e.target.value)} className="h-8 rounded-md border border-input bg-transparent px-2 font-mono text-xs md:hidden" aria-label="Sandbox">
                   {sandboxes.map((s) => <option key={s.id}>{s.name}</option>)}
-                </SelectField>
+                </SelectField>}
 
                 <BlurFade duration={0.22} offset={3} blur="1px">
                   <div className={`rounded-lg border p-5 ${services.length ? "border-emerald-600/20 bg-emerald-50/40" : "border-border bg-card"}`}>
@@ -314,4 +322,22 @@ function ScopedIngressView() {
       </div>
     </div>
   )
+}
+
+function CombinedIngressView() {
+  const model = useLocationData(['ingress'])
+  const [opened,setOpened] = React.useState(null)
+  const [query,setQuery] = React.useState('')
+  const boxes = model.inventory.sandboxes.filter(box=>box.phase !== 'deleting' && box.name.toLowerCase().includes(query.toLowerCase()))
+  return <div className="flex h-full min-h-0 flex-col">
+    <div className="flex items-center gap-2 border-b px-4 py-3 sm:px-6"><SearchInput className="w-60" aria-label="Search ingress" placeholder="Search sandboxes…" value={query} onValueChange={setQuery} /></div>
+    <SourceStatus model={model} offline={false} />
+    <div className="min-h-0 flex-1 overflow-auto"><table aria-label="Ingress" className="w-full min-w-[560px] text-left text-xs"><thead className="sticky top-0 border-b bg-muted text-muted-foreground"><tr>{['Sandbox','Source','Web services','Access'].map(label=><th key={label} className="h-9 px-6 font-normal">{label}</th>)}</tr></thead><tbody className="divide-y">{boxes.map(box=>{
+      const source=model.sources.find(source=>source.location.id===box.location.id)
+      const location=source?.location ?? box.location
+      const services=source?.data?.ingress?.services.filter(service=>service.sandbox===box.name) ?? []
+      return <tr key={resourceKey(box)} className="bg-card hover:bg-muted/40"><td className="px-6 py-3 font-mono">{box.name}</td><td className="px-6"><PlacementBadge location={location} /></td><td className="px-6 text-muted-foreground">{source?.data ? services.length ? services.map(service=>`${service.name} · ${service.port}`).join(', ') : 'Closed' : location.connected ? 'Loading…' : 'Offline'}</td><td className="px-6"><Button variant="ghost" size="sm" disabled={!location.connected} onClick={()=>setOpened({...box,location})}>{location.connected ? 'Manage access' : 'Offline'}</Button></td></tr>
+    })}</tbody></table>{!boxes.length && <p role="status" className="py-16 text-center text-sm text-muted-foreground">{model.inventory.loading ? 'Loading ingress…' : 'No matching sandboxes.'}</p>}</div>
+    {opened && <Sheet open onOpenChange={open=>{if(!open){setOpened(null);model.refresh()}}}><SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-5xl"><SheetHeader className="shrink-0 border-b px-6 py-4"><SheetTitle>{opened.name}</SheetTitle><SheetDescription><PlacementBadge location={opened.location} /></SheetDescription></SheetHeader><div className="min-h-0 flex-1"><LocationProvider location={opened.location}><LiveProvider><ScopedIngressView selectedSandbox={opened.name} /></LiveProvider></LocationProvider></div></SheetContent></Sheet>}
+  </div>
 }

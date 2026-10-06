@@ -27,6 +27,9 @@ export const AGENT_ACCESS = {
     binaries: ['/usr/bin/claude', '/usr/local/bin/claude'],
     endpoints: ['api.anthropic.com', 'platform.claude.com', 'claude.ai'].map(host => endpoint(host)),
     authentication: 'Attach a Claude credential or sign in with your subscription after connecting.',
+    // Claude Code lists claude.ai connectors on api.anthropic.com and calls
+    // them through Anthropic's proxy, which holds each connector's sign-in.
+    connectors: { name: 'claude.ai connectors', hosts: ['mcp-proxy.anthropic.com'] },
   },
   opencode: {
     name: 'OpenCode',
@@ -39,6 +42,10 @@ export const AGENT_ACCESS = {
     name: 'Codex',
     binaries: ['/usr/bin/codex', '/usr/local/bin/codex', '/usr/local/lib/node_modules/@openai/**/codex', '/usr/lib/node_modules/@openai/**/codex'],
     endpoints: ['api.openai.com', 'auth.openai.com', 'chatgpt.com', 'ab.chatgpt.com'].map(host => endpoint(host)),
+    // Codex lists and calls ChatGPT connectors (apps) and hosted plugins on
+    // chatgpt.com, which it also needs for sign-in, so turning them off closes
+    // these paths instead.
+    connectors: { name: 'ChatGPT connectors and plugins', paths: { 'chatgpt.com': ['/backend-api/ps/mcp', '/backend-api/ps/mcp/**', '/backend-api/connectors/**'] } },
     // Codex's "Sign in with ChatGPT" redirects the host browser to a callback
     // server inside the sandbox, which the browser cannot reach.
     authentication: 'Attach a Codex credential, or run codex after connecting and choose “Sign in with Device Code” (ChatGPT plan) or “Provide your own API key”. “Sign in with ChatGPT” can’t complete from a sandbox.',
@@ -85,19 +92,34 @@ export const TOOL_ACCESS = {
   },
 }
 
-export function agentAccessFor(recipe) {
+// Agents whose subscription brings its own connectors (remote MCPs). They stay
+// off unless chosen at creation.
+export const connectorAgents = (ids = []) => ids.filter(id => AGENT_ACCESS[id]?.connectors)
+// A Claude Code secret is an API key; a Codex secret is the ChatGPT sign-in
+// itself, so only the former rules connectors out.
+const API_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'OPENAI_API_KEY']
+export const holdsApiKey = (secret) => Boolean(secret?.credentialKeys?.some(key => API_KEYS.includes(key)))
+
+function withConnectors(access, on) {
+  const { hosts = [], paths = {} } = access.connectors ?? {}
+  const endpoints = access.endpoints.map(e => !on && paths[e.host] ? { ...e, deny: [...(e.deny ?? []), ...paths[e.host].map(path => ({ method: '*', path }))] } : e)
+  return { ...access, endpoints: on ? [...endpoints, ...hosts.map(host => endpoint(host))] : endpoints }
+}
+
+export function agentAccessFor(recipe, { connectors = [] } = {}) {
   // Only built recipes have known installation locations. An existing image
   // keeps its policy as chosen; we do not guess what it contains.
   if (recipe?.source !== 'build') return { profiles: [], unsupported: [] }
   const ids = [...new Set(recipe.agents ?? [])]
+  if (!Array.isArray(connectors) || connectors.some(id => !connectorAgents(ids).includes(id))) throw new Error('Connectors can be turned on only for this sandbox’s Claude Code or Codex.')
   return {
-    profiles: [...ids.filter(id => AGENT_ACCESS[id]).map(id => ({ id, rule: `agent-${id}`, ...AGENT_ACCESS[id] })), ...[...new Set(recipe.runtimes ?? [])].filter(id => TOOL_ACCESS[id]).map(id => ({ id, ...TOOL_ACCESS[id] }))],
+    profiles: [...ids.filter(id => AGENT_ACCESS[id]).map(id => ({ id, rule: `agent-${id}`, ...withConnectors(AGENT_ACCESS[id], connectors.includes(id)) })), ...[...new Set(recipe.runtimes ?? [])].filter(id => TOOL_ACCESS[id]).map(id => ({ id, ...TOOL_ACCESS[id] }))],
     unsupported: ids.filter(id => !AGENT_ACCESS[id]),
   }
 }
 
-export function agentAccessRules(recipe) {
-  const { profiles, unsupported } = agentAccessFor(recipe)
+export function agentAccessRules(recipe, options) {
+  const { profiles, unsupported } = agentAccessFor(recipe, options)
   if (unsupported.length) throw new Error(`Automatic network access is not configured for: ${unsupported.join(', ')}. Add a reviewed agent access profile before launching this template.`)
   return profiles.map(({ rule, binaries, endpoints }) => ({ name: rule, binaries, endpoints }))
 }

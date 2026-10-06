@@ -154,6 +154,7 @@ export function ConnectionsView({ onCreateSandbox }) {
                 <p className="mt-0.5 text-xs text-muted-foreground">Added in OpenRod. One machine is connected at a time.</p>
               </div>
               <Button variant="ghost" size="icon-sm" aria-label="Refresh connections" onClick={() => load()} className="text-muted-foreground"><RefreshCw /></Button>
+              {overview.forgottenHosts?.length > 0 && <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" />}>Restore</DropdownMenuTrigger><DropdownMenuContent align="end">{overview.forgottenHosts.map(host => <DropdownMenuItem key={host} onClick={() => act(host, () => api.restoreSshHost(host), "Couldn’t restore it")}>Restore {host}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
               <Button size="sm" onClick={() => setAdding(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />Add</Button>
             </div>
             {mine.length > 0
@@ -198,7 +199,7 @@ export function ConnectionsView({ onCreateSandbox }) {
     <Dialog open={Boolean(wizard)} onOpenChange={(open) => { if (!open) setWizard(null) }}>
       <DialogContent className="sm:max-w-3xl" aria-describedby={undefined}>
         <DialogHeader><DialogTitle>{wizard?.replacing ? "Switch host" : "Connect a remote machine"}</DialogTitle></DialogHeader>
-        {wizard && <RemoteConnect initialHost={wizard.host} connectedHost={wizard.replacing ?? null} onUseConnected={() => setWizard(null)}
+        {wizard && <RemoteConnect key={wizard.host} initialHost={wizard.host} connectedHost={wizard.replacing ?? null} onUseConnected={() => setWizard(null)}
           onConnected={(job) => { setWizard(null); toast.success(`Connected to ${job.host}`); load(); inventory.refresh() }} onBack={() => setWizard(null)} />}
       </DialogContent>
     </Dialog>

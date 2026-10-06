@@ -12,7 +12,7 @@ import { connectLocalGateway } from "@/lib/locations"
 
 export function StepTrail({ step, subject = "sandbox" }) {
   return <ol aria-label="Steps" className="flex items-center gap-2 text-[11px] text-muted-foreground">
-    {["Location", subject === "template" ? "Template" : "Sandbox"].map((label, index) => {
+    {["Location", subject === "setup" ? "Setup" : subject === "template" ? "Template" : "Sandbox"].map((label, index) => {
       const current = index + 1 === step
       const finished = index + 1 < step
       return <React.Fragment key={label}>
@@ -149,36 +149,36 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   async function chooseRegisteredLocal() {
     setLocalBusy(true); setError(null)
     try {
-      await connectLocalGateway(api, locals[0].name)
-      window.location.reload()
+      const job = await connectLocalGateway(api, locals[0].name)
+      onConnected(job)
     } catch (reason) { setError(reason.message); setLocalBusy(false) }
   }
 
   const slide = reduce ? {} : { initial: { opacity: 0, x: view === "remote" ? 24 : -24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: view === "remote" ? -24 : 24 }, transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] } }
-  const localCaption = local ? (local.connected ? "Local gateway" : "Disconnected") : locals?.length ? `Use ${locals[0].name}` : locals ? (missingCli ? "OpenShell isn’t installed" : "No local gateway running") : "Checking…"
+  const localCaption = local ? (local.connected ? local.cloud ? "Cloud gateway" : "Local gateway" : "Disconnected") : locals?.length ? `Use ${locals[0].name}` : locals ? (missingCli ? "OpenShell isn’t installed" : "No local gateway running") : "Checking…"
 
   return <div className="flex min-h-0 flex-col gap-6 rounded-xl bg-popover p-7 ring-1 ring-foreground/10">
     <DialogHeader className="gap-3">
-      <StepTrail step={1} subject={subject} />
+      {!['workspace', 'resource'].includes(subject) && <StepTrail step={1} subject={subject} />}
       <div className="flex items-center gap-2">
         {view === "remote" && <Button type="button" variant="ghost" size="icon-sm" aria-label="Back to locations" onClick={() => setView("choose")}><ArrowLeft /></Button>}
-        <DialogTitle>{view === "remote" ? "Connect a machine" : "Where should it run?"}</DialogTitle>
+        <DialogTitle>{view === "remote" ? "Connect a machine" : subject === "resource" ? "Create in" : subject === "workspace" ? "Work in" : subject === "setup" ? "Import to" : "Where should it run?"}</DialogTitle>
       </div>
-      <DialogDescription className={view === "remote" ? "sr-only" : "text-xs"}>{view === "remote" ? `Connect an SSH host to ${subject === "sandbox" ? "run sandboxes on" : "build templates on"}.` : `Pick a location for this ${subject}.`}</DialogDescription>
+      <DialogDescription className={view === "remote" || ['setup', 'workspace', 'resource'].includes(subject) ? "sr-only" : "text-xs"}>{view === "remote" ? `Connect an SSH host to ${subject === "workspace" ? "work on" : subject === "setup" ? "import your setup to" : subject === "sandbox" ? "run sandboxes on" : "build templates on"}.` : subject === "workspace" ? "Choose a working location." : `Pick a location for this ${subject}.`}</DialogDescription>
     </DialogHeader>
 
     <div className="-m-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
       <AnimatePresence mode="wait" initial={false}>
         {view === "choose" ? <motion.div key="choose" {...slide} className="grid gap-3">
-          <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-3" : ""}`}>
-          <Place index={0} scene="local" live={local?.connected} title="This computer" caption={localCaption} tone={local?.connected ? "live" : "idle"}
+          <div className={`grid gap-4 ${allowRemote ? ['setup', 'workspace', 'resource'].includes(subject) ? "sm:grid-cols-2" : "sm:grid-cols-3" : ""}`}>
+          <Place index={0} scene={local?.cloud ? "cloud" : "local"} live={local?.connected} title={local?.cloud ? "Cloud" : "This computer"} caption={localCaption} tone={local?.connected ? "live" : "idle"}
             disabled={local ? !local.connected : !locals?.length || localBusy}
             onClick={() => local ? onPick(local.id ?? local.context) : chooseRegisteredLocal()}
             trailing={localBusy && <Loader2 className="size-4 animate-spin text-muted-foreground" />} />
           {allowRemote && <Place index={1} scene="remote" live={remote?.connected} title="Remote machine"
             caption={remote?.connected ? `Connected · ${hostOf(remote)}` : remote ? `${hostOf(remote)} · Disconnected` : "Your server, over SSH"}
             tone={remote?.connected ? "live" : remote ? "warn" : "idle"} onClick={() => setView("remote")} />}
-          {allowRemote && <Place index={2} scene="cloud" title="Cloud" caption="Coming soon" disabled trailing={<span aria-hidden="true" />} />}
+          {allowRemote && !['setup', 'workspace', 'resource'].includes(subject) && <Place index={2} scene="cloud" title="Cloud" caption="Coming soon" disabled trailing={<span aria-hidden="true" />} />}
           </div>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <div className="mt-3 flex justify-end">
