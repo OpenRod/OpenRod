@@ -1,4 +1,5 @@
 import {createLocalCloudNative} from './local-cloud-native.js'
+import { claimCloudAnnouncement } from './announcements.js'
 import {cloudSshRoute,cloudSshUpgrade} from './cloud-ssh.js'
 import {createLocalCloud} from './local-cloud.js'
 import { cloudOrigin, CLOUD_SOON } from './cloud-origin.js'
@@ -522,6 +523,11 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           else if (requestedContext != null && requestedContext !== contextKey() && !(req.method === 'GET' && parts[0] === 'connections')) return send(res, 409, { error: 'Console context changed. Reload before continuing.' })
           return await runWithContext(owner, async () => {
           if (req.method === 'GET' && parts.length === 1 && parts[0] === 'capabilities') return send(res, 200, consoleCapabilities(security.config.mode))
+          if (parts.length === 2 && parts[0] === 'announcements' && parts[1] === 'cloud') {
+            if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
+            await body(req)
+            return send(res, 200, await claimCloudAnnouncement({ user: identityContext.getStore()?.uid ?? 'local' }))
+          }
           // Connection discovery is available before any gateway is selected.
           // Job reads remain available after that job changes the context.
           if (parts[0] === 'connections') {

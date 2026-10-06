@@ -19,6 +19,7 @@ import { LocationProvider } from "@/lib/location-context"
 import { useInventory } from "@/lib/inventory"
 import { workingLocation, locationIdentity } from "@/lib/working-location"
 import { ResourceImportDialog } from '@/components/resource-import-dialog'
+import { CloudAnnouncement } from '@/components/cloud-announcement'
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -148,6 +149,7 @@ export function App() {
       <SidebarProvider>
         <AppSidebar view={view} onNavigate={navigate} />
         <SidebarInset className="min-w-0 bg-background">
+          <CloudAnnouncement />
           <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-6">
             <SidebarTrigger className="mr-2 md:hidden" />
             <h1 className="text-[18px] font-semibold tracking-tight">{TITLES[view]}</h1>
