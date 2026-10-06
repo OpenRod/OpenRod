@@ -113,8 +113,10 @@ export function ConnectionsView({ onCreateSandbox }) {
     const title = row.label ?? row.name
     if (kind === "forget") act(row.name, async () => { await api.forgetRemote(); toast.success(`Forgot ${title}`) }, "Couldn’t forget it")
     else act(row.name, async () => {
-      if (remote?.host === row.name) await api.forgetRemote()
+      // Forget can move the console off this host, which outdates the page's
+      // context for the next request, so it runs last.
       await api.removeSshHost(row.name)
+      if (remote?.host === row.name) await api.forgetRemote()
       toast.success(`Deleted ${title}`)
     }, "Couldn’t delete it")
   }

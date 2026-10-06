@@ -6,7 +6,7 @@ import path from 'node:path'
 import https from 'node:https'
 import { X509Certificate } from 'node:crypto'
 import { parse } from 'smol-toml'
-import { prepareGatewayState, registerManagedGateway, gatewayEnvironment, remoteGatewayName } from './remote-gateway-state.js'
+import { prepareGatewayState, registerManagedGateway, unregisterManagedGateway, gatewayEnvironment, remoteGatewayName } from './remote-gateway-state.js'
 import { findExecutable, runCli } from './openshell-cli.js'
 
 const probe = { engineId: 'engine-one', version: '0.1.2' }
@@ -84,4 +84,22 @@ test('inherited gateway overrides cannot redirect the second gateway into operat
     if (before === undefined) delete process.env.OPENSHELL_DB_URL
     else process.env.OPENSHELL_DB_URL = before
   }
+})
+
+test('unregistering removes only a registration this console owns', async t => {
+  const rootDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-unregister-'))
+  t.after(() => fs.rm(rootDirectory, { recursive: true, force: true }))
+  const configDir = path.join(rootDirectory, 'operator-config')
+  const [own, foreign, unmarked] = ['work', 'other', 'plain'].map(host => remoteGatewayName(host, probe.engineId))
+  const registration = name => path.join(configDir, 'gateways', name)
+  for (const [name, root] of [[own, path.join(rootDirectory, 'remote-gateways', own)], [foreign, path.join(rootDirectory, 'elsewhere', foreign)], [unmarked, null]]) {
+    await fs.mkdir(path.join(registration(name), 'mtls'), { recursive: true })
+    await fs.writeFile(path.join(registration(name), 'metadata.json'), '{}')
+    if (root) await fs.writeFile(path.join(registration(name), 'console-managed.json'), JSON.stringify({ root, host: 'work' }))
+  }
+  await fs.mkdir(path.join(configDir, 'gateways', 'local'), { recursive: true })
+  for (const name of [own, foreign, unmarked, 'local', '../gateways', undefined]) await unregisterManagedGateway(name, { configDir, rootDirectory })
+  await assert.rejects(fs.access(registration(own)), { code: 'ENOENT' })
+  for (const name of [foreign, unmarked, 'local']) await fs.access(registration(name))
+  await unregisterManagedGateway(own, { configDir, rootDirectory })
 })

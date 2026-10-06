@@ -121,3 +121,14 @@ export async function registerManagedGateway(state, host, { configDir = CONFIG_D
   // remote compute. Builders must explicitly transfer images before publication.
   await privateWrite(path.join(directory, 'metadata.json'), JSON.stringify({ name: state.name, gateway_endpoint: `https://127.0.0.1:${state.port}`, is_remote: true, gateway_port: state.port, auth_mode: 'mtls' }))
 }
+
+// Removes only a registration this console made for its own state. The state
+// stays, so reconnecting the host reuses its certificates and port.
+export async function unregisterManagedGateway(name, { configDir = CONFIG_DIR, rootDirectory = stateDirectory() } = {}) {
+  if (!/^console-ssh-[a-f0-9]{24}$/.test(name ?? '')) return
+  const directory = path.join(configDir, 'gateways', name)
+  let owner
+  try { owner = JSON.parse(await fs.readFile(path.join(directory, 'console-managed.json'), 'utf8')) } catch { return }
+  if (owner?.root !== path.join(rootDirectory, 'remote-gateways', name)) return
+  await fs.rm(directory, { recursive: true, force: true })
+}

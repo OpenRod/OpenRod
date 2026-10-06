@@ -2,6 +2,12 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **Forget** removes an SSH connection that had already dropped. It used to come back as a disconnected host, even after a restart, leaving the console stuck on it. Reconnecting later still reaches the sandboxes on that machine.
+
 ## 0.1.2
 
 ### Added

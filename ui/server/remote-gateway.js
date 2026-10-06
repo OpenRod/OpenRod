@@ -12,7 +12,7 @@ import { CONFIG_DIR, clearConsoleContext, contextConfigured, contextSelection, d
 import { stateDirectory } from './paths.js'
 import { fail, findExecutable, openshellBinary, runCli, sshBinary } from './openshell-cli.js'
 import { listSshHosts, probeHost, installDocker as installHostDocker, installRuntime, sshArgs } from './remote-hosts.js'
-import { prepareGatewayState, registerManagedGateway } from './remote-gateway-state.js'
+import { prepareGatewayState, registerManagedGateway, unregisterManagedGateway } from './remote-gateway-state.js'
 import { ensureGateway } from './gateway-install.js'
 import { installCommand } from '../shared/openshell-release.js'
 import { startRemoteRuntime } from './remote-runtime.js'
@@ -378,10 +378,22 @@ export function createRemoteConnections({ onSelected = () => {}, onDeselected = 
     async forget() {
       if (disconnecting || job?.status === 'working') throw fail('Wait for the current connection change to finish.', 409)
       await loadHistory()
-      if (active?.status === 'connected' || active?.status === 'connecting') await this.disconnect()
+      const selected = contextSelection().gateway
+      const gateways = new Set([active?.gateway, lastRemote?.gateway, selected])
+      // A dropped connection can stay selected, and a selected registration
+      // brings the location back, so disconnect moves the selection off it.
+      if (active?.status === 'connected' || active?.status === 'connecting' || /^console-ssh-[a-f0-9]{24}$/.test(selected)) await this.disconnect()
       active = null
       lastRemote = null
       await saveHistory()
+      // Another console on this data directory may be connected through the
+      // registration, so it stays while that console holds the lock.
+      const release = await acquireLock().catch(() => null)
+      if (release) {
+        try { for (const name of gateways) await unregisterManagedGateway(name) }
+        catch (error) { logger.warn(`Remote registration could not be removed: ${error.message}`) }
+        finally { await release() }
+      }
       return { ok: true }
     },
     async disconnect() {
