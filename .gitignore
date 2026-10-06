@@ -8,6 +8,8 @@ dist/
 .state/
 *.log
 openrod-*.tgz
+__pycache__/
+*.pyc
 
 # Local environment and authentication material
 .env

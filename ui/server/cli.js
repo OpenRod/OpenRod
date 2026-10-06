@@ -128,10 +128,14 @@ export function rejectUnsupportedUpgrade(req, socket) {
   if (!['/api/os/terminal', '/api/os/ssh', '/api/remote/os/terminal', '/api/remote/os/ssh'].includes(pathname)) socket.destroy()
 }
 
-export async function startConsole(options = parseOptions([]), logger = console) {
-  // The openrod command is the loopback console guarded by its launch token.
-  // Cloud and worker deployments start server/start.js instead.
+// The openrod command is the loopback console guarded by its launch token.
+// Cloud and worker deployments start server/start.js instead.
+function assertLocalMode() {
   if ((process.env.OPENROD_MODE ?? 'local') !== 'local') throw new Error('openrod runs the local console. Unset OPENROD_MODE, or start cloud and worker deployments with server/start.js.')
+}
+
+export async function startConsole(options = parseOptions([]), logger = console) {
+  assertLocalMode()
   const { host, port } = parseOptions(['--host', options.host ?? '127.0.0.1', '--port', String(options.port ?? 4600)])
   let directory
   try {
@@ -195,6 +199,7 @@ async function main() {
   if (options.help) { process.stdout.write(HELP); return }
   if (options.version) { console.log(JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version); return }
   if (!nodeSupported()) throw new Error(`OpenRod needs Node.js 22.13 or newer, and this is ${process.versions.node}. Install a current release from https://nodejs.org, then run it again.`)
+  assertLocalMode()
   quietSqliteWarning()
   // Before the console starts, so the browser opens on a usable local gateway.
   try {

@@ -26,7 +26,7 @@ export async function createCompute(config, credential, {env=process.env, reques
   return value
  }
  return {get:name=>request('GET',`${base}/instances/${name}`),async create(record){
-  const settings=Buffer.from(JSON.stringify({key:record.key,uid:record.uid,origin:config.origin,artifactOrigin,artifactHash,name:record.name,workerProtocol:config.workerProtocol??'current',...(config.workerProtocol==='legacy'?{legacyHeaderPrefix:legacyHeaderPrefix(process.env.OPENROD_LEGACY_HEADER_PREFIX)}:{})})).toString('base64')
+  const settings=Buffer.from(JSON.stringify({key:record.key,uid:record.uid,origin:config.origin,artifactOrigin,artifactHash,name:record.name,workerProtocol:config.workerProtocol??'current',...(config.workerProtocol==='legacy'?{legacyHeaderPrefix:legacyHeaderPrefix(env.OPENROD_LEGACY_HEADER_PREFIX)}:{})})).toString('base64')
   const script=Buffer.from(source.replace('__OPENROD_WORKER_SETTINGS__',settings)).toString('base64')
   const startup=`#!/usr/bin/env bash
 set -euo pipefail
