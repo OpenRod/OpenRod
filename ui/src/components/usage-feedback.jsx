@@ -14,6 +14,16 @@ export const useUsageState = () => React.useSyncExternalStore(analytics.subscrib
 export function UsageProvider({ children }) {
   const state = useUsageState()
   const [dialog, setDialog] = React.useState(null)
+  const prompted = React.useRef(false)
+  React.useEffect(() => {
+    const firstRun = dialog === 'usage' || dialog === 'usage-details'
+    if (firstRun && (!state.available || state.sharing !== null)) {
+      setDialog(null)
+    } else if (state.available && state.sharing === null && !dialog && !prompted.current && !window.location.hash.startsWith('#terminal/')) {
+      prompted.current = true
+      setDialog('usage')
+    }
+  }, [state.available, state.sharing, dialog])
   React.useEffect(() => {
     const changed = () => analytics.refresh()
     window.addEventListener('storage', changed)
@@ -25,11 +35,27 @@ export function UsageProvider({ children }) {
     analytics.setSharing(value)
     setDialog(null)
   }
+  function close() {
+    if (dialog === 'usage-details') setDialog('usage')
+    else if (dialog === 'usage') chooseSharing(false)
+    else setDialog(null)
+  }
+  const details = dialog === 'details' || dialog === 'usage-details'
   return <UsageContext.Provider value={open}>
     {children}
-    <Dialog open={Boolean(dialog)} onOpenChange={value => { if (!value) setDialog(null) }}>
-      <DialogContent className={dialog === 'details' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg' : 'sm:max-w-sm'}>
-        {dialog === 'settings' ? <>
+    <Dialog open={Boolean(dialog)} onOpenChange={value => { if (!value) close() }}>
+      <DialogContent className={details ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg' : 'sm:max-w-sm'}>
+        {dialog === 'usage' ? <>
+          <DialogHeader>
+            <DialogTitle>Help improve OpenRod</DialogTitle>
+            <DialogDescription>Share anonymous metrics via PostHog.</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => chooseSharing(false)}>No thanks</Button>
+            <Button type="button" size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share anonymous usage</Button>
+          </div>
+          <Button type="button" size="sm" variant="ghost" className="justify-self-start text-muted-foreground" onClick={() => setDialog('usage-details')}>What is being shared?</Button>
+        </> : dialog === 'settings' ? <>
           <DialogHeader>
             <DialogTitle>Usage and feedback</DialogTitle>
             <DialogDescription>Share anonymous usage metrics with PostHog ({state.destination}) to improve OpenRod. No commands or project content.</DialogDescription>
@@ -46,7 +72,7 @@ export function UsageProvider({ children }) {
             <Button size="sm" variant="outline" onClick={() => setDialog('feedback')}>Give feedback</Button>
             <Button size="sm" variant="ghost" onClick={() => open('details')}>What is being shared?</Button>
           </div>
-        </> : dialog === 'details' ? <UsageDetails destination={state.destination} onClose={() => setDialog(null)} /> : dialog === 'feedback' ? <FeedbackForm canSend={state.available} onClose={() => setDialog(null)} /> : null}
+        </> : details ? <UsageDetails destination={state.destination} onClose={close} /> : dialog === 'feedback' ? <FeedbackForm canSend={state.available} onClose={() => setDialog(null)} /> : null}
       </DialogContent>
     </Dialog>
   </UsageContext.Provider>
@@ -56,20 +82,6 @@ export function UsageButton() {
   const open = React.useContext(UsageContext)
   if (!open) return null
   return <SidebarMenuButton size="sm" className="text-muted-foreground" onClick={() => open()}><MessageSquare aria-hidden="true" />Usage &amp; feedback</SidebarMenuButton>
-}
-
-export function UsageNotice() {
-  const open = React.useContext(UsageContext)
-  const state = useUsageState()
-  if (!open || !state.available || state.sharing !== null) return null
-  return <div role="group" aria-label="Optional usage sharing" className="grid gap-2 border-t border-sidebar-border pt-3">
-    <p className="text-xs leading-relaxed text-muted-foreground">Share anonymous metrics via PostHog.</p>
-    <Button type="button" variant="outline" size="xs" className="w-full" onClick={() => analytics.setSharing(true)}>Share anonymous usage</Button>
-    <div className="flex flex-wrap gap-1">
-      <Button type="button" variant="outline" size="xs" onClick={() => analytics.setSharing(false)}>No thanks</Button>
-      <Button type="button" variant="ghost" size="xs" className="text-muted-foreground" onClick={() => open('details')}>What is being shared?</Button>
-    </div>
-  </div>
 }
 
 function UsageDetails({ destination, onClose }) {

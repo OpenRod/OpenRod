@@ -20,7 +20,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { useLive } from "@/lib/live"
-import { UsageButton, UsageNotice } from './usage-feedback'
+import { UsageButton } from './usage-feedback'
 
 const ENVIRONMENT = [
   { label: "Sandboxes", icon: Box, view: "sandboxes" },
@@ -145,7 +145,6 @@ export function AppSidebar({ view, onNavigate }) {
             <RemoteMachine />
           </PopoverContent>
         </Popover>
-        <UsageNotice />
       </SidebarFooter>
     </Sidebar>
   )
