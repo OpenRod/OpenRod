@@ -32,9 +32,10 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 
 - Node.js **22.13+**
 - macOS (Apple Silicon) or Linux
-- OpenShell **0.1.2** with a local gateway (`npx openrod` offers to install it)
 - Docker, running: [Docker Desktop](https://docs.docker.com/desktop/) on macOS (`brew install --cask docker-desktop`, then open it once) or [Docker Engine](https://docs.docker.com/engine/install/) on Linux. OpenRod builds sandbox images with it, including for Quick setup.
 - OpenSSH and OpenSSL
+
+You don't need to install OpenShell first. If it's missing, `npx openrod` installs OpenShell **0.1.2** and its local gateway for you in step 2.
 
 **1. Install and start Docker** (on Linux, install [Docker Engine](https://docs.docker.com/engine/install/) instead)
 
@@ -42,7 +43,7 @@ Create sandboxes, edit policy, and open agent sessions from one place, running o
 brew install --cask docker-desktop && open -a Docker
 ```
 
-**2. Run OpenRod.** If OpenShell is missing, it offers to install 0.1.2. On macOS that uses Homebrew, and sandboxes run in VMs.
+**2. Run OpenRod.** If OpenShell is missing, it asks before installing 0.1.2. On macOS that uses Homebrew, and sandboxes run in VMs.
 
 ```bash
 npx openrod
