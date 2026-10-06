@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { buildPackage, packageLocation, packageRuntimeRequirements } from './setup-packages.js'
+import { createPackagePreparation, packageLocation, packageRuntimeRequirements } from './setup-packages.js'
 import { discoverSignIn } from './setup-auth-discovery.js'
 import { checkRemote } from './setup-remote-check.js'
 import { connectCredentials } from './setup-credentials.js'
@@ -101,6 +101,7 @@ export async function prepareImport(store,input,{source,packagesOnly=false}={}){
  const job={id,status:'running',createdAt:new Date().toISOString(),message:'Preparing selected tools',items:items.map(publicItem)}
  state.jobs.set(id,job);state.controllers.set(id,controller);await persist(job)
  const context=contextSelection()
+ const packages=createPackagePreparation({signal:controller.signal})
  void runWithContext(context,async()=>{
    const prepared=[]
    let startupFailure=null
@@ -111,7 +112,7 @@ export async function prepareImport(store,input,{source,packagesOnly=false}={}){
      try{
        if(!item.preparationBlocked&&!item.disabled&&(!packagesOnly||canPrepareAtLaunch(item))){
          if(item.package&&!item.artifact){
-           const artifact=await buildPackage(item.package,{signal:controller.signal,progress:step})
+           const artifact=await packages.build(item.package,{progress:step})
            item={...item,artifact,config:{command:'node',args:[`${packageLocation(artifact)}/${artifact.bin}`,...artifact.args],...(item.environment?{env:item.environment}:{})},issues:item.issues.filter(i=>!isPackagePending(i))}
          }
          if(item.credentialFields?.length&&(choices[item.id]?.useSourceSecrets||choices[item.id]?.provider||Object.values(choices[item.id]?.secrets||{}).some(Boolean))){
@@ -138,7 +139,7 @@ export async function prepareImport(store,input,{source,packagesOnly=false}={}){
    else{job.status='complete';job.message='Review the prepared items. Items needing attention remain inactive.';job.review=store.stage(prepared,preview.credentials)}
    await persist(job)
    // A finished job keeps only its public view; the staged review or snapshot holds the prepared items.
- }).catch((e)=>runWithContext(context,async()=>{job.status='failed';job.message=e?.status?e.message:'Preparation failed. Retry the import.';delete job.current;try{await persist(job)}catch{}})).finally(()=>{state.controllers.delete(id);delete job.preparedItems})
+ }).catch((e)=>runWithContext(context,async()=>{job.status='failed';job.message=e?.status?e.message:'Preparation failed. Retry the import.';delete job.current;try{await persist(job)}catch{}})).finally(async()=>{await packages.close();state.controllers.delete(id);delete job.preparedItems})
  return publicJob(job)
  })
 }

@@ -85,7 +85,7 @@ export async function checkPreparationRegistry(client, name, signal, { workspace
 }
 
 const INSTALL = `const fs=require('fs'),cp=require('child_process'),path=require('path');
-const p=JSON.parse(fs.readFileSync(0,'utf8')); const root='/sandbox/package';fs.mkdirSync(root,{recursive:true});
+const p=JSON.parse(fs.readFileSync(0,'utf8')); const root=p.root||'/sandbox/package';fs.mkdirSync(root,{recursive:true});
 fs.writeFileSync(root+'/package.json',JSON.stringify({private:true,dependencies:{[p.name]:p.version}}));
 const options={cwd:root,env:{PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/sandbox',NODE_EXTRA_CA_CERTS:process.env.NODE_EXTRA_CA_CERTS||'',npm_config_cache:'/sandbox/cache',npm_config_registry:'https://registry.npmjs.org/',npm_config_fetch_retries:'1',npm_config_fetch_retry_mintimeout:'1000',npm_config_fetch_timeout:'30000',npm_config_update_notifier:'false'},encoding:'utf8',timeout:120000,killSignal:'SIGKILL',maxBuffer:2000000};
 for(const args of [['install','--package-lock-only','--ignore-scripts','--no-audit','--no-fund'],['ci','--ignore-scripts','--no-audit','--no-fund']]){
@@ -100,13 +100,13 @@ console.log(JSON.stringify({bin:bin.slice(root.length+1),bytes:size,node:process
 
 // npm already retries each download once. Re-running the entire installation
 // multiplies an outage across every selected MCP and discards useful diagnostics.
-export async function installPackage(client, name, pinned, signal, { workspace = workspaceName() } = {}) {
+export async function installPackage(client, name, pinned, signal, { workspace = workspaceName(), root = '/sandbox/package' } = {}) {
   const deadline = AbortSignal.timeout(250000)
   const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline
   let result
   try {
     result = await client.sandbox.exec(name, ['/usr/local/bin/node', '-e', INSTALL], {
-      workspace, noLoginShell: true, stdin: Buffer.from(JSON.stringify(pinned)), timeoutSecs: 250, signal: bounded,
+      workspace, noLoginShell: true, stdin: Buffer.from(JSON.stringify({...pinned, root})), timeoutSecs: 250, signal: bounded,
     })
   } catch (error) {
     signal?.throwIfAborted()
@@ -126,9 +126,8 @@ export async function installPackage(client, name, pinned, signal, { workspace =
   return metadata
 }
 
-// The gateway may move to a different architecture, including behind the same
-// endpoint. Probe this builder before reusing anything; npm and MCP checks are
-// skipped only for an identical pinned image and actual runtime.
+// The gateway may move to a different architecture, even at the same endpoint.
+// Reuse requires the pinned image and a currently established target runtime.
 const cacheIndex = (pinned, runtime, dir) => path.join(dir, 'index', createHash('sha256').update(JSON.stringify({ v: 2, name: pinned.name, version: pinned.version, integrity: pinned.integrity, args: pinned.args, image: BUILDER_IMAGE, runtime })).digest('hex') + '.json')
 async function builderRuntime(client, name, signal, workspace) {
   const script = "console.log(JSON.stringify({node:process.versions.node,arch:process.arch,platform:process.platform,libc:process.report.getReport().header.glibcVersionRuntime?'glibc':null}))"
@@ -141,7 +140,7 @@ async function builderRuntime(client, name, signal, workspace) {
 async function cachedArtifact(index, pinned, runtime, dir) {
   try {
     const artifact = JSON.parse(await fs.readFile(index, 'utf8'))
-    if (!/^[a-f0-9]{64}$/.test(artifact?.digest || '') || typeof artifact.bin !== 'string' || artifact.name !== pinned.name || artifact.version !== pinned.version || artifact.integrity !== pinned.integrity || artifact.verification?.status !== 'connected' || Object.entries(runtime).some(([key, value]) => artifact[key] !== value)) throw fail('Invalid prepared package index.')
+    if (!/^[a-f0-9]{64}$/.test(artifact?.digest || '') || typeof artifact.bin !== 'string' || artifact.name !== pinned.name || artifact.version !== pinned.version || artifact.integrity !== pinned.integrity || artifact.verification?.status !== 'connected' || JSON.stringify(artifact.args) !== JSON.stringify(pinned.args) || artifact.bin.startsWith('/') || artifact.bin.split('/').includes('..') || Object.entries(runtime).some(([key, value]) => artifact[key] !== value)) throw fail('Invalid prepared package index.')
     await artifactFile(artifact, dir)
     return { ...artifact, requested: pinned.requested }
   } catch { await fs.rm(index, { force: true }).catch(() => {}); return null }
@@ -151,59 +150,139 @@ async function saveCached(index, artifact) {
   try { await fs.mkdir(path.dirname(index), { recursive: true, mode: 0o700 }); await fs.writeFile(tmp, JSON.stringify(artifact), { mode: 0o600, flag: 'wx' }); await fs.rename(tmp, index) } catch { await fs.rm(tmp, { force: true }).catch(() => {}) }
 }
 
-export function buildPackage(plan, options = {}) {
-  return runWithContext(contextSelection(), () => buildInContext(plan, options))
-}
-
-async function buildInContext(plan, { signal, progress = async () => {}, dir = artifactDirectory(), connect = gateway, fetcher = fetch, settle = 12000 } = {}) {
-  const org = await readOrg()
-  if (blockedBy(org, ['registry.npmjs.org']) || blockedByPolicy(await listPolicies(), {name:'',group:null}, ['registry.npmjs.org'], hostMatches)) throw fail('Organization policy blocks the npm registry.', 403)
-  await progress('Looking up the package on npm')
-  const pinned = await resolvePackage(plan, fetcher, signal)
-  const { client, workspace, workspaceScope } = await connect()
-  const name = 'sp-' + randomUUID().slice(0, 12)
-  const base = await planSandbox({ name, systemBaseline: true })
-  base.policy.networkPolicies = {}
-  base.policy.networkPolicies.setup_registry = { name:'setup_registry', binaries:[{path:'/usr/local/bin/node'}],endpoints:[{host:'registry.npmjs.org',port:443,protocol:'rest',access:1,enforcement:1,allowEncodedSlash:true}] }
-  let created = false, temporary
-  try {
-    await progress('Starting a temporary sandbox')
-    await client.sandbox.create({ name, workspace, image:BUILDER_IMAGE, command:['/bin/sleep','infinity'],providers:[],policy:base.policy,labels:{'openshell.console/setup-builder':'true'} });created=true
-    await waitReady(client,name,signal,{workspace})
-    const effective=await client.raw.getSandboxConfig({name,workspaceScope})
-    if(effective.policySource===2)throw fail('Gateway global policy overrides isolated preparation. Ask the administrator for a dedicated preparation gateway.',403)
-    await progress('Checking the package runtime')
-    const runtime = await builderRuntime(client, name, signal, workspace)
-    const index = cacheIndex(pinned, runtime, dir), cached = await cachedArtifact(index, pinned, runtime, dir)
+// A session belongs to one preparation job and never executes package code in
+// its shared downloader. Each MCP initialization gets a fresh, offline sandbox.
+export function createPackagePreparation(options = {}) {
+  const context = contextSelection()
+  let downloader, closed = false, busy = false
+  const signal = options.signal
+  const progress = options.progress ?? (async () => {})
+  const dir = options.dir ?? artifactDirectory()
+  const connect = options.connect ?? gateway
+  const readRuntime = options.readRuntime ?? (async target => {
+    const { preparationImageRuntime } = await import('./image-templates.js')
+    return preparationImageRuntime(target, BUILDER_IMAGE)
+  })
+  async function createBox(current, registry) {
     signal?.throwIfAborted()
-    if (cached) { await progress('Using the package prepared earlier'); signal?.throwIfAborted(); return cached }
-    // The supervisor's first provider-environment poll replaces synthetic DNS
-    // mappings. Start npm after that initial refresh so its DNS cache is fresh.
-    await progress('Waiting for the sandbox network to be ready')
-    await new Promise((resolve,reject)=>{const done=()=>{signal?.removeEventListener('abort',stop);resolve()};const timer=setTimeout(done,settle);const stop=()=>{clearTimeout(timer);reject(signal.reason)};if(signal?.aborted)stop();else signal?.addEventListener('abort',stop,{once:true})})
-    await progress('Checking access to the npm registry')
-    await checkPreparationRegistry(client, name, signal, { workspace })
-    await progress(`Downloading ${pinned.name}@${pinned.version} (install scripts off)`)
-    const metadata = await installPackage(client, name, pinned, signal, { workspace })
-    await progress('Saving the package')
-    await fs.mkdir(dir,{recursive:true,mode:0o700})
-    temporary=path.join(dir,randomUUID()+'.tmp')
-    const handle=await fs.open(temporary,'wx',0o600);const digest=createHash('sha256');let bytes=0,exit=null
-    try{for await(const event of client.sandbox.execStream(name,['tar','-czf','-','-C','/sandbox/package','.'],{workspace,noLoginShell:true,timeoutSecs:120,signal})){
-      if(event.stream==='stdout'){bytes+=event.data.length;if(bytes>100*1024*1024)throw fail('Compressed package exceeds 100 MB.');digest.update(event.data);await handle.write(event.data)}
-      if(event.type==='exit')exit=event.exitCode
-    }}finally{await handle.close()}
-    if(exit!==0)throw fail('Could not export the prepared package.')
-    const id=digest.digest('hex');await fs.rename(temporary,path.join(dir,id+'.tar.gz'));temporary=null
-    await progress('Checking that the MCP starts')
-    const verifier=await fs.readFile(path.join(import.meta.dirname,'setup-verifier.cjs'),'utf8')
-    const check=await client.sandbox.exec(name,['/usr/local/bin/node','-e',verifier],{workspace,noLoginShell:true,stdin:Buffer.from(JSON.stringify({config:{command:'/usr/local/bin/node',args:['/sandbox/package/'+metadata.bin,...pinned.args]}})),timeoutSecs:35,signal})
-    let verification={status:'unverified',reason:'Initialization check did not finish.'}
-    try{verification=JSON.parse(check.stdout.toString())}catch{}
-    const artifact={ ...pinned,...metadata,digest:id,compressedBytes:bytes,verification,preparedAt:new Date().toISOString() }
-    if(verification?.status==='connected')await saveCached(index,artifact)
-    return artifact
-  }finally{if(temporary)await fs.rm(temporary,{force:true});if(created)await client.sandbox.delete(name,{workspace}).catch(()=>{})}
+    const name = (registry ? 'sp-' : 'sc-') + randomUUID().slice(0, 12)
+    const base = await planSandbox({ name, systemBaseline: true })
+    base.policy.networkPolicies = registry ? { setup_registry: { name:'setup_registry', binaries:[{path:'/usr/local/bin/node'}],endpoints:[{host:'registry.npmjs.org',port:443,protocol:'rest',access:1,enforcement:1,allowEncodedSlash:true}] } } : {}
+    const {client, workspace, workspaceScope} = current
+    await client.sandbox.create({name,workspace,image:BUILDER_IMAGE,command:['/bin/sleep','infinity'],providers:[],policy:base.policy,labels:{[registry?'openshell.console/setup-builder':'openshell.console/setup-check']:'true'}})
+    const box = {...current, name}
+    try {
+      await waitReady(client,name,signal,{workspace})
+      const effective=await client.raw.getSandboxConfig({name,workspaceScope})
+      if(effective.policySource===2)throw fail('Gateway global policy overrides isolated preparation. Ask the administrator for a dedicated preparation gateway.',403)
+      box.runtime = await builderRuntime(client,name,signal,workspace)
+      signal?.throwIfAborted()
+      return box
+    } catch(error) { await dispose(box); throw error }
+  }
+  async function dispose(box) {
+    if (box) await box.client.sandbox.delete(box.name,{workspace:box.workspace}).catch(()=>{})
+  }
+  async function getDownloader(current, step) {
+    if (downloader) return downloader
+    await step('Starting the shared package download sandbox')
+    downloader = await createBox(current,true)
+    return downloader
+  }
+  async function readyNetwork(step) {
+    if(downloader.networkReady)return
+    await step('Waiting for the sandbox network to be ready')
+    await new Promise((resolve,reject)=>{const done=()=>{signal?.removeEventListener('abort',stop);resolve()};const timer=setTimeout(done,options.settle ?? 12000);const stop=()=>{clearTimeout(timer);reject(signal.reason)};if(signal?.aborted)stop();else signal?.addEventListener('abort',stop,{once:true})})
+    await checkPreparationRegistry(downloader.client,downloader.name,signal,{workspace:downloader.workspace})
+    downloader.networkReady=true
+  }
+  async function verify(current, artifact, runtime, step) {
+    await step('Checking the MCP in an isolated sandbox')
+    const box = await createBox(current,false)
+    const {client,name,workspace} = box
+    try {
+      if (JSON.stringify(box.runtime) !== JSON.stringify(runtime)) throw fail('Preparation runtime changed. Retry preparation.',409)
+      const {data} = await artifactFile(artifact,dir)
+      const file='/sandbox/check-package.tar.gz'
+      for(let offset=0;offset<data.length;offset+=512*1024) {
+        signal?.throwIfAborted()
+        const result=await client.sandbox.exec(name,['/usr/local/bin/node','-e',"const fs=require('fs');const p=process.argv[1],offset=Number(process.argv[2]);if(offset===0)fs.writeFileSync(p,Buffer.alloc(0),{flag:'wx',mode:0o600});if(fs.statSync(p).size!==offset)throw Error('Invalid package upload');fs.appendFileSync(p,fs.readFileSync(0))",file,String(offset)],{workspace,noLoginShell:true,stdin:data.subarray(offset,offset+512*1024),timeoutSecs:30,signal})
+        if(result.exitCode!==0)throw fail('Could not stage the MCP check package.')
+      }
+      const extracted=await client.sandbox.exec(name,['/usr/local/bin/node','-e',"const fs=require('fs'),cp=require('child_process');const file=process.argv[1];if(require('crypto').createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==process.argv[2])throw Error('Package integrity mismatch');fs.mkdirSync('/sandbox/package');cp.execFileSync('tar',['-xzf',file,'-C','/sandbox/package']);fs.unlinkSync(file)",file,artifact.digest],{workspace,noLoginShell:true,timeoutSecs:120,signal})
+      if(extracted.exitCode!==0)throw fail('Could not extract the MCP check package.')
+      const verifier=await fs.readFile(path.join(import.meta.dirname,'setup-verifier.cjs'),'utf8')
+      const result=await client.sandbox.exec(name,['/usr/local/bin/node','-e',verifier],{workspace,noLoginShell:true,stdin:Buffer.from(JSON.stringify({config:{command:'/usr/local/bin/node',args:['/sandbox/package/'+artifact.bin,...artifact.args]}})),timeoutSecs:35,signal})
+      signal?.throwIfAborted()
+      try { if(result.exitCode===0)return JSON.parse(result.stdout.toString()) } catch {}
+      return {status:'unverified',reason:'Initialization check did not finish.'}
+    } finally { await dispose(box) }
+  }
+  async function build(plan, {progress: step = progress} = {}) {
+    if(closed || busy)throw fail('Package preparation session is closed or busy.',409)
+    busy=true
+    let temporary
+    try {
+      signal?.throwIfAborted()
+      const org=await readOrg()
+      if(blockedBy(org,['registry.npmjs.org']) || blockedByPolicy(await listPolicies(),{name:'',group:null},['registry.npmjs.org'],hostMatches))throw fail('Organization policy blocks the npm registry.',403)
+      await step('Looking up the package on npm')
+      const pinned=await resolvePackage(plan,options.fetcher ?? fetch,signal)
+      const current=await connect()
+      if(downloader && (downloader.client!==current.client || downloader.workspace!==current.workspace)) {
+        await dispose(downloader);downloader=null
+      }
+      // Read-only image metadata is an optional fast path. Unknown targets must
+      // fall back to a real builder probe, never the console host architecture.
+      const known=downloader?.runtime ?? await readRuntime(current.target).catch(()=>null)
+      if(known) {
+        const cached=await cachedArtifact(cacheIndex(pinned,known,dir),pinned,known,dir)
+        signal?.throwIfAborted()
+        if(cached){await step('Using the package prepared earlier');signal?.throwIfAborted();return cached}
+      }
+      const box=await getDownloader(current,step)
+      const {client,name,workspace,runtime}=box
+      const index=cacheIndex(pinned,runtime,dir)
+      const cached=await cachedArtifact(index,pinned,runtime,dir)
+      signal?.throwIfAborted()
+      if(cached){await step('Using the package prepared earlier');signal?.throwIfAborted();return cached}
+      await readyNetwork(step)
+      const root='/sandbox/packages/'+randomUUID()
+      await step(`Downloading ${pinned.name}@${pinned.version} (install scripts off)`)
+      const metadata=await installPackage(client,name,pinned,signal,{workspace,root})
+      if(Object.entries(runtime).some(([key,value])=>metadata[key]!==value))throw fail('Package builder runtime changed. Retry preparation.',409)
+      await step('Saving the package')
+      await fs.mkdir(dir,{recursive:true,mode:0o700})
+      temporary=path.join(dir,randomUUID()+'.tmp')
+      const handle=await fs.open(temporary,'wx',0o600),digest=createHash('sha256')
+      let bytes=0,exit=null
+      try {for await(const event of client.sandbox.execStream(name,['tar','-czf','-','-C',root,'.'],{workspace,noLoginShell:true,timeoutSecs:120,signal})){
+        if(event.stream==='stdout'){bytes+=event.data.length;if(bytes>100*1024*1024)throw fail('Compressed package exceeds 100 MB.');digest.update(event.data);await handle.write(event.data)}
+        if(event.type==='exit')exit=event.exitCode
+      }} finally {await handle.close()}
+      if(exit!==0)throw fail('Could not export the prepared package.')
+      const removed=await client.sandbox.exec(name,['/usr/local/bin/node','-e',"require('fs').rmSync(process.argv[1],{recursive:true,force:true})",root],{workspace,noLoginShell:true,timeoutSecs:30,signal})
+      if(removed.exitCode!==0)throw fail('Could not clean the package download directory.')
+      const id=digest.digest('hex');await fs.rename(temporary,path.join(dir,id+'.tar.gz'));temporary=null
+      const artifact={...pinned,...metadata,digest:id,compressedBytes:bytes,preparedAt:new Date().toISOString()}
+      artifact.verification=await verify(current,artifact,runtime,step)
+      if(artifact.verification?.status==='connected')await saveCached(index,artifact)
+      return artifact
+    } catch(error) {
+      // A cancelled/failed operation must not leave a partially initialized
+      // downloader available to another item in this job.
+      await dispose(downloader);downloader=null
+      throw error
+    } finally {busy=false;if(temporary)await fs.rm(temporary,{force:true})}
+  }
+  return {
+    build:(plan,overrides)=>runWithContext(context,()=>build(plan,overrides)),
+    close:()=>runWithContext(context,async()=>{closed=true;await dispose(downloader);downloader=null}),
+  }
+}
+export async function buildPackage(plan, options = {}) {
+  const session=createPackagePreparation(options)
+  try {return await session.build(plan)} finally {await session.close()}
 }
 
 export async function artifactFile(artifact, dir = artifactDirectory()) {
