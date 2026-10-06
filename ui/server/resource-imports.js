@@ -315,7 +315,10 @@ export function createResourceImports({ directory = path.join(scopedStateDirecto
           }
         }
       }
-      const resources = bundle.resources.filter(resource => selected.has(resource.key)).sort((a, b) => phases[a.type] - phases[b.type] || a.key.localeCompare(b.key))
+      // Organization blocks come before other rules, so a reused group never
+      // runs with an imported allow rule but without its source's blocks.
+      const blocks = resource => resource.requiredForGroups?.length ? 0 : 1
+      const resources = bundle.resources.filter(resource => selected.has(resource.key)).sort((a, b) => phases[a.type] - phases[b.type] || blocks(a) - blocks(b) || a.key.localeCompare(b.key))
       const id = randomUUID().replaceAll('-', ''), mapping = {}, items = [], inventories = {}
       for (const type of new Set(resources.map(resource => resource.type))) inventories[type] = await inventory(type)
       for (const resource of resources) {

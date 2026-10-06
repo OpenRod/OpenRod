@@ -263,6 +263,18 @@ test('source organization restrictions are mandatory when an imported group is s
   assert.equal(f.values.network[0].action, 'block')
 })
 
+test('organization blocks are created before other network rules for the group', async t => {
+  const allow = { ...network, appliesTo: { groups: [group.id], setups: [], sandboxes: [], everyone: false } }
+  const f = await fixture(t, { groups: [group], network: [allow] })
+  f.adapter.organizationRules = async () => [{ id: 'restriction-development', name: 'Source organization blocks', action: 'block', destinations: ['blocked.example.com'], appliesTo: { groups: [group.id] }, sourceOrganizationBlock: true }]
+  const exported = await f.service.export({ types: ['groups', 'network'], selection: ['groups:development', 'network:docs'] })
+  f.values.groups = []; f.values.network = []
+  const plan = await f.service.plan({ bundle: exported, selection: ['groups:development', 'network:docs'] })
+  await f.service.execute(plan.id, { acknowledged: true })
+  assert.equal((await completed(f.service, plan.id)).status, 'completed')
+  assert.deepEqual(f.calls.map(call => [call.type, call.data.action ?? null]), [['groups', null], ['network', 'block'], ['network', 'allow']])
+})
+
 test('limits active imports per destination and concurrent execute does not start duplicate work', async t => {
   let release
   const gate = new Promise(resolve => { release = resolve })
