@@ -8,11 +8,9 @@ import { createApi } from '@/lib/api'
 import { useCompute } from '@/lib/compute'
 import { useApi, useLocation } from '@/lib/location-context'
 import { useInventory } from '@/lib/inventory'
-import { copyLocalSandbox, copyCloudSandboxToLocal, localCloudRequest, waitForCloudReady } from '@/lib/local-cloud'
+import { copyLocalSandbox, copyCloudSandboxToLocal } from '@/lib/local-cloud'
 import { useTransferGroups } from '@/components/transfer-groups'
 import { LOCAL_ORIGIN, localHandoffUrl, isLocalHandoffMessage } from '@/lib/cloud-transfer'
-import { CLOUD_AVAILABLE } from '@/lib/cloud-origin'
-import { CloudSoon } from '@/components/cloud-soon'
 
 export function ContinueInCloud({ name, sandbox }) {
   const api = useApi()
@@ -30,10 +28,7 @@ export function ContinueInCloud({ name, sandbox }) {
     const signal = api.signal ? AbortSignal.any([api.signal, controller.signal]) : controller.signal
     setStage('signin')
     try {
-      await compute.connect()
-      setStage('prepare')
-      signal.throwIfAborted()
-      await waitForCloudReady(() => localCloudRequest('machine', undefined, { signal }), { signal })
+      await compute.prepare({ signal, onProgress: () => setStage('prepare') })
       const destination = createApi('cloud', signal)
       setStage('groups')
       const groups = await chooseGroups(destination, 'cloud', signal)
@@ -44,13 +39,13 @@ export function ContinueInCloud({ name, sandbox }) {
       const context = await destination.contextKey()
       try { sessionStorage.setItem('gateway-box', JSON.stringify({ name: result.name, context, target: 'cloud' })) } catch {}
       refresh()
-      compute.selectTarget('cloud')
+      window.dispatchEvent(new CustomEvent('openrod-navigate', { detail: { view: 'sandboxes' } }))
       window.dispatchEvent(new CustomEvent('openrod-sandbox-handoff', { detail: { name: result.name, context, target: 'cloud' } }))
     } catch (error) { if (error.name !== 'AbortError') toast.error('Couldn’t continue in cloud', { description: error.message }) }
     finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
   if (sandbox?.phase !== 'ready') return null
-  if (!CLOUD_AVAILABLE) return <CloudSoon className="w-full justify-start text-xs"><Cloud className="size-3.5" aria-hidden="true" />Continue in cloud</CloudSoon>
+  if (!compute?.available) return <Button variant="outline" size="sm" disabled title={compute?.status?.reason || "OpenRod Cloud is not configured."} className="w-full justify-start text-xs"><Cloud className="size-3.5" aria-hidden="true" />OpenRod Cloud unavailable</Button>
   return <div className="flex items-center gap-1">
     {dialog}
     <Button variant="outline" size="sm" className="flex-1 justify-start text-xs" disabled={Boolean(stage) || location?.connected === false} onClick={copy}>
@@ -137,13 +132,13 @@ export function ContinueLocally({ name, sandbox }) {
       toast.success('Workspace running locally', { description: result.warning || 'Your cloud source is unchanged. Reconnect agent credentials locally.' })
       try { sessionStorage.setItem('gateway-box', JSON.stringify({ name: result.name, context: destinationLocation.context, target: 'local' })) } catch {}
       refresh()
-      compute.selectTarget('local')
+      window.dispatchEvent(new CustomEvent('openrod-navigate', { detail: { view: 'sandboxes' } }))
       window.dispatchEvent(new CustomEvent('openrod-sandbox-handoff', { detail: { name: result.name, context: destinationLocation.context, target: 'local' } }))
     } catch(error) {
       if(error.name !== 'AbortError') toast.error('Couldn’t import locally', {description:error.message})
     } finally { if (!controller.signal.aborted) setStage(null); if (transfer.current === controller) transfer.current = null }
   }
-  if (compute?.localViewer && !CLOUD_AVAILABLE) return <CloudSoon className="w-full justify-start text-xs"><Laptop className="size-3.5" aria-hidden="true" />Import and run locally</CloudSoon>
+  if (compute?.localViewer && !compute.available) return null
   return (
     <div className="flex items-center gap-1">
       {dialog}

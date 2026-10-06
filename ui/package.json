@@ -74,6 +74,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.2.5",
+    "firebase": "12.19.0",
     "lucide-react": "^0.577.0",
     "motion": "^13.2.0",
     "next-themes": "^0.4.6",
@@ -88,5 +89,10 @@
   },
   "engines": {
     "node": ">=22.13.0"
+  },
+  "overrides": {
+    "@firebase/firestore": {
+      "@grpc/grpc-js": "1.14.5"
+    }
   }
 }

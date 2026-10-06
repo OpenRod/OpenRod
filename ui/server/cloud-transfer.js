@@ -135,7 +135,7 @@ export async function exportTransfer(input, options = {}) {
 export async function localTransfer(input, options = {}) {
   const origin = options.origin ?? cloudOrigin()
   if (!origin) throw cloudUnavailable()
-  if (typeof input?.ticket !== 'string' || !/^openrod-user-[a-f0-9]{24}\.[a-f0-9]{64}$/.test(input.ticket)) throw fail('Invalid cloud transfer request.')
+  if (typeof input?.ticket !== 'string' || !/^[a-z][a-z0-9-]{0,62}\.[a-f0-9]{64}$/.test(input.ticket)) throw fail('Invalid cloud transfer request.')
   const { bundle, warning } = await exportTransfer(input, options)
   if (input.destinationGroups !== undefined) {
     try { bundle.destinationGroups = groupIds(input.destinationGroups) } catch (error) { throw fail(error.message) }

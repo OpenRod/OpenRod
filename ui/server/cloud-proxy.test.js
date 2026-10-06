@@ -5,6 +5,7 @@ import {once} from 'node:events'
 import {cloudRouter,createHandoffs} from './cloud-proxy.js'
 import {cloudConfig,createSecurity} from './security.js'
 import {verifyWorkerRequest} from './worker-auth.js'
+import {EventEmitter} from 'node:events'
 const config=cloudConfig({OPENROD_MODE:'cloud',OPENROD_ORG_ID:'pilot',OPENROD_PUBLIC_ORIGIN:'https://console.example.com',GOOGLE_CLOUD_PROJECT:'openrod-test',OPENROD_FIREBASE_API_KEY:'public',OPENROD_FIREBASE_AUTH_DOMAIN:'openrod-test.firebaseapp.com'})
 async function listen(t,server){server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>{server.closeAllConnections();return new Promise(r=>server.close(r))});return server.address().port}
 test('authenticated HTTP routing separates users and never serves the pilot gateway',async t=>{
@@ -67,4 +68,17 @@ test('combined inventory reads only an existing owner VM without allocating comp
  record={uid:'alice',state:'ready',key,address:'127.0.0.1',port:await listen(t,worker)}
  assert.equal((await request()).data.sandboxes[0].name,'demo');assert.equal(allocations,0)
  record={...record,uid:'bob'};assert.equal((await request()).status,403)
+})
+
+test('terminal and SSH upgrades never provision a cloud environment',async()=>{
+ const identity={uid:'alice',expires:Date.now()+60000},calls=[]
+ const security={config,authenticate:async()=>identity,watch:()=>{}}
+ const machines={target:async(_identity,options)=>{calls.push(options);throw Object.assign(Error('Not prepared'),{status:409})}}
+ const connections={authenticate:async()=>identity}
+ const routes=cloudRouter(security,machines,{},null,{connections})
+ for(const url of ['/api/os/terminal','/api/cloud/local-connect/os/terminal','/api/cloud/local-connect/os/ssh']){
+  const socket=new EventEmitter();socket.destroy=()=>socket.emit('close');socket.end=()=>socket.emit('close')
+  await routes.upgrade({url,headers:{host:config.host,origin:config.origin,authorization:'Bearer fixture'}},socket,Buffer.alloc(0))
+ }
+ assert.deepEqual(calls,[{provision:false},{provision:false},{provision:false}])
 })

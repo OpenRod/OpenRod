@@ -2,13 +2,12 @@ import { CloudComputeProvider, LocalComputeProvider, useCompute } from '@/lib/co
 import { LocalConnect } from './local-connect'
 import { LocalReturn } from './local-return'
 import { CloudMachine } from './cloud-machine'
-import { CloudBuildDialog } from './cloud-build-dialog'
 import * as React from 'react'
-import { Cloud } from 'lucide-react'
-import { toast } from 'sonner'
-import { buttonVariants } from '@/components/ui/button'
-import { CLOUD_AVAILABLE, CLOUD_SOON } from '@/lib/cloud-origin'
+import { initializeApp, getApps } from 'firebase/app'
+import { getAuth, GoogleAuthProvider, inMemoryPersistence, setPersistence, signInWithPopup, signOut } from 'firebase/auth'
 import { LINK_REQUIRED } from '@/lib/api'
+import { CloudSignIn } from './cloud-sign-in'
+import { cloudSignInError } from '@/lib/cloud-sign-in-error'
 
 async function authRequest(path, body) {
   const response = await fetch(`/api/auth/${path}`, {
@@ -24,24 +23,17 @@ async function authRequest(path, body) {
 export const useCloudMode = () => useCompute()?.target === 'cloud'
 export function CloudAccount() {
   const compute = useCompute()
-  const [open, setOpen] = React.useState(false)
-  if (!compute?.localViewer) return <div className="ml-auto flex items-center gap-3 text-xs"><span className="max-w-40 truncate text-muted-foreground">{compute?.user?.email}</span><button className="underline underline-offset-4" onClick={compute?.logout}>Sign out</button></div>
-  // Until a cloud origin is configured, the local console shows no cloud controls.
-  if (!CLOUD_AVAILABLE) return null
-  return <div className="ml-auto flex items-center gap-3 text-xs">
-    <label className="flex items-center gap-2"><span className="text-muted-foreground">Compute</span><select aria-label="Compute target" className="rounded-md border bg-background px-2 py-1.5 text-foreground" value={compute.target} onChange={e => e.target.value === 'cloud' && !compute.connected ? setOpen(true) : compute.selectTarget(e.target.value)}><option value="local">Local</option><option value="cloud">Cloud</option></select></label>
-    {compute.connected && <><span className="hidden max-w-40 truncate text-muted-foreground sm:block">{compute.user?.email}</span><button className="underline underline-offset-4" onClick={compute.disconnect}>Sign out</button></>}
-    {!compute.connected && <button disabled={compute.connecting} onClick={() => compute.connect().catch(e => toast.error('Couldn’t sign in', {description:e.message}))} className={buttonVariants({ size: 'sm', variant: 'outline' })}>{compute.connecting ? 'Signing in…' : 'Sign in'}</button>}
-    <button onClick={() => setOpen(true)} className={buttonVariants({ size: 'sm', className: 'gap-2' })}><Cloud aria-hidden="true" />Build in cloud</button>
-    <CloudBuildDialog open={open} onOpenChange={setOpen} />
-  </div>
+  if (compute?.localViewer) return null
+  return <div className="ml-auto flex items-center gap-3 text-xs"><span className="max-w-40 truncate text-muted-foreground">{compute?.user?.email}</span><button className="underline underline-offset-4" onClick={compute?.logout}>Sign out</button></div>
 }
+
 export function AuthGate({ children }) {
   const [config, setConfig] = React.useState(null)
   const [user, setUser] = React.useState(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState('')
   const [linkRequired, setLinkRequired] = React.useState(false)
+  const [signingIn, setSigningIn] = React.useState(false)
   React.useEffect(() => {
     let alive = true
     async function load() {
@@ -65,8 +57,23 @@ export function AuthGate({ children }) {
     window.addEventListener(LINK_REQUIRED, locked)
     return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); window.removeEventListener(LINK_REQUIRED, locked) }
   }, [])
-  // Google sign-in returns with the cloud release.
-  const login = () => setError(CLOUD_SOON)
+  async function login() {
+    if (signingIn || !config?.firebase) return
+    setSigningIn(true); setError('')
+    let auth
+    try {
+      const app = getApps().find(app => app.name === 'openrod-cloud') ?? initializeApp(config.firebase, 'openrod-cloud')
+      auth = getAuth(app)
+      await setPersistence(auth, inMemoryPersistence)
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+      const credential = await signInWithPopup(auth, provider)
+      const session = await authRequest('session', { idToken: await credential.user.getIdToken(true) })
+      setUser(session.user)
+    } catch (reason) {
+      setError(cloudSignInError(reason))
+    } finally { if (auth) await signOut(auth).catch(() => {}); setSigningIn(false) }
+  }
   async function logout() {
     try { await authRequest('logout', {}) } catch (e) { setError(e.message) }
     finally { setUser(null) }
@@ -80,13 +87,5 @@ export function AuthGate({ children }) {
   if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading OpenRod…</div>
   if (config?.mode === 'local') return <LocalComputeProvider><LocalReturn>{children}</LocalReturn></LocalComputeProvider>
   if (user) return <LocalConnect user={user} logout={logout}><CloudComputeProvider user={user} logout={logout}><CloudMachine key={user.uid} logout={logout}>{children}</CloudMachine></CloudComputeProvider></LocalConnect>
-  return <main className="grid min-h-screen place-items-center bg-background px-6">
-    <section className="w-full max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
-      <h1 className="text-2xl font-semibold tracking-tight">{window.location.hash.startsWith('#local-connect=') ? 'Sign in to OpenRod' : 'Your workspace, in the cloud.'}</h1>
-      <p className="mt-3 text-sm text-muted-foreground">{window.location.hash.startsWith('#local-connect=') ? 'Sign in with Google. You’ll return to local OpenRod automatically.' : 'Sign in or create your account with Google. Your workspace runs on your own private machine.'}</p>
-      {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
-      <button disabled={!config} onClick={login} className="mt-6 w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50">Continue with Google</button>
-      <p className="mt-5 text-xs text-muted-foreground">Running OpenRod locally? No account required.</p>
-    </section>
-  </main>
+  return <CloudSignIn localConnect={window.location.hash.startsWith('#local-connect=')} error={error} busy={signingIn} available={Boolean(config?.firebase)} onLogin={login} />
 }

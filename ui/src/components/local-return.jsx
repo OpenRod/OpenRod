@@ -3,9 +3,11 @@ import { createApi } from "@/lib/api"
 import { terminalHref } from "@/lib/sandbox-session"
 import { useTransferGroups } from '@/components/transfer-groups'
 import {CLOUD_ORIGIN} from '@/lib/cloud-transfer'
-import {CLOUD_AVAILABLE} from '@/lib/cloud-origin'
+import { useCompute } from '@/lib/compute'
 import { Notice } from '@/components/notice'
 export function LocalReturn({children}) {
+ const compute = useCompute()
+ const cloudOrigin = compute?.status?.origin || CLOUD_ORIGIN
  const { chooseGroups, dialog, cancel } = useTransferGroups()
   // A cloud return always rebuilds on the laptop, independent of saved compute.
   const transfer = React.useRef(new AbortController())
@@ -16,12 +18,12 @@ export function LocalReturn({children}) {
     return () => queueMicrotask(() => { if (generation.current === current) transfer.current.abort() })
   }, [])
  const nonce=React.useRef(/^#cloud-return=([a-f0-9-]{36})$/.exec(window.location.hash)?.[1])
- const [state,setState]=React.useState(CLOUD_AVAILABLE&&nonce.current&&window.opener?'waiting':'normal'),[message,setMessage]=React.useState('')
+ const [state,setState]=React.useState(nonce.current&&window.opener?'waiting':'normal'),[message,setMessage]=React.useState('')
  const accepted=React.useRef(false),detached=React.useRef(false)
  React.useEffect(()=>{
-  if(state!=='waiting')return
+  if(state!=='waiting'||!compute?.available||!cloudOrigin)return
   const receive=async event=>{
-   if(accepted.current||event.origin!==CLOUD_ORIGIN||event.source!==window.opener||event.data?.type!=='openrod-local-bundle'||event.data.nonce!==nonce.current)return
+   if(accepted.current||event.origin!==cloudOrigin||event.source!==window.opener||event.data?.type!=='openrod-local-bundle'||event.data.nonce!==nonce.current)return
    accepted.current=true;setState('importing')
    try {
     if (typeof event.data.error === 'string') throw Error(event.data.error)
@@ -32,16 +34,16 @@ export function LocalReturn({children}) {
     const groups = await chooseGroups(destination, 'local OpenRod', transfer.current.signal)
     if (detached.current) return
     const result=await destination.importCloud({ ...event.data.bundle, ...(groups ? { destinationGroups: groups } : {}) })
-    window.opener.postMessage({type:'openrod-local-result',nonce:nonce.current,name:result.name},CLOUD_ORIGIN)
+    window.opener.postMessage({type:'openrod-local-result',nonce:nonce.current,name:result.name},cloudOrigin)
     if(detached.current)return
     setMessage(event.data.warning??'Workspace copied locally. Reconnect agent credentials to continue.')
     window.location.href=terminalHref(result.name, "shell", { ...location, target: "local" });setState('done')
-   }catch(error){if(detached.current || transfer.current.signal.aborted)return;setMessage(error.message);setState('error');window.opener.postMessage({type:'openrod-local-result',nonce:nonce.current,error:error.message},CLOUD_ORIGIN)}
+   }catch(error){if(detached.current || transfer.current.signal.aborted)return;setMessage(error.message);setState('error');window.opener.postMessage({type:'openrod-local-result',nonce:nonce.current,error:error.message},cloudOrigin)}
   }
   window.addEventListener('message',receive)
-  window.opener.postMessage({type:'openrod-local-ready',nonce:nonce.current},CLOUD_ORIGIN)
+  window.opener.postMessage({type:'openrod-local-ready',nonce:nonce.current},cloudOrigin)
   return()=>window.removeEventListener('message',receive)
- },[state])
+ },[state,cloudOrigin,compute?.available])
  React.useEffect(()=>{
   if(!['waiting','importing'].includes(state))return
   const deadline=Date.now()+35*60000

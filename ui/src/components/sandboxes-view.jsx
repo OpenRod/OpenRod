@@ -64,6 +64,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const [selectedContext, setSelectedContext] = React.useState(null)
   const defaultContext = locationKey(inheritedLocation) ?? selectedContext
   const [creationLocation, setCreationLocation] = React.useState(null)
+  const [confirmedCreationLocation, setConfirmedCreationLocation] = React.useState(false)
   const [handoff, setHandoff] = React.useState(null)
   const canConnect = allowRemote
   React.useEffect(() => {
@@ -99,7 +100,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const [deleteErrors, setDeleteErrors] = React.useState([])
   const [creating, setCreating] = React.useState(Boolean(compute?.createRequested))
   React.useEffect(() => {
-    if (compute?.createRequested) { setCreating(true); compute.requestCreate(false) }
+    if (compute?.createRequested) { if (compute.createRequested.location) { setCreationLocation(compute.createRequested.location); setConfirmedCreationLocation(true) }; setCreating(true); compute.requestCreate(false) }
   }, [compute?.createRequested])
   const [now, setNow] = React.useState(Date.now)
   const search = React.useRef(null)
@@ -260,7 +261,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     overview: locationKey(openedLocation) === defaultContext ? live.overview : { gateway: { name: openedLocation?.gateway, workspace: openedLocation?.workspace, remote: openedLocation?.remote } },
     refresh: inventory.refresh,
   } : null
-  const beginCreation = () => { setCreationLocation(availableLocation ?? null); setCreating(true) }
+  const beginCreation = () => { setConfirmedCreationLocation(false); setCreationLocation(availableLocation ?? null); setCreating(true) }
   React.useEffect(() => { if (createRequest) { beginCreation(); onCreateRequestHandled?.() } }, [createRequest])
 
   return (
@@ -336,7 +337,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
         </AlertDialogContent>
       </AlertDialog>
       <Dialog open={Boolean(reconnectHost)} onOpenChange={open => { if (!open) setReconnectHost(null) }}><DialogContent className="sm:max-w-3xl" aria-describedby={undefined}><DialogHeader><DialogTitle>Connect to {reconnectHost}</DialogTitle></DialogHeader>{reconnectHost && <RemoteConnect key={reconnectHost} initialHost={reconnectHost} onConnected={() => { setReconnectHost(null); inventory.refresh() }} onBack={() => setReconnectHost(null)} />}</DialogContent></Dialog>
-      <LocationProvider location={chosenLocation}><CreateSandboxDialog open={creating} onOpenChange={setCreating} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} onRefreshLocations={inventory.refresh} allowRemote={canConnect} /></LocationProvider>
+      <LocationProvider location={chosenLocation}><CreateSandboxDialog initialLocationConfirmed={confirmedCreationLocation} open={creating} onOpenChange={setCreating} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} onRefreshLocations={inventory.refresh} allowRemote={canConnect} /></LocationProvider>
     </>
   )
 }

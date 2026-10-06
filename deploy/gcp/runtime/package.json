@@ -1,0 +1,8 @@
+{
+  "name": "openrod-cloud-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Control-plane-only dependencies; not installed by local OpenRod or workers",
+  "engines": { "node": ">=22.13.0" },
+  "dependencies": { "firebase-admin": "14.5.0" }
+}

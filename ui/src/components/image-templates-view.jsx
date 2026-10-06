@@ -260,7 +260,7 @@ export function TemplatesView() {
       <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={() => setRemove(null)}>Cancel</Button><Button variant="destructive" disabled={busy || !remove?.some(connected)} onClick={deleteTemplates}>{busy && <Spinner />}{busy ? 'Deleting…' : deleteErrors.length ? 'Retry deletion' : remove?.length === 1 ? 'Delete template' : 'Delete templates'}</Button></div>
     </DialogContent></Dialog>
     <Dialog open={chooseLocation} onOpenChange={(open) => { setChooseLocation(open); if (!open) setPendingGateway(null) }}><DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-3xl">
-      <LocationStep locations={locations} allowRemote subject="template" connecting={Boolean(pendingGateway)}
+      <LocationStep locations={locations} allowRemote={Boolean(compute?.localViewer)} subject="template" connecting={Boolean(pendingGateway)}
         onPick={(context) => startTemplate(locations.find((location) => locationKey(location) === context))}
         onConnected={(job) => { setPendingGateway(job.gateway); load() }}
         onCancel={() => setChooseLocation(false)} />

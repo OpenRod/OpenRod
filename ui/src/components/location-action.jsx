@@ -17,7 +17,7 @@ export function LocationAction({ children, onClose, subject = 'resource' }) {
     if (found) { setLocation(found); setPending(null) }
   }, [pending, inventory.locations])
   if (location) return <LocationProvider location={location}>{children(location, onClose)}</LocationProvider>
-  return <Dialog open onOpenChange={open=>{if(!open)onClose()}}><DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-xl">
+  return <Dialog open onOpenChange={open=>{if(!open)onClose()}}><DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-3xl">
     <LocationStep locations={inventory.locations} allowRemote={Boolean(compute?.localViewer)} subject={subject} connecting={Boolean(pending)}
       onPick={id=>setLocation(inventory.locations.find(item=>(item.id ?? item.context)===id && item.connected))}
       onConnected={job=>{setPending(job.gateway);inventory.refresh()}} onCancel={onClose} />

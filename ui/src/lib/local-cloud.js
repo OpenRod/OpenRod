@@ -17,17 +17,17 @@ export function localConnectFromHash(hash) {
   } catch { return null }
 }
 export function isLocalConnectedMessage(event, popup, nonce, cloud = CLOUD_ORIGIN) {
-  return Boolean(cloud && popup && event.source === popup && event.origin === cloud && event.data?.type === 'openrod-local-connected' && event.data.nonce === nonce && typeof event.data.code === 'string' && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(event.data.code))
+  return Boolean(cloud && popup && event.source === popup && event.origin === cloud && ['openrod-local-connected', 'legacy-local-connected'].includes(event.data?.type) && event.data.nonce === nonce && typeof event.data.code === 'string' && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(event.data.code))
 }
-export async function localCloudRequest(path, body, {signal} = {}) {
+export async function localCloudRequest(path, body, {signal, owner = currentCloudOwner()} = {}) {
   const response = await fetch(`/api/local-cloud/${path}`, {
     signal,
     method: body === undefined ? 'GET' : 'POST',
-    headers: { ...(currentCloudOwner() ? { 'x-openrod-local-owner': currentCloudOwner() } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json', 'x-openshell-console': '1' }) },
+    headers: { ...(owner ? { 'x-openrod-local-owner': owner } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json', 'x-openshell-console': '1' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const value = await response.json().catch(() => ({}))
-  if (value.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
+  if (value.code === 'CLOUD_OWNER_CHANGED' || (response.status === 401 && ['machine', 'inventory'].includes(path))) window.dispatchEvent(new Event('openrod-session-expired'))
   if (!response.ok) throw Object.assign(new Error(value.error ?? 'Cloud connection unavailable'), {status:response.status})
   return value
 }
@@ -51,6 +51,19 @@ export async function waitForCloudReady(statusRequest, { signal, onProgress = ()
     if (attempt < attempts - 1) await wait(5000, signal)
   }
   throw new Error('Your private machine is still preparing. Check its status before trying again.')
+}
+// Preparation is an explicit mutation. Every request remains bound to the
+// account selected before it began, including after an account switch.
+export async function prepareCloudMachine({ owner, signal, onProgress, request = localCloudRequest, wait, attempts } = {}) {
+  signal?.throwIfAborted()
+  const started = await request('machine', {}, { signal, owner })
+  let first = true
+  return waitForCloudReady(async () => {
+    const value = first ? started : await request('machine', undefined, { signal, owner })
+    first = false
+    if (value.owner !== owner) throw new Error('Your cloud account changed. Choose the destination again.')
+    return value
+  }, { signal, onProgress, wait, attempts })
 }
 export async function copyLocalSandbox(local, cloud, name, destinationGroups) {
   const exported = await local.cloudExport(name)

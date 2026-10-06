@@ -9,7 +9,7 @@ const PREFIX='/api/cloud/local-connect'
 const cloudPath=req=>{try{const path=requestPath(req);return path.startsWith('/api/local-cloud/')||path.startsWith('/api/remote/')}catch{return false}}
 // Without a configured cloud origin every sign-in, relay and socket route refuses before any cloud request.
 function unavailableLocalCloud(){return {close(){},setNative(){},
- middleware(req,res,next){if(!cloudPath(req))return next();req.resume();responseJson(res,409,{error:CLOUD_SOON})},
+ middleware(req,res,next){if(!cloudPath(req))return next();if(!isLocalApiRequest(req)){req.resume();return responseJson(res,403,{error:'Request rejected'})}if(requestPath(req)==='/api/local-cloud/status'&&req.method==='GET')return responseJson(res,200,{available:false,connected:false,reason:'OpenRod Cloud is not configured on this computer.'});req.resume();responseJson(res,409,{error:CLOUD_SOON})},
  upgrade(req,socket){if(!cloudPath(req))return false;socket.on('error',()=>{});socket.end(`HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n${JSON.stringify({error:CLOUD_SOON})}`);return true},
 }}
 export function createLocalCloud({origin=cloudOrigin(),allowTestHttp=false,native}={}) {
@@ -31,7 +31,7 @@ export function createLocalCloud({origin=cloudOrigin(),allowTestHttp=false,nativ
  const call=(path,options={})=>upstream(path,{...options,token:connection().token})
  const ownerId=uid=>createHash('sha256').update(uid).digest('hex').slice(0,16)
  const assertOwner=req=>{const current=connection(),supplied=req.headers['x-openrod-local-owner']??new URL(req.url,'http://local').searchParams.get('owner');if(supplied!==ownerId(current.user.uid))throw Object.assign(remoteFail('This cloud connection belongs to a different account. Sign in again in this tab.',403),{code:'CLOUD_OWNER_CHANGED'});return current}
- const status=()=>grant?{connected:true,user:grant.user,owner:ownerId(grant.user.uid),expires:grant.expires}:{connected:false}
+ const status=()=>({available:true,origin,...(grant?{connected:true,user:grant.user,owner:ownerId(grant.user.uid),expires:grant.expires}:{connected:false})})
  function relay(req,res,target){
   const current=connection(),headers={host:url.host,origin,'x-openshell-console':'1',authorization:`Bearer ${current.token}`}
   for(const k of ['content-type','content-length','accept','range','x-openshell-context','x-openshell-location'])if(req.headers[k])headers[k]=req.headers[k]
@@ -67,7 +67,7 @@ export function createLocalCloud({origin=cloudOrigin(),allowTestHttp=false,nativ
      if(grant){const current=grant;try{const result=await call('/identity');if(grant===current&&result.user?.uid===current.user.uid)current.user=result.user;return responseJson(res,200,status())}catch(error){if(grant!==current)return responseJson(res,200,status());if([401,403].includes(error.status))clear();else return responseJson(res,200,{...status(),error:error.message})}}
      return responseJson(res,200,status())
     }
-    if(path==='/api/local-cloud/machine'&&req.method==='GET'){const current=assertOwner(req),machine=await call('/machine');if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,{...status(),machine})}
+    if(path==='/api/local-cloud/machine'&&['GET','POST'].includes(req.method)){const current=assertOwner(req);if(req.method==='POST')await readJson(req);const machine=await call('/machine',{method:req.method,...(req.method==='POST'?{body:{}}:{})});if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,{...status(),machine})}
     if(path==='/api/local-cloud/inventory'&&req.method==='GET'){const current=assertOwner(req),inventory=await call('/inventory',{maxBytes:4*1024*1024});if(grant!==current)throw remoteFail('Cloud connection changed. Try again.',401);return responseJson(res,200,inventory)}
     if(path==='/api/local-cloud/start'&&req.method==='POST'){
      const body=await readJson(req),verifier=randomBytes(32).toString('hex'),nonce=randomUUID(),challenge=createHash('sha256').update(verifier).digest('hex')

@@ -10,7 +10,7 @@ export function cloudHandoffUrl(origin, nonce, cloud = CLOUD_ORIGIN) {
 export function isCloudReadyMessage(event, popup, nonce, cloud = CLOUD_ORIGIN) {
   return Boolean(cloud && popup && event.source === popup && event.origin === cloud
     && event.data?.type === 'openrod-cloud-ready' && event.data.nonce === nonce
-    && typeof event.data.ticket === 'string' && /^openrod-user-[a-f0-9]{24}\.[a-f0-9]{64}$/.test(event.data.ticket))
+    && typeof event.data.ticket === 'string' && /^[a-z][a-z0-9-]{0,62}\.[a-f0-9]{64}$/.test(event.data.ticket))
 }
 
 export const LOCAL_ORIGIN = 'http://127.0.0.1:4600'

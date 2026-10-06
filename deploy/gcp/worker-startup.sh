@@ -50,7 +50,7 @@ sudo -iu openrod bash -c 'cd /var/lib/openrod/app/ui && npm ci && npm run build'
 python3 - <<'PY'
 import json,pathlib
 s=json.loads(pathlib.Path('/etc/openrod/worker-settings.json').read_text())
-lines={'OPENROD_MODE':'worker','OPENROD_PUBLIC_ORIGIN':s['origin'],'OPENROD_WORKER_UID':s['uid'],'OPENROD_WORKER_KEY':s['key'],'OPENSHELL_CONFIG_DIR':'/var/lib/openrod/.config/openshell','OPENSHELL_GATEWAY':'openshell'}
+lines={'OPENROD_MODE':'worker','OPENROD_PUBLIC_ORIGIN':s['origin'],'OPENROD_WORKER_UID':s['uid'],'OPENROD_WORKER_KEY':s['key'],'OPENROD_WORKER_PROTOCOL':s.get('workerProtocol','current'),'OPENSHELL_CONFIG_DIR':'/var/lib/openrod/.config/openshell','OPENSHELL_GATEWAY':'openshell'}
 # JSON string quoting matches systemd EnvironmentFile and handles arbitrary UIDs.
 pathlib.Path('/etc/openrod/console.env').write_text(''.join(k+'='+json.dumps(v)+'\n' for k,v in lines.items()))
 PY

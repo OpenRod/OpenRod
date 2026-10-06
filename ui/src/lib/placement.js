@@ -6,4 +6,4 @@ export const PLACEMENTS = {
   cloud: { id: 'cloud', label: 'Cloud', hint: 'Runs on a cloud machine' },
 }
 
-export const placementOf = (location) => PLACEMENTS[location?.placement]?.id ?? (location?.remote ? 'remote' : 'local')
+export const placementOf = (location) => location?.cloud || location?.target === 'cloud' ? 'cloud' : PLACEMENTS[location?.placement]?.id ?? (location?.remote ? 'remote' : 'local')

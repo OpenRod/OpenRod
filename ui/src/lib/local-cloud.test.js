@@ -16,6 +16,13 @@ test('connection parser accepts only exact loopback origins and valid nonce/chal
 test('exchange messages require exact popup, cloud origin, nonce and short code', () => {
   const popup = {}, value = { source: popup, origin: 'https://cloud.example.test', data: { type: 'openrod-local-connected', nonce: 'nonce', code: 'a'.repeat(64) + '.' + 'b'.repeat(64) } }
   assert.equal(connect.isLocalConnectedMessage(value, popup, 'nonce', CLOUD), true)
+  const legacy = { ...value, data: { ...value.data, type: 'legacy-local-connected' } }
+  assert.equal(connect.isLocalConnectedMessage(legacy, popup, 'nonce', CLOUD), true)
+  for (const message of [value, legacy]) {
+    assert.equal(connect.isLocalConnectedMessage({ ...message, source: {} }, popup, 'nonce', CLOUD), false)
+    assert.equal(connect.isLocalConnectedMessage({ ...message, origin: 'https://evil.example' }, popup, 'nonce', CLOUD), false)
+    assert.equal(connect.isLocalConnectedMessage(message, popup, 'wrong-nonce', CLOUD), false)
+  }
   assert.equal(connect.isLocalConnectedMessage(value, popup, 'nonce'), false)
   for (const patch of [{ source: {} }, { origin: 'https://evil.example' }, { data: { ...value.data, nonce: 'other' } }, { data: { ...value.data, code: '' } }]) assert.equal(connect.isLocalConnectedMessage({ ...value, ...patch }, popup, 'nonce', CLOUD), false)
 })
@@ -47,6 +54,22 @@ test('cloud-to-local return tabs always import locally despite a remembered clou
 })
 test('preparation reports capacity and machine errors immediately', async () => {
   await assert.rejects(connect.waitForCloudReady(async () => ({ connected:true,error:'Fleet capacity reached' }), {wait:async()=>{},attempts:1}), /Fleet capacity reached/)
+})
+test('explicit preparation mutates once then polls the selected cloud owner', async () => {
+  const calls = [], progress = []
+  const request = async (path, body, options) => {
+    calls.push({ path, body, owner: options.owner })
+    return { connected: true, owner: 'selected-owner', machine: { status: calls.length === 1 ? 'starting' : 'ready' } }
+  }
+  const value = await connect.prepareCloudMachine({ owner: 'selected-owner', request, wait: async () => {}, onProgress: value => progress.push(value.machine.status) })
+  assert.equal(value.machine.status, 'ready')
+  assert.deepEqual(calls, [{ path: 'machine', body: {}, owner: 'selected-owner' }, { path: 'machine', body: undefined, owner: 'selected-owner' }])
+  assert.deepEqual(progress, ['starting', 'ready'])
+})
+test('preparation never accepts another owner or allocates after cancellation', async () => {
+  await assert.rejects(connect.prepareCloudMachine({ owner: 'alice', request: async () => ({ connected: true, owner: 'bob', machine: { status: 'ready' } }) }), /account changed/)
+  const controller = new AbortController(); controller.abort()
+  await assert.rejects(connect.prepareCloudMachine({ owner: 'alice', signal: controller.signal, request: async () => assert.fail('cancelled preparation must not allocate') }), { name: 'AbortError' })
 })
 
 test('local sign-in exchanges identity and closes the popup without selecting compute or preparing a machine', async () => {
@@ -107,7 +130,7 @@ function signInHarness(request) {
   const popup = {closed:false,close(){this.closed=true},location:{set href(value){navigated.push(value)}}}
   const events = {addEventListener:(_type,listener)=>listeners.add(listener),removeEventListener:(_type,listener)=>listeners.delete(listener)}
   const attempt = connect.createLocalSignInAttempt({popup,origin:'http://localhost:4600',cloud:CLOUD,request,events,focus:()=>{},setTimer:()=>1,clearTimer:()=>{}})
-  const receive = nonce => { for (const listener of listeners) listener({source:popup,origin:CLOUD,data:{type:'openrod-local-connected',nonce,code:'a'.repeat(64)+'.'+'b'.repeat(64)}}) }
+  const receive = (nonce, type = 'openrod-local-connected') => { for (const listener of listeners) listener({source:popup,origin:CLOUD,data:{type,nonce,code:'a'.repeat(64)+'.'+'b'.repeat(64)}}) }
   return {attempt,popup,navigated,receive,listeners}
 }
 test('cancelling before delayed start suppresses popup navigation and cancels the returned nonce', async () => {
@@ -145,4 +168,15 @@ test('late cancelled redemption cannot disconnect a newer successful sign-in', a
   assert.deepEqual(calls.filter(call=>call.path==='cancel').map(call=>call.body.nonce),['attempt-1','attempt-1'])
   assert.equal(old.listeners.size,0)
   assert.equal(current.listeners.size,0)
+})
+
+test('legacy and current cloud return messages redeem only once and close the popup', async () => {
+  const calls = [], identity = {connected:true,user:{uid:'user'}}
+  const flow = signInHarness(async path => { calls.push(path); return path === 'start' ? {nonce:'attempt',url:CLOUD} : identity })
+  await flush()
+  flow.receive('attempt', 'legacy-local-connected')
+  flow.receive('attempt', 'openrod-local-connected')
+  assert.equal(await flow.attempt.promise, identity)
+  assert.equal(flow.popup.closed, true)
+  assert.deepEqual(calls, ['start','finish'])
 })

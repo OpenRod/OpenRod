@@ -121,6 +121,13 @@ function openBrowser(url, logger) {
   child.unref()
 }
 
+// The API authenticates these upgrades. The CLI must not destroy a cloud
+// relay socket after that asynchronous handler has accepted responsibility.
+export function rejectUnsupportedUpgrade(req, socket) {
+  const pathname = (req.url ?? '').split('?', 1)[0]
+  if (!['/api/os/terminal', '/api/os/ssh', '/api/remote/os/terminal', '/api/remote/os/ssh'].includes(pathname)) socket.destroy()
+}
+
 export async function startConsole(options = parseOptions([]), logger = console) {
   const { host, port } = parseOptions(['--host', options.host ?? '127.0.0.1', '--port', String(options.port ?? 4600)])
   let directory
@@ -155,7 +162,7 @@ export async function startConsole(options = parseOptions([]), logger = console)
   })
   try { api = createOpenShellApi({ httpServer: server, logger, token }) }
   catch (error) { server.close(); throw error }
-  server.on('upgrade', (req, socket) => { if ((req.url ?? '').split('?', 1)[0] !== '/api/os/terminal') socket.destroy() })
+  server.on('upgrade', rejectUnsupportedUpgrade)
   let closing
   const close = () => {
     if (closing) return closing

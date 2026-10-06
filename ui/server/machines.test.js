@@ -45,11 +45,60 @@ test('completed readiness clears its overall timer instead of destroying a succe
 })
 test('parallel ensure calls create one VM, no credentials are returned to the browser',async()=>{
  const store=createMachineStore(database(),{maxMachines:1});let creates=0,exists=false
- const compute={get:async()=>exists?{status:'RUNNING',labels:{openrod_owner:machineName('alice').slice(9)},networkInterfaces:[{networkIP:'10.80.0.9'}]}:null,create:async()=>{creates++;exists=true}}
+ const compute={get:async()=>exists?{status:'RUNNING',labels:{openrod_owner:'2bd806c97f0e00af1a1fc332'},networkInterfaces:[{networkIP:'10.80.0.9'}]}:null,create:async()=>{creates++;exists=true}}
  const manager=createMachineManager(store,compute,{ready:async()=>true})
  await Promise.all(Array.from({length:10},()=>manager.ensure({uid:'alice'})))
  const result=await manager.status({uid:'alice'})
  assert.equal(creates,1);assert.equal(result.status,'ready');assert.equal(result.key,undefined);assert.equal(result.address,undefined)
+})
+
+test('worker ownership verification is independent of the configured resource prefix',async()=>{
+ for(const prefix of ['openrod-user','legacy-user','my-company-worker']){
+  const store=createMachineStore(database(),{prefix})
+  await store.reserve({uid:'alice'})
+  const manager=createMachineManager(store,{get:async()=>({status:'RUNNING',labels:{openrod_owner:'2bd806c97f0e00af1a1fc332'},networkInterfaces:[{networkIP:'10.80.0.9'}]})},{ready:async()=>true})
+  assert.equal((await manager.status({uid:'alice'})).status,'ready')
+ }
+})
+
+test('status and resource reads never reserve a machine or recreate a failed reservation',async()=>{
+ const store=createMachineStore(database(),{maxMachines:1});let creates=0
+ const manager=createMachineManager(store,{get:async()=>null,create:async()=>{creates++}})
+ assert.deepEqual(await manager.status({uid:'alice'}),{name:null,status:'none',error:null})
+ assert.equal(await store.get('alice'),null)
+ await assert.rejects(manager.target({uid:'alice'},{provision:false}),{status:409})
+ await store.reserve({uid:'alice'})
+ assert.equal((await manager.status({uid:'alice'})).status,'provisioning')
+ assert.equal(creates,0)
+ await manager.prepare({uid:'alice'})
+ assert.equal(creates,1)
+})
+
+test('configured legacy fleet identity reuses its existing owner record without creating a second VM',async()=>{
+ const db=database(),store=createMachineStore(db,{prefix:'legacy-user',maxMachines:1})
+ const original=await store.reserve({uid:'alice'})
+ assert.equal(original.name,machineName('alice','legacy-user'))
+ let creates=0
+ const manager=createMachineManager(createMachineStore(db,{prefix:'legacy-user',maxMachines:1}),{get:async()=>({status:'RUNNING',labels:{legacy_owner:original.name.slice(9)},networkInterfaces:[{networkIP:'10.80.0.3'}]}),create:async()=>{creates++}},{ownerLabel:'legacy_owner',allowProvisioning:false,ready:async()=>true})
+ assert.equal((await manager.prepare({uid:'alice'})).status,'ready')
+ assert.equal((await store.get('alice')).key,original.key)
+ await assert.rejects(manager.prepare({uid:'bob'}),/temporarily unavailable/)
+ assert.equal(await store.get('bob'),null)
+ assert.equal(await store.byName(machineName('alice')),null)
+ assert.equal(creates,0)
+})
+
+test('explicit prepare arriving during an empty status read still allocates exactly once',async()=>{
+ const store=createMachineStore(database()),read=store.get
+ let release,creates=0,first=true
+ store.get=async uid=>{if(first){first=false;await new Promise(resolve=>{release=resolve})}return read(uid)}
+ const manager=createMachineManager(store,{get:async()=>null,create:async()=>{creates++}})
+ const status=manager.status({uid:'alice'})
+ const prepare=manager.prepare({uid:'alice'})
+ release()
+ assert.equal((await status).status,'none')
+ assert.equal((await prepare).status,'provisioning')
+ assert.equal(creates,1)
 })
 
 test('readiness probe preserves the public Host and signed worker identity',async()=>{

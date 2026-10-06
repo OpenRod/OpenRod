@@ -32,3 +32,18 @@ test('opens the browser by default only where there is a screen to open on', () 
   assert.equal(autoOpen({ ...desk, platform: 'linux', env: { DISPLAY: ':0' } }), true)
   assert.equal(autoOpen({ ...desk, platform: 'linux', env: { WAYLAND_DISPLAY: 'wayland-0' } }), true)
 })
+
+
+test('CLI guard leaves authenticated terminal and SSH relays to the API and rejects unknown upgrades', async () => {
+  const { rejectUnsupportedUpgrade } = await import('./cli.js')
+  for (const url of ['/api/os/terminal?ticket=one', '/api/os/ssh?ticket=two', '/api/remote/os/terminal?ticket=three&owner=alice', '/api/remote/os/ssh?ticket=four&owner=alice']) {
+    let destroyed = false
+    rejectUnsupportedUpgrade({url}, {destroy(){destroyed=true}})
+    assert.equal(destroyed, false, url)
+  }
+  for (const url of ['/api/remote/os/overview', '/api/remote/os/terminal/extra', '/unknown', undefined]) {
+    let destroyed = false
+    rejectUnsupportedUpgrade({url}, {destroy(){destroyed=true}})
+    assert.equal(destroyed, true, url)
+  }
+})

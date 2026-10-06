@@ -28,6 +28,7 @@ import { useInventory } from '@/lib/inventory'
 import { useLocationData } from '@/lib/location-data'
 import { resourceKey } from '@/lib/locations'
 import { LocationStep } from '@/components/location-step'
+import { useCompute } from '@/lib/compute'
 
 const SOURCES = [{ id: 'codex', name: 'Codex', logo: 'codex' }, { id: 'claude', name: 'Claude Code', logo: 'claudecode' }, { id: 'cursor', name: 'Cursor', logo: 'cursor' }]
 const count = (setup, kind) => setup.items.filter((item) => item.kind === kind).length
@@ -336,6 +337,7 @@ function ImportSetup(props) {
 }
 
 function NewSetupImport({ onClose, onSaved, ...props }) {
+  const compute = useCompute()
   const { locations, refresh } = useInventory()
   const [destination, setDestination] = React.useState(null)
   const [pendingGateway, setPendingGateway] = React.useState(null)
@@ -348,9 +350,9 @@ function NewSetupImport({ onClose, onSaved, ...props }) {
     <ImportSetupForm {...props} onClose={onClose} onChangeLocation={() => setDestination(null)} onSaved={saved => onSaved(saved, destination)} />
   </LocationProvider>
   return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
-    <DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-xl">
-      <LocationStep locations={locations} allowRemote subject="setup" connecting={Boolean(pendingGateway)}
-        onPick={id => { const selected = locations.find(item => (item.id ?? item.context) === id && item.connected); if (selected) setDestination(selected) }}
+    <DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-3xl">
+      <LocationStep locations={locations} allowRemote={Boolean(compute?.localViewer)} subject="setup" connecting={Boolean(pendingGateway)}
+        onPick={id => { const selected = locations.find(item => (item.id ?? item.context) === id && item.connected); if (!selected) return; if (compute?.localViewer && (selected.cloud || selected.target === 'cloud')) { onClose(); window.dispatchEvent(new CustomEvent('openrod-import', { detail: { destination: selected, type: 'setups' } })); return }; setDestination(selected) }}
         onConnected={job => { setPendingGateway(job.gateway); refresh() }} onCancel={onClose} />
     </DialogContent>
   </Dialog>
