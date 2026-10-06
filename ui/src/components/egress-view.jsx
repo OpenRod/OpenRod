@@ -329,7 +329,7 @@ function FleetSummary({ model, fleet, org, events, onOpen, onOpenGlobal, onDecid
   const needle = query.trim().toLowerCase()
   const filteredDestinations = destinations.filter((d) => (sourceFilter === "all" || d.sources.has(sourceFilter)) && (!needle || [d.host, ...d.grants.flatMap((g) => [g.sandbox, g.key])].join(" ").toLowerCase().includes(needle)))
   const destinationCount = filteredDestinations.length
-  const sourceOptions = [{ id: "all", label: "All" }, ...SOURCE_ORDER.filter((s) => destinations.some((d) => d.sources.has(s))).map((s) => ({ id: s, label: SOURCE[s].label }))]
+  const sourceOptions = [{ id: "all", label: "All" }, ...SOURCE_ORDER.filter((s) => s === sourceFilter || destinations.some((d) => d.sources.has(s))).map((s) => ({ id: s, label: SOURCE[s].label }))]
 
   const filteredBlocked = blocked.filter((b) => !needle || [b.host, ...b.programs, ...b.sandboxes].join(" ").toLowerCase().includes(needle))
   const filteredBoxes = sandboxes.filter((s) => !needle || s.name.toLowerCase().includes(needle))

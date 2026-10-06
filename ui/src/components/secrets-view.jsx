@@ -238,7 +238,11 @@ function ScopedSecretsView({model}) {
   const profiles = data?.profiles ?? EMPTY
   const rows = React.useMemo(() => model ? model.sources.flatMap(source=>indexSecrets(source.data?.secrets?.providers ?? [],source.data?.secrets?.profiles ?? [],now).map(row=>({...row,secret:{...row.secret,location:source.location}}))) : indexSecrets(providers, profiles, now), [providers, profiles, now, model?.sources])
   const ordered = React.useMemo(() => filterSecrets(rows, { query: deferredQuery, scope, service, expiry, sort }), [rows, deferredQuery, scope, service, expiry, sort])
-  const services = React.useMemo(() => [...new Map(rows.map((row) => [row.secret.type, row.service])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [rows])
+  const services = React.useMemo(() => {
+    const options = new Map(rows.map((row) => [row.secret.type, row.service]))
+    if (service && !options.has(service)) options.set(service, service)
+    return [...options.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [rows, service])
   const virtual = useVirtualRows({ count: ordered.length, rowHeight: 40 })
   React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, scope, service, expiry, sort])
   const selected = rows.find((row) => resourceKey(row.secret) === opened)

@@ -160,9 +160,10 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const columnValues = React.useMemo(() => Object.fromEntries(Object.entries(filterValue).map(([column, of]) => {
     const counts = new Map()
     for (const row of indexed) counts.set(of(row), (counts.get(of(row)) ?? 0) + 1)
+    for (const value of filters[column]) if (!counts.has(value)) counts.set(value, 0)
     const values = [...counts.keys()].sort(column === "phase" ? (a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b) : collator.compare)
     return [column, values.map((value) => ({ value, label: column === "phase" ? STATUS[value].label : value, count: counts.get(value) }))]
-  })), [indexed])
+  })), [indexed, filters])
   const ordered = React.useMemo(() => {
     const q = deferredQuery.trim().toLowerCase()
     const since = filters.createdAt ? now - Number(filters.createdAt) * 86400000 : null
@@ -267,7 +268,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
       <div className="flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 px-4 pt-4 pb-3 sm:px-6">
           <div className="flex flex-wrap gap-1" role="group" aria-label="Sandbox status">
-            {FILTERS.filter((key) => ["all", "running", "sleeping"].includes(key) || all.status[key] > 0).map((key) => <button key={key} aria-pressed={key === "all" ? !filters.phase.length : filters.phase.length === 1 && filters.phase[0] === key} onClick={() => setFilter("phase", key === "all" ? [] : [key])}
+            {FILTERS.filter((key) => ["all", "running", "sleeping"].includes(key) || all.status[key] > 0 || filters.phase.includes(key)).map((key) => <button key={key} aria-pressed={key === "all" ? !filters.phase.length : filters.phase.length === 1 && filters.phase[0] === key} onClick={() => setFilter("phase", key === "all" ? [] : [key])}
               className={`rounded-md px-3 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${(key === "all" ? !filters.phase.length : filters.phase.length === 1 && filters.phase[0] === key) ? "bg-accent/70" : "hover:bg-muted/60"}`}>
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{key !== "all" && <span aria-hidden="true" className={`size-1.5 rounded-full ${STATUS[key].bar}`} />}{key === "all" ? "Sandboxes" : STATUS[key].label}</span>
               <span className="mt-1 block font-mono text-lg leading-none tabular-nums"><NumberTicker value={key === "all" ? all.total : all.status[key]} /></span>
