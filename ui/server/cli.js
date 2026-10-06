@@ -129,6 +129,9 @@ export function rejectUnsupportedUpgrade(req, socket) {
 }
 
 export async function startConsole(options = parseOptions([]), logger = console) {
+  // The openrod command is the loopback console guarded by its launch token.
+  // Cloud and worker deployments start server/start.js instead.
+  if ((process.env.OPENROD_MODE ?? 'local') !== 'local') throw new Error('openrod runs the local console. Unset OPENROD_MODE, or start cloud and worker deployments with server/start.js.')
   const { host, port } = parseOptions(['--host', options.host ?? '127.0.0.1', '--port', String(options.port ?? 4600)])
   let directory
   try {
@@ -136,6 +139,7 @@ export async function startConsole(options = parseOptions([]), logger = console)
     await fs.access(path.join(directory, 'index.html'))
   } catch { throw new Error('Built frontend is missing. Run npm run build from the source checkout before starting or packaging the console.') }
   const { createOpenShellApi, isLocalApiRequest } = await import('./api.js')
+  const { createSecurity } = await import('./security.js')
   const { createLaunchToken, tokenUrl } = await import('./launch-token.js')
   const token = createLaunchToken()
   const serveStatic = staticMiddleware(directory)
@@ -160,7 +164,7 @@ export async function startConsole(options = parseOptions([]), logger = console)
     server.once('error', error)
     server.listen(port, host === 'localhost' ? '127.0.0.1' : host, () => { server.off('error', error); resolve() })
   })
-  try { api = createOpenShellApi({ httpServer: server, logger, token }) }
+  try { api = createOpenShellApi({ httpServer: server, logger, token, security: createSecurity({ mode: 'local' }) }) }
   catch (error) { server.close(); throw error }
   server.on('upgrade', rejectUnsupportedUpgrade)
   let closing

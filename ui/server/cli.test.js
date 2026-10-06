@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { autoOpen, nodeSupported, parseOptions } from './cli.js'
+import { autoOpen, nodeSupported, parseOptions, startConsole } from './cli.js'
 
 test('requires Node.js 22.13 or newer', () => {
   for (const version of ['20.20.2', '22.12.0', '21.7.3', '18.20.4']) assert.equal(nodeSupported(version), false, version)
@@ -45,5 +45,18 @@ test('CLI guard leaves authenticated terminal and SSH relays to the API and reje
     let destroyed = false
     rejectUnsupportedUpgrade({url}, {destroy(){destroyed=true}})
     assert.equal(destroyed, true, url)
+  }
+})
+
+test('the openrod command refuses cloud and worker modes instead of serving them without its launch token', async () => {
+  const before = process.env.OPENROD_MODE
+  try {
+    for (const mode of ['cloud', 'worker']) {
+      process.env.OPENROD_MODE = mode
+      await assert.rejects(startConsole({ port: 0 }), /local console/)
+    }
+  } finally {
+    if (before === undefined) delete process.env.OPENROD_MODE
+    else process.env.OPENROD_MODE = before
   }
 })
