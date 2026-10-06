@@ -192,10 +192,13 @@ export function createResourceImports({ directory = path.join(scopedStateDirecto
   const key = id => file(id)
   const save = async job => { job.updatedAt = now(); await atomic(file(job.id), job) }
   const read = async id => {
+    // A job saves its final state before it stops running, so only a job that
+    // was already stopped when the read began can be stranded in 'running'.
+    const active = running.has(key(id))
     let job
     try { job = JSON.parse(await fs.readFile(file(id), 'utf8')) } catch (error) { if (error.code === 'ENOENT') throw importFail('Import not found.', 404); throw error }
     if (contextKey(job.destination) !== contextKey(destination)) throw importFail('Import belongs to another destination.', 403)
-    if (job.status === 'running' && !running.has(key(id))) {
+    if (job.status === 'running' && !active && !running.has(key(id))) {
       job.status = 'interrupted'
       for (const item of job.items) if (item.status === 'running') { item.status = 'failed'; item.error = 'The process stopped during this item. Retry to check the destination and resume.' }
     }

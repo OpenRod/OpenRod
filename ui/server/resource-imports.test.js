@@ -279,6 +279,26 @@ test('limits active imports per destination and concurrent execute does not star
   assert.equal(f.calls.length, 2)
 })
 
+test('a poll that overlaps the final save never reports a finished import as interrupted', async t => {
+  let release, finished
+  const gate = new Promise(resolve => { release = resolve }), done = new Promise(resolve => { finished = resolve })
+  const f = await fixture(t)
+  const create = f.adapter.create
+  f.adapter.create = async (type, data) => { await gate; return create(type, data) }
+  const plan = await f.service.plan({ bundle: bundle([['groups', group]]) })
+  await f.service.execute(plan.id, { acknowledged: true })
+  // Hold one poll's read of the 'running' file until the job has finished.
+  const readFile = fs.readFile
+  t.after(() => { fs.readFile = readFile })
+  fs.readFile = async (...args) => { fs.readFile = readFile; const content = await readFile(...args); await done; return content }
+  const poll = f.service.get(plan.id)
+  release()
+  assert.equal((await completed(f.service, plan.id)).status, 'completed')
+  finished()
+  assert.equal((await poll).status, 'running')
+  assert.equal((await f.service.get(plan.id)).status, 'completed')
+})
+
 test('rejects JSON-shaped embedded secrets in skill content', () => {
   assert.throws(() => portableResource('setups', { ...setup, items: [{ kind: 'skill', name: 'Review', files: [{ path: 'SKILL.md', content: '{"api_key":"opaqueSecretValue123456789"}' }] }] }), /credentials/)
 })
