@@ -33,6 +33,8 @@ const AGENT_LABELS = Object.fromEntries(AGENTS.map((agent) => [agent.name, { nam
 const RANGE = { all: 'Available history', 15: 'Last 15 minutes', 60: 'Last hour', 1440: 'Last 24 hours', custom: 'Custom range' }
 const control = 'h-8 rounded-md border border-border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
 const timestamp = (at) => Number.isFinite(Date.parse(at)) ? new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'
+const names = (list) => new Intl.ListFormat('en', { type: 'conjunction' }).format(list)
+const unavailableNote = (source) => source.offline ? `${source.label} is offline` : `Could not load logs from ${source.label}`
 
 function Choices({ options, selected, onChange, label }) {
   const [query, setQuery] = React.useState('')
@@ -143,7 +145,8 @@ function ScopedActivityView({combined,sourceRevision}) {
       const result = await api.deleteActivity(deletion.token)
       setDeletion(null); setSelected(null); setChecked(new Set()); setHeld([])
       history.refresh(); live.refresh()
-      toast.success(`Deleted ${result.deleted.toLocaleString()} log${result.deleted === 1 ? '' : 's'}`)
+      const skipped = deletion.skipped ?? []
+      toast.success(`Deleted ${result.deleted.toLocaleString()} log${result.deleted === 1 ? '' : 's'}`, skipped.length ? { description: `${names(skipped)} ${skipped.length === 1 ? 'was offline; its' : 'were offline; their'} logs were kept.` } : undefined)
     } catch (e) { setDeleteError(e.message) } finally { setDeleteBusy(false) }
   }
   function toggleChecked(id) {
@@ -169,7 +172,7 @@ function ScopedActivityView({combined,sourceRevision}) {
     setExporting(true)
     try {
       if (live.demo) { download(filterActivity(rows, { ...exportQuery, now: anchor }).map((r) => r.event), { ...exportQuery, demo: true }, exportFormat); setExportOptions(null); return }
-      if(combined) { const result=await api.activity({...exportQuery,exportAll:true}); download(result.events.map(({originalId,id,...event})=>({...event,id:originalId})),exportQuery,exportFormat);setExportOptions(null);return }
+      if(combined) { const result=await api.activity({...exportQuery,exportAll:true}); download(result.events.map(({originalId,id,...event})=>({...event,id:originalId})),exportQuery,exportFormat);setExportOptions(null);if(result.unavailable?.length)toast.warning('Some logs were not exported',{description:result.unavailable.map(unavailableNote).join('\n')});return }
       const link = document.createElement('a')
       link.href = api.url("/activity/export", { format: exportFormat, query: JSON.stringify(exportQuery), context: await api.contextKey(), ...(location ? { location: "1" } : {}) })
       link.download = exportFormat === 'ocsf' ? 'openshell-activity-ocsf.json' : 'openshell-activity.json'
@@ -262,6 +265,7 @@ function ScopedActivityView({combined,sourceRevision}) {
       <div className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-6 py-2 text-[11px] text-muted-foreground">
         <span><strong className="font-mono text-foreground">{total.toLocaleString()}</strong> {live.demo ? 'demo events' : 'matching events'}</span>
         <span>{allowed.toLocaleString()} allowed · <span className={denied ? 'text-red-600' : ''}>{denied.toLocaleString()} denied</span> <span className="text-muted-foreground/70">on this page</span></span>
+        {combined && !live.demo && !history.error && history.unavailable?.map((source, index) => <span key={index} title={source.error} className="text-amber-700 dark:text-amber-400">{unavailableNote(source)}</span>)}
         <button className="flex min-h-10 items-center gap-1.5 rounded px-2 text-xs hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { if (held) { setHeld(null); setDemoPagination({ query: pageQuery, page: 0 }); setAnchor(Date.now()); history.refresh(); virtual.scrollToTop() } else hold() }}>{held ? <Play className="size-3" /> : <Pause className="size-3" />}{held ? 'Resume' : 'Pause'}</button>
         {held && <span className="flex items-center gap-2"><span>View paused</span><button className="rounded text-foreground underline underline-offset-4 disabled:opacity-40" disabled={live.demo && !pending} onClick={() => { setHeld(live.demo ? live.events : events); setAnchor(Date.now()); history.refresh(); virtual.scrollToTop() }}>{live.demo ? `${pending.toLocaleString()} new events` : 'Refresh'}</button></span>}
         {checked.size > 0 && <span className="flex items-center gap-2">{checked.size.toLocaleString()} selected<button className="underline" onClick={() => setChecked(new Set())}>Clear selection</button></span>}
@@ -324,6 +328,8 @@ function ScopedActivityView({combined,sourceRevision}) {
       </DialogContent>
     </Dialog>
     <AlertDialog open={Boolean(deletion)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeletion(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{deletion?.mode === 'all' ? 'Delete all retained logs?' : deletion?.mode === 'matching' ? 'Delete matching logs?' : 'Delete selected logs?'}</AlertDialogTitle><AlertDialogDescription>{deletion?.count.toLocaleString()} log{deletion?.count === 1 ? '' : 's'} will be permanently removed from Activity and pending webhook delivery. This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+      {deletion?.sources?.length > 1 && <p className="text-xs text-muted-foreground">{deletion.sources.map((source) => `${source.label}: ${source.count.toLocaleString()}`).join(', ')}</p>}
+      {deletion?.skipped?.length > 0 && <p className="text-xs font-medium text-amber-700 dark:text-amber-400">{names(deletion.skipped)} {deletion.skipped.length === 1 ? 'is offline; its' : 'are offline; their'} logs won’t be deleted.</p>}
       <p className="text-xs leading-relaxed text-muted-foreground">{deletion?.mode === 'all' ? 'This includes every sandbox and ignores the current filters. ' : ''}New logs arriving after this review will be kept. Copies in sandbox files, exports, or external systems are not deleted; a webhook request already in flight may still arrive.</p>
       {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
       <AlertDialogFooter><AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={deleteBusy || !deletion?.count || Boolean(deleteError)} onClick={confirmDeletion}>{deleteBusy ? 'Deleting…' : `Delete ${deletion?.count.toLocaleString()} log${deletion?.count === 1 ? '' : 's'}`}</AlertDialogAction></AlertDialogFooter>
