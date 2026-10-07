@@ -2,17 +2,14 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.3
 
 ### Added
 
 - Optional usage sharing. On first opening, OpenRod asks whether to share usage metrics with PostHog; nothing is sent unless you agree, and never commands, files or names. **Usage & feedback** in the sidebar changes the choice and sends feedback. `OPENROD_TELEMETRY=0` or `DO_NOT_TRACK=1` turns it all off.
-- Cloud sign-in uses the OpenRod fisherman logo and concise, actionable copy. Configuration import appears after connecting Cloud and remains available on the connection, rather than in every page header.
-- OpenRod Cloud can be configured at runtime and selected alongside Local and Remote when creating resources. Sign-in, explicit workspace preparation, connection status, and sandbox copying use the selected cloud account.
 - Configuration imports preview groups, network policies, saved MCPs and skills, and template recipes before copying them to another location. Source organization blocks follow imported groups; credential values stay excluded. Persistent jobs report partial results and support cancellation and retries.
 - Activity history can be imported separately in bounded batches, retaining source identity and timestamps without copying raw payloads.
-- The cloud control plane initializes its authentication, Firestore registry, and private worker services lazily, with deployment preflight/readiness checks and explicit compatibility settings for an existing fleet.
-- Where OpenRod Cloud is configured, a one-time banner announces it. Without a cloud origin, cloud entry points keep saying "Coming soon".
+- Groundwork for OpenRod Cloud. It isn't available yet, so cloud entry points still say "Coming soon".
 
 ### Changed
 
