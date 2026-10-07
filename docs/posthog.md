@@ -26,7 +26,7 @@ A small client in the browser posts to PostHog's [capture API](https://posthog.c
 | `feature_used` | A template build, setup import or activation, network rule or group save, activity filter, file upload, or sandbox start, stop or delete succeeded. |
 | `feedback_submitted` | Text the user typed and sent, up to 2,000 characters. |
 
-Events carry the app version, environment, a random installation ID and, while sharing is on, a session ID and the current screen. Feedback sent with sharing off carries only the text and a one-off ID.
+Events carry the app version, environment, a random installation ID and, while sharing is on, a session ID and the current screen. Feedback sent with sharing off carries only the text, the OpenRod version and a one-off ID.
 
 Never sent: commands, terminal output, files, sandbox, host or template names, paths, repositories, credentials, URLs and error messages. Error messages are matched in the browser against OpenRod's own wording, and only the resulting category is sent.
 

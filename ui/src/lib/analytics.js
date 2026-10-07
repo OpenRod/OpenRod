@@ -263,7 +263,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       const url = new URL(getLocation())
       const [path, query = ''] = url.hash.split('?')
       const params = new URLSearchParams(query); params.delete('analyticsFlow')
-      url.hash = params.size ? `${path}?${params}` : path
+      url.hash = params.toString() ? `${path}?${params}` : path
       replaceLocation(url.href)
     })
   }
