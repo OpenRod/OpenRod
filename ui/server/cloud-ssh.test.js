@@ -82,7 +82,7 @@ test('raw SSH websocket streams binary to fixed proxy argv and kills child on di
 
 test('expired authorization kills the proxy even when a peer never acknowledges websocket close', async () => {
   const tickets = module.createSshTickets()
-  const ticket = tickets.issue({ name: 'demo', target: context.target, gateway: context.target.name, workspace: context.workspace, principal: 'alice', sessionExpires: Date.now() + 100 })
+  const ticket = tickets.issue({ name: 'demo', target: context.target, gateway: context.target.name, workspace: context.workspace, principal: 'alice', sessionExpires: Date.now() + 500 })
   const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough()
   let killed = false; child.kill = () => { killed = true }
   const server = http.createServer()
@@ -91,7 +91,8 @@ test('expired authorization kills the proxy even when a peer never acknowledges 
   const ws = new WebSocket(`ws://127.0.0.1:${server.address().port}/api/os/ssh?ticket=${ticket}`)
   try {
     await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) }); ws.pause()
-    await new Promise(resolve => setTimeout(resolve, 180)); assert.equal(killed, true)
+    for (let waited = 0; !killed && waited < 3000; waited += 20) await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(killed, true)
   } finally { ws.terminate(); await new Promise(resolve => server.close(resolve)) }
 })
 

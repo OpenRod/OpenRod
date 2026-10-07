@@ -123,7 +123,7 @@ function nextName(taken, prefix = "sandbox") {
   return ""
 }
 
-export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, onRefreshLocations, allowRemote = false, ...props }) {
+export function CreateSandboxDialog({ locations, location: requestedLocation, onLocationChange, onRefreshLocations, allowRemote = false, initialLocationConfirmed = false, ...props }) {
   const inheritedLocation = useLocation()
   const api = useApi()
   const [selectedContext, setSelectedContext] = React.useState(null)
@@ -139,8 +139,8 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
   const [pendingGateway, setPendingGateway] = React.useState(null)
   React.useEffect(() => {
     if (!props.open) setSelectedContext(null)
-    setStep("where"); setPendingGateway(null)
-  }, [props.open])
+    setStep(initialLocationConfirmed ? "form" : "where"); setPendingGateway(null)
+  }, [props.open, initialLocationConfirmed])
   const changeLocation = (context) => {
     const next = available.find((item) => locationKey(item) === context && item.connected)
     if (!next) return

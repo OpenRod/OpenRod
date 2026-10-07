@@ -1,20 +1,24 @@
 import * as React from 'react'
 import { cloudHandoff } from '@/lib/cloud-machine'
 import { Notice } from '@/components/notice'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
 async function request(path,method='GET') {
- const response=await fetch(`/api/cloud/${path}`,{method,headers:method==='POST'?{'x-openshell-console':'1'}:undefined})
+ const response=await fetch(`/api/cloud/${path}`,{method,headers:method==='POST'?{'x-openshell-console':'1','content-type':'application/json'}:undefined,body:method==='POST'?'{}':undefined})
  const value=await response.json()
  if(!response.ok)throw Error(value.error??'Cloud machine unavailable')
  return value
 }
 export function CloudMachine({children,logout}) {
  const [machine,setMachine]=React.useState(null),[error,setError]=React.useState(''),[transfer,setTransfer]=React.useState(null)
+ const [preparing,setPreparing]=React.useState(false),[revision,refresh]=React.useReducer(value=>value+1,0)
+ async function prepare(){setPreparing(true);setError('');try{setMachine(await request('machine','POST'));refresh()}catch(e){setError(e.message)}finally{setPreparing(false)}}
  const handoff=React.useRef(cloudHandoff(window.location.hash)),sent=React.useRef(false)
  React.useEffect(()=>{
   let alive=true,timer
-  async function poll(){try{const value=await request('machine');if(alive){setMachine(value);setError(value.error??'');if(value.status!=='ready')timer=setTimeout(poll,5000)}}catch(e){if(alive){setError(e.message);timer=setTimeout(poll,10000)}}}
+  async function poll(){try{const value=await request('machine');if(alive){setMachine(value);setError(value.error??'');if(!['ready','none','error'].includes(value.status))timer=setTimeout(poll,5000)}}catch(e){if(alive){setError(e.message);timer=setTimeout(poll,10000)}}}
   poll();return()=>{alive=false;clearTimeout(timer)}
- },[])
+ },[revision])
  React.useEffect(()=>{
   const target=handoff.current
   if(machine?.status!=='ready'||!target||!window.opener||sent.current)return
@@ -37,9 +41,10 @@ export function CloudMachine({children,logout}) {
  },[machine?.status])
  if(machine?.status==='ready'&&(!transfer||transfer.status==='done'))return <>{transfer?.message&&<Notice id="cloud-transfer" tone="success" title="Workspace continued in the cloud" onDismiss={()=>setTransfer(null)}>{transfer.message}</Notice>}{children}</>
  return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-md text-center">
-  <h1 className="text-2xl font-semibold">{transfer?'Continuing your workspace…':'Preparing your private machine…'}</h1>
+  <h1 className="text-2xl font-semibold">{transfer?'Continuing your workspace…':machine?.status==='none'?'Start OpenRod Cloud':'Starting your cloud machine…'}</h1>
   <p className="mt-3 text-sm text-muted-foreground">{transfer?'Keep the local OpenRod tab open while your files are copied and your template is rebuilt.':'Your account has one dedicated machine. Its first start can take several minutes.'}</p>
   {(error||transfer?.message)&&<p role="alert" className="mt-4 text-sm text-destructive">{transfer?.message??error}</p>}
+  {!transfer&&(machine?.status==='none'||error)&&<Button disabled={preparing} className="mt-5" onClick={prepare}>{preparing&&<Spinner />}{error?'Try again':'Start cloud machine'}</Button>}
   {transfer&&<button onClick={()=>{handoff.current=null;setTransfer(null);window.location.hash=''}} className="mt-4 text-sm underline">Open cloud workspace</button>}
   <button onClick={logout} className="mt-6 block w-full text-xs underline">Sign out</button>
  </section></main>

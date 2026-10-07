@@ -10,7 +10,8 @@ export function LocationProvider({ location, children }) {
   // The SaaS serves its owner-routed worker at /api/os. Only the local viewer
   // uses /api/remote/os for cloud locations.
   const target = compute?.localViewer && location?.target ? location.target : base.target
-  const scoped = React.useMemo(() => createApi(target, base.signal, location?.context, base.owner), [target, base.signal, location?.context, base.owner])
+  const owner = target === 'cloud' ? compute?.status?.owner ?? base.owner : base.owner
+  const scoped = React.useMemo(() => createApi(target, base.signal, location?.context, owner), [target, base.signal, location?.context, owner])
   const value = React.useMemo(() => ({ location, api: scoped }), [location, scoped])
   return <ScopedComputeProvider target={location?.target}><LocationContext.Provider value={value}>{children}</LocationContext.Provider></ScopedComputeProvider>
 }
@@ -24,6 +25,6 @@ export function useLocation() {
   return React.useContext(LocationContext)?.location ?? null
 }
 
-export function LocationApiProvider({api, children}) {
-  return <LocationContext.Provider value={{location:null,api}}>{children}</LocationContext.Provider>
+export function LocationApiProvider({api, location = null, children}) {
+  return <LocationContext.Provider value={{location,api}}>{children}</LocationContext.Provider>
 }

@@ -61,6 +61,7 @@ export function createTemplateStore({ directory, builtins, legacy = [], validate
     save: (input) => mutate(async () => {
       const template = validate(input)
       const current = await state()
+      if (input.isNew && (await list(current)).some(item => item.id === template.id)) throw fail('A policy with this id already exists. Pick another identity.', 409)
       const catalog = (await list(current)).filter(item => item.id !== template.id).concat(template)
       // An edited addition must also remain compatible with saved combinations.
       for (const item of catalog) {

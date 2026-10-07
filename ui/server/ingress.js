@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { gateway, iso, contextKey, contextSelection, runWithContext } from './gateway.js'
 import { stateDirectory } from './paths.js'
+import { assertCloudOperation } from './security.js'
 
 // Ingress: the ways into a sandbox. OpenShell sandboxes accept nothing inbound
 // on their own; every way in is something the gateway opened on purpose:
@@ -79,6 +80,7 @@ async function setDeadline(sandbox, name, expiresAt) {
 }
 
 export async function expose({ sandbox, name = '', port, closeAfterMinutes }) {
+  assertCloudOperation(['ingress', 'expose'])
   if (!SANDBOX.test(sandbox ?? '')) throw fail('Unknown sandbox.')
   if (!SERVICE.test(name)) throw fail('Service names use lowercase letters, digits and dashes (up to 32).')
   const targetPort = Number(port)
@@ -99,6 +101,7 @@ export async function close({ sandbox, name = '' }, reason = 'closed') {
 }
 
 async function extend({ sandbox, name = '', closeAfterMinutes }) {
+  assertCloudOperation(['ingress', 'extend'])
   if (!SANDBOX.test(sandbox ?? '') || !SERVICE.test(name)) throw fail('Unknown service.')
   const services = await listServices()
   if (!services.some((s) => s.sandbox === sandbox && s.name === name)) throw fail('That service is no longer open.')

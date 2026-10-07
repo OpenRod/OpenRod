@@ -13,11 +13,13 @@ import { TemplatesView } from "@/components/image-templates-view"
 import { ConnectionsView } from "@/components/connections-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
-import { CloudAccount, useCloudMode } from "@/components/auth-gate"
+import { CloudAccount } from "@/components/auth-gate"
 import { LiveProvider } from "@/lib/live"
 import { LocationProvider } from "@/lib/location-context"
 import { useInventory } from "@/lib/inventory"
 import { workingLocation, locationIdentity } from "@/lib/working-location"
+import { ResourceImportDialog } from '@/components/resource-import-dialog'
+import { CloudAnnouncement } from '@/components/cloud-announcement'
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -84,13 +86,14 @@ function viewFromLocation() {
 }
 
 export function App() {
-  const cloud = useCloudMode()
   const api = useApi()
   const compute = useCompute()
+  const cloud = !compute?.localViewer
   const [view, setView] = React.useState(viewFromLocation)
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
   const [createRequest, setCreateRequest] = React.useState(0)
   const [pageLocation, setPageLocation] = React.useState(locationFromHash)
+  const [importRequest, setImportRequest] = React.useState(null)
   const inventory = useInventory()
   const location = React.useMemo(() => workingLocation(inventory.locations, null, api.target ?? 'local'), [inventory.locations, api.target])
   const navigate = React.useCallback((next, requestedLocation) => {
@@ -114,8 +117,21 @@ export function App() {
       window.removeEventListener("openrod-navigate", scopedNavigate)
     }
   }, [navigate])
+  React.useEffect(() => {
+    const open = event => setImportRequest({ ...event.detail, type: event.detail?.type ?? event.detail?.types?.[0], key: Date.now() })
+    window.addEventListener('openrod-import', open)
+    return () => window.removeEventListener('openrod-import', open)
+  }, [])
 
   if (terminal) {
+    // A fresh terminal tab must resolve its cloud owner before issuing requests.
+    // Otherwise its first request can race account discovery and invalidate it.
+    if (terminal.location?.target === 'cloud' && compute?.localViewer && (compute.checking || !compute.connected)) {
+      return <main className="grid min-h-svh place-items-center p-6"><section className="text-center text-sm">
+        <p role="status">{compute.checking ? 'Checking cloud connection…' : 'Connect to OpenRod Cloud to open this terminal.'}</p>
+        {!compute.checking && <a href="#connections" className="mt-4 inline-block underline underline-offset-4">Open Connections</a>}
+      </section></main>
+    }
     return (
       <>
         <React.Suspense fallback={null}>
@@ -133,6 +149,7 @@ export function App() {
       <SidebarProvider>
         <AppSidebar view={view} onNavigate={navigate} />
         <SidebarInset className="min-w-0 bg-background">
+          <CloudAnnouncement />
           <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-6">
             <SidebarTrigger className="mr-2 md:hidden" />
             <h1 className="text-[18px] font-semibold tracking-tight">{TITLES[view]}</h1>
@@ -155,6 +172,7 @@ export function App() {
           </PageBoundary>
         </SidebarInset>
         <Toaster position="bottom-right" />
+        {importRequest && <ResourceImportDialog key={importRequest.key} request={importRequest} onClose={() => setImportRequest(null)} />}
       </SidebarProvider>
     </LiveProvider></LocationProvider>
   )

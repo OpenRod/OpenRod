@@ -20,3 +20,7 @@ test('Cloud next to This computer keeps the choice', () => {
   assert.equal(directLocation([local, cloud]), null)
   assert.equal(directLocation([cloud, local]), null)
 })
+test('a connectable but unconnected Cloud keeps the choice', () => {
+  assert.equal(directLocation([local], { offerCloud: true }), null)
+  assert.equal(directLocation([local], { offerCloud: false }), local)
+})

@@ -8,8 +8,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { cloudOrigin } from './cloud-origin.js'
 import { tokenCookie } from './launch-token.js'
-import { CLOUD_UNRELEASED, cloudConfig, releaseConfig } from './security.js'
-import { createConsoleServer } from './start.js'
+import { releaseConfig } from './security.js'
 const TOKEN = 'test-launch-token-' + 'x'.repeat(32)
 
 test('cloud origin is unset by default and must be an HTTPS origin when configured', () => {
@@ -18,19 +17,18 @@ test('cloud origin is unset by default and must be an HTTPS origin when configur
   for (const value of ['http://cloud.example.test', 'https://cloud.example.test/path', 'https://user@cloud.example.test', 'nope']) assert.throws(() => cloudOrigin({ OPENROD_CLOUD_ORIGIN: value }), /OPENROD_CLOUD_ORIGIN/)
 })
 
-test('cloud and worker modes refuse to start in this release', async () => {
+test('cloud and worker startup fail closed without deployment configuration', async () => {
   assert.equal(releaseConfig({}).mode, 'local')
   for (const mode of ['cloud', 'worker']) {
-    assert.throws(() => releaseConfig({ OPENROD_MODE: mode }), { message: CLOUD_UNRELEASED })
-    const child = spawnSync(process.execPath, ['--no-warnings', fileURLToPath(new URL('./start.js', import.meta.url))], { env: { ...process.env, OPENROD_MODE: mode }, encoding: 'utf8', timeout: 10000 })
+    assert.throws(() => releaseConfig({ OPENROD_MODE: mode }), /requires/)
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('OPENROD_')))
+    const child = spawnSync(process.execPath, ['--no-warnings', fileURLToPath(new URL('./start.js', import.meta.url))], { env: { ...clean, OPENROD_MODE: mode }, encoding: 'utf8', timeout: 10000 })
     assert.equal(child.status, 1, mode)
-    assert.equal(child.stderr.trim(), CLOUD_UNRELEASED, mode)
+    assert.match(child.stderr.trim(), /requires/, mode)
   }
-  const config = cloudConfig({ OPENROD_MODE: 'cloud', OPENROD_ORG_ID: 'acme', OPENROD_PUBLIC_ORIGIN: 'https://acme.example.com', GOOGLE_CLOUD_PROJECT: 'example-project', OPENROD_FIREBASE_API_KEY: 'key', OPENROD_FIREBASE_AUTH_DOMAIN: 'example-project.firebaseapp.com' })
-  await assert.rejects(createConsoleServer({ config }), { message: CLOUD_UNRELEASED })
 })
 
-test('local console refuses every cloud endpoint while cloud is unconfigured', { timeout: 15000 }, async (t) => {
+test('local console reports unconfigured status and refuses cloud operations', { timeout: 15000 }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-cloud-soon-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const moduleUrl = new URL('./api.js', import.meta.url).href
@@ -60,13 +58,17 @@ test('local console refuses every cloud endpoint while cloud is unconfigured', {
     ['POST', '/api/os/cloud-transfer', { name: 'demo', ticket }],
     ['GET', '/api/os/cloud-export?name=demo'],
     ['POST', '/api/os/cloud-import', { version: 1 }],
-    ['GET', '/api/local-cloud/status'],
     ['POST', '/api/local-cloud/start', { origin }],
     ['POST', '/api/local-cloud/finish', { nonce: 'n', code: 'c' }],
     ['POST', '/api/local-cloud/disconnect', {}],
     ['GET', '/api/remote/os/sandboxes'],
     ['POST', '/api/remote/os/sandboxes', { name: 'demo' }],
   ]
+  const status = await fetch(origin + '/api/local-cloud/status', { headers: { origin, cookie } })
+  assert.equal(status.status, 200)
+  const connection = await status.json()
+  assert.equal(connection.available, false)
+  assert.equal(connection.connected, false)
   for (const [method, route, body] of requests) {
     const response = await fetch(origin + route, { method, headers: body ? headers : { origin, cookie }, body: body && JSON.stringify(body) })
     assert.equal(response.status, 409, route)

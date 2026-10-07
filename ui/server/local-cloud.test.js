@@ -64,6 +64,18 @@ test('sign-in and account status do not allocate cloud compute',async t=>{
  assert.equal(paths.some(p=>p.endsWith('/machine')),false)
  const machine=await(await fetch(base+'/api/local-cloud/machine',{headers:ownerHeaders})).json();assert.equal(machine.machine.status,'ready');assert.equal(paths.filter(p=>p.endsWith('/machine')).length,1)
 })
+test('machine inspection stays GET and explicit preparation forwards POST for the current owner',async t=>{
+ const methods=[]
+ const upstream=await listen(t,http.createServer(async(req,res)=>{for await(const c of req){};res.setHeader('content-type','application/json');if(req.url.endsWith('/machine'))methods.push(req.method);res.end(JSON.stringify(req.url.endsWith('/exchange')?{token:'grant',expires:Date.now()+3600000,user:{uid:'alice'}}:{status:req.method==='POST'?'starting':'none'}))}))
+ const bridge=createLocalCloud({origin:upstream,allowTestHttp:true}),base=await listen(t,http.createServer((req,res)=>bridge.middleware(req,res,()=>res.writeHead(404).end())))
+ const post=(path,body)=>fetch(base+'/api/local-cloud/'+path,{method:'POST',headers:{...ownerHeaders,origin:base,'content-type':'application/json','x-openshell-console':'1'},body:JSON.stringify(body)})
+ const initial=await(await fetch(base+'/api/local-cloud/status')).json();assert.equal(initial.available,true);assert.equal(initial.origin,upstream)
+ const start=await(await post('start',{origin:base})).json();await post('finish',{nonce:start.nonce,code:'code'})
+ const inspect=await(await fetch(base+'/api/local-cloud/machine',{headers:ownerHeaders})).json();assert.equal(inspect.machine.status,'none')
+ const prepared=await(await post('machine',{})).json();assert.equal(prepared.machine.status,'starting')
+ assert.deepEqual(methods,['GET','POST'])
+ const wrong=await fetch(base+'/api/local-cloud/machine',{method:'POST',headers:{'x-openrod-local-owner':'wrong',origin:base,'content-type':'application/json','x-openshell-console':'1'},body:'{}'});assert.equal(wrong.status,403);assert.deepEqual(methods,['GET','POST'])
+})
 test('cancelling an old sign-in nonce cannot disconnect a newer account session',async t=>{
  const upstream=await listen(t,http.createServer(async(req,res)=>{for await(const c of req){};res.setHeader('content-type','application/json');res.end(JSON.stringify(req.url.endsWith('/exchange')?{token:'grant',expires:Date.now()+3600000,user:{uid:'alice'}}:{user:{uid:'alice'}}))}))
  const bridge=createLocalCloud({origin:upstream,allowTestHttp:true}),base=await listen(t,http.createServer((req,res)=>bridge.middleware(req,res,()=>res.writeHead(404).end())))

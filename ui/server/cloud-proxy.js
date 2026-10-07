@@ -4,20 +4,22 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { identityContext, requestPath } from './security.js'
 import {readJson,safeWorkspaceTarget} from './remote-http.js'
 import { signWorkerRequest } from './worker-auth.js'
+import { workerPrefix, workerAuthHeader, workerNameHeader } from './cloud-deployment.js'
 const fail=(message,status=503)=>Object.assign(Error(message),{status})
 const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value))}
 const hash=value=>createHash('sha256').update(value).digest('hex')
-export function createHandoffs(db,now=()=>Date.now()) {
+export function createHandoffs(db,now=()=>Date.now(),prefix='openrod-user') {
+ const ticketPattern=new RegExp(`^${workerPrefix(prefix)}-[a-f0-9]{24}\\.[a-f0-9]{64}$`)
  return {
   async issue(identity,name){const token=`${name}.${randomBytes(32).toString('hex')}`;await db.collection('handoffs').doc(name).set({uid:identity.uid,hash:hash(token),expires:Math.min(identity.expires,now()+300000),used:false});return token},
   async consume(token){
-   if(typeof token!=='string'||!/^openrod-user-[a-f0-9]{24}\.[a-f0-9]{64}$/.test(token))throw fail('Invalid cloud transfer ticket',401)
+   if(typeof token!=='string'||!ticketPattern.test(token))throw fail('Invalid cloud transfer ticket',401)
    return db.runTransaction(async tx=>{const ref=db.collection('handoffs').doc(token.split('.')[0]),s=await tx.get(ref),r=s.exists?s.data():null;if(!r||r.used||r.expires<=now()||r.hash!==hash(token))throw fail('Cloud transfer ticket expired or already used',401);tx.update(ref,{used:true});return r.uid})
   },
  }
 }
 export function proxyWorker(req,res,record,identity,config,{target=req.url,maxBytes=36*1024*1024}={}) {
- const headers={host:config.host,origin:config.origin,'x-openshell-console':'1','x-openrod-worker-auth':signWorkerRequest(record.key,identity,{method:req.method,url:target})}
+ const headers={host:config.host,origin:config.origin,'x-openshell-console':'1',[workerAuthHeader(record.workerProtocol??config.workerProtocol)]:signWorkerRequest(record.key,identity,{method:req.method,url:target})}
  for(const key of ['content-type','content-length','accept','range','x-openshell-context','x-openshell-location'])if(req.headers[key])headers[key]=req.headers[key]
  return new Promise(resolve=>{
   const upstream=http.request({hostname:record.address,port:record.port??4600,path:target,method:req.method,headers},response=>{
@@ -32,7 +34,7 @@ export function proxyWorker(req,res,record,identity,config,{target=req.url,maxBy
  })
 }
 export function proxyWorkerSocket(req,socket,head,record,identity,config,{target=req.url}={}) {
- const upstream=http.request({hostname:record.address,port:record.port??4600,path:target,method:'GET',headers:{host:config.host,origin:config.origin,upgrade:'websocket',connection:'Upgrade','sec-websocket-key':req.headers['sec-websocket-key'],'sec-websocket-version':req.headers['sec-websocket-version'],'x-openrod-worker-auth':signWorkerRequest(record.key,identity,{method:'GET',url:target})}})
+ const upstream=http.request({hostname:record.address,port:record.port??4600,path:target,method:'GET',headers:{host:config.host,origin:config.origin,upgrade:'websocket',connection:'Upgrade','sec-websocket-key':req.headers['sec-websocket-key'],'sec-websocket-version':req.headers['sec-websocket-version'],[workerAuthHeader(record.workerProtocol??config.workerProtocol)]:signWorkerRequest(record.key,identity,{method:'GET',url:target})}})
  upstream.once('upgrade',(response,remote,remoteHead)=>{
   socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(response.headers).map(([k,v])=>`${k}: ${v}`).join('\r\n')}\r\n\r\n`)
   if(remoteHead.length)socket.write(remoteHead);if(head.length)remote.write(head)
@@ -47,7 +49,7 @@ export function cloudRouter(security,machines,handoffs,auth,{artifact=process.en
    const pathname=requestPath(req)
    if(pathname==='/internal/worker-artifact') {
     if(req.method!=='GET')throw fail('Not found',404)
-    const record=await machines.store.byName(req.headers['x-openrod-worker'])
+    const record=await machines.store.byName(req.headers['x-openrod-worker']??(security.config.workerProtocol==='legacy'?req.headers[workerNameHeader('legacy')]:undefined))
     const supplied=req.headers.authorization?.replace(/^Bearer /,'')??''
     if(!record||supplied.length!==record.key.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(record.key))||!artifact)throw fail('Not found',404)
     res.writeHead(200,{'Content-Type':'application/gzip','Cache-Control':'no-store'});const file=fs.createReadStream(artifact);file.on('error',()=>res.destroy());res.once('close',()=>file.destroy());file.pipe(res);return
@@ -69,11 +71,15 @@ export function cloudRouter(security,machines,handoffs,auth,{artifact=process.en
      return await proxyWorker(req,res,record,identity,security.config,{target:'/api/os/inventory'})
     }
     if(pathname==='/api/cloud/local-connect/machine'&&req.method==='GET')return json(res,200,await machines.status(identity))
+    if(pathname==='/api/cloud/local-connect/machine'&&req.method==='POST'){
+     if(req.headers['x-openshell-console']!=='1')throw fail('Request rejected',403)
+     await readJson(req);return json(res,200,await machines.prepare(identity))
+    }
     if(pathname.startsWith('/api/cloud/local-connect/os/')&&['GET','POST'].includes(req.method)){
      const target=safeWorkspaceTarget(req.url,'/api/cloud/local-connect/os')
      if(req.method!=='GET'&&req.headers['x-openshell-console']!=='1')throw fail('Request rejected',403)
      watchConnection(token,res,identity)
-     return await proxyWorker(req,res,await machines.target(identity),identity,security.config,{target})
+     return await proxyWorker(req,res,await machines.target(identity,{provision:req.method!=='GET'}),identity,security.config,{target})
     }
     throw fail('Not found',404)
    }
@@ -93,11 +99,15 @@ export function cloudRouter(security,machines,handoffs,auth,{artifact=process.en
    const identity=identityContext.getStore(),pathname=requestPath(req)
    if(connections&&pathname==='/api/cloud/local-connect/authorize'&&req.method==='POST'){const body=await readJson(req);return json(res,200,{code:await connections.authorize(identity,body,security.sessionHash(req))})}
    if(pathname==='/api/cloud/machine'&&req.method==='GET')return json(res,200,await machines.status(identity))
+   if(pathname==='/api/cloud/machine'&&req.method==='POST'){
+    if(req.headers['x-openshell-console']!=='1')throw fail('Request rejected',403)
+    await readJson(req);return json(res,200,await machines.prepare(identity))
+   }
    if(pathname==='/api/cloud/handoff'&&req.method==='POST'){
     if(req.headers['x-openshell-console']!=='1')throw fail('Request rejected',403)
     const record=await machines.target(identity);return json(res,200,{ticket:await handoffs.issue(identity,record.name)})
    }
-   if(pathname.startsWith('/api/os/'))return await proxyWorker(req,res,await machines.target(identity),identity,security.config)
+   if(pathname.startsWith('/api/os/'))return await proxyWorker(req,res,await machines.target(identity,{provision:req.method!=='GET'}),identity,security.config)
    next()
   }catch(error){json(res,error.status??503,{error:error.status?error.message:'Cloud service unavailable. Try again shortly.'})}
  }
@@ -113,10 +123,10 @@ export function cloudRouter(security,machines,handoffs,auth,{artifact=process.en
     const target=safeWorkspaceTarget(req.url,'/api/cloud/local-connect/os')
     if(!['/api/os/terminal','/api/os/ssh'].includes(target.split('?')[0]))throw fail('Not found',404)
     const token=req.headers.authorization?.replace(/^Bearer /,''),identity=await connections.authenticate(token)
-    watchConnection(token,socket,identity);proxyWorkerSocket(req,socket,head,await machines.target(identity),identity,security.config,{target});return
+    watchConnection(token,socket,identity);proxyWorkerSocket(req,socket,head,await machines.target(identity,{provision:false}),identity,security.config,{target});return
    }
    if(pathname!=='/api/os/terminal')return
-   const identity=await security.authenticate(req);security.watch(req,socket,identity);proxyWorkerSocket(req,socket,head,await machines.target(identity),identity,security.config)
+   const identity=await security.authenticate(req);security.watch(req,socket,identity);proxyWorkerSocket(req,socket,head,await machines.target(identity,{provision:false}),identity,security.config)
   }catch{socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')}
  }}
 }

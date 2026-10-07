@@ -19,6 +19,8 @@ test('ticket messages require exact cloud origin, popup source and nonce', () =>
   const popup = {}
   const event = { origin: CLOUD_ORIGIN, source: popup, data: { type: 'openrod-cloud-ready', nonce: 'nonce', ticket: ('openrod-user-' + 'a'.repeat(24) + '.' + 'b'.repeat(64)) } }
   assert.equal(isCloudReadyMessage(event, popup, 'nonce', CLOUD_ORIGIN), true)
+  assert.equal(isCloudReadyMessage({ ...event, data: { ...event.data, ticket: 'legacy-worker-123.' + 'c'.repeat(64) } }, popup, 'nonce', CLOUD_ORIGIN), true)
+  assert.equal(isCloudReadyMessage({ ...event, data: { ...event.data, ticket: '../worker.' + 'c'.repeat(64) } }, popup, 'nonce', CLOUD_ORIGIN), false)
   for (const changed of [{ origin: 'https://evil.test' }, { source: {} }, { data: { ...event.data, nonce: 'old' } }, { data: { ...event.data, type: 'other' } }, { data: { ...event.data, ticket: '' } }]) assert.equal(isCloudReadyMessage({ ...event, ...changed }, popup, 'nonce', CLOUD_ORIGIN), false)
   assert.equal(isCloudReadyMessage(event, null, 'nonce', CLOUD_ORIGIN), false)
 })

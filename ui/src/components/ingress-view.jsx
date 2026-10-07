@@ -72,7 +72,7 @@ function CopyButton({ text }) {
 }
 
 // One open door: the sentence first, the controls after it.
-function ServiceDoor({ service, visits, now, onChanged, remote }) {
+function ServiceDoor({ service, visits, now, onChanged, remote, canExpose }) {
   const api = useApi()
   const [busy, setBusy] = React.useState(null)
   const [extending, setExtending] = React.useState(false)
@@ -113,14 +113,14 @@ function ServiceDoor({ service, visits, now, onChanged, remote }) {
         <p className="border-t border-border/70 bg-amber-50/50 px-4 py-1.5 text-[11px] text-amber-800">Last visit failed: nothing listening on port {service.port}.</p>
       )}
       <div className="flex flex-wrap items-center gap-2 border-t border-border/70 px-4 py-2">
-        {extending ? (
+        {canExpose && (extending ? (
           <>
             <div className="w-full sm:w-96"><DurationPicker value={undefined} onChange={(minutes) => run("extend", () => api.extendService(service, minutes), minutes ? "Timer reset" : "Timer removed")} label="New auto-close" /></div>
             <Button size="icon-xs" variant="ghost" onClick={() => setExtending(false)} aria-label="Cancel"><X /></Button>
           </>
         ) : (
           <Button size="xs" variant="ghost" onClick={() => setExtending(true)} disabled={Boolean(busy)}><Timer />Change timer</Button>
-        )}
+        ))}
         <Button size="xs" variant="outline" className="ml-auto border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive" disabled={Boolean(busy)}
           onClick={() => run("close", () => api.closeService(service), `Closed ${label}`)}>
           {busy === "close" ? <Spinner /> : <DoorClosed />}Close now
@@ -220,6 +220,15 @@ function ScopedIngressView({selectedSandbox}) {
   React.useEffect(() => { try { if (selected) sessionStorage.setItem(scopeKey, selected) } catch { /* optional */ } }, [selected, scopeKey])
 
   const [data, setData] = React.useState(null)
+  const [capabilities, setCapabilities] = React.useState(null)
+  const [capabilityError, setCapabilityError] = React.useState("")
+  React.useEffect(() => {
+    let alive = true
+    setCapabilities(null); setCapabilityError("")
+    api.capabilities().then(value => { if (alive) setCapabilities(value) }).catch(reason => { if (alive) setCapabilityError(reason.message) })
+    return () => { alive = false }
+  }, [api])
+  const canExpose = capabilities?.features?.publicIngress === true
   const load = React.useCallback(() => api.ingress().then(setData).catch((e) => setData({ error: e.message })), [api])
   React.useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [load])
 
@@ -275,8 +284,8 @@ function ScopedIngressView({selectedSandbox}) {
 
                 <section className="space-y-3">
                   <h2 className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-faint uppercase"><Globe className="size-3" />Web services</h2>
-                  {services.map((s) => <ServiceDoor key={`${s.sandbox}/${s.name}`} remote={data.auth.remote} service={s} visits={visitsFor(s.port)} now={now} onChanged={() => { load(); live.refresh() }} />)}
-                  <OpenDoorForm sandbox={selected} onOpened={() => { load(); live.refresh() }} />
+                  {services.map((s) => <ServiceDoor key={`${s.sandbox}/${s.name}`} remote={data.auth.remote} canExpose={canExpose} service={s} visits={visitsFor(s.port)} now={now} onChanged={() => { load(); live.refresh() }} />)}
+                  {canExpose ? <OpenDoorForm sandbox={selected} onOpened={() => { load(); live.refresh() }} /> : <p role="status" className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">{capabilityError ? `Could not check service forwarding: ${capabilityError}` : !capabilities ? "Checking service forwarding…" : "Public service forwarding is not available at this location. Terminal and file access remain available."}</p>}
                 </section>
 
                 <section className="space-y-2">
@@ -325,7 +334,7 @@ function ScopedIngressView({selectedSandbox}) {
 }
 
 function CombinedIngressView() {
-  const model = useLocationData(['ingress'])
+  const model = useLocationData(['ingress', 'capabilities'])
   const [opened,setOpened] = React.useState(null)
   const [query,setQuery] = React.useState('')
   const boxes = model.inventory.sandboxes.filter(box=>box.phase !== 'deleting' && box.name.toLowerCase().includes(query.toLowerCase()))
@@ -336,7 +345,7 @@ function CombinedIngressView() {
       const source=model.sources.find(source=>source.location.id===box.location.id)
       const location=source?.location ?? box.location
       const services=source?.data?.ingress?.services.filter(service=>service.sandbox===box.name) ?? []
-      return <tr key={resourceKey(box)} className="bg-card hover:bg-muted/40"><td className="px-6 py-3 font-mono">{box.name}</td><td className="px-6"><PlacementBadge location={location} /></td><td className="px-6 text-muted-foreground">{source?.data ? services.length ? services.map(service=>`${service.name} · ${service.port}`).join(', ') : 'Closed' : location.connected ? 'Loading…' : 'Offline'}</td><td className="px-6"><Button variant="ghost" size="sm" disabled={!location.connected} onClick={()=>setOpened({...box,location})}>{location.connected ? 'Manage access' : 'Offline'}</Button></td></tr>
+      return <tr key={resourceKey(box)} className="bg-card hover:bg-muted/40"><td className="px-6 py-3 font-mono">{box.name}</td><td className="px-6"><PlacementBadge location={location} /></td><td className="px-6 text-muted-foreground">{source?.data ? source.data.capabilities?.features?.publicIngress === false ? 'Not supported' : services.length ? services.map(service=>`${service.name} · ${service.port}`).join(', ') : 'Closed' : location.connected ? 'Loading…' : 'Offline'}</td><td className="px-6"><Button variant="ghost" size="sm" disabled={!location.connected} onClick={()=>setOpened({...box,location})}>{location.connected ? 'Manage access' : 'Offline'}</Button></td></tr>
     })}</tbody></table>{!boxes.length && <p role="status" className="py-16 text-center text-sm text-muted-foreground">{model.inventory.loading ? 'Loading ingress…' : 'No matching sandboxes.'}</p>}</div>
     {opened && <Sheet open onOpenChange={open=>{if(!open){setOpened(null);model.refresh()}}}><SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-5xl"><SheetHeader className="shrink-0 border-b px-6 py-4"><SheetTitle>{opened.name}</SheetTitle><SheetDescription><PlacementBadge location={opened.location} /></SheetDescription></SheetHeader><div className="min-h-0 flex-1"><LocationProvider location={opened.location}><LiveProvider><ScopedIngressView selectedSandbox={opened.name} /></LiveProvider></LocationProvider></div></SheetContent></Sheet>}
   </div>

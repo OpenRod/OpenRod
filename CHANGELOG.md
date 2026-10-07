@@ -4,6 +4,15 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 ## Unreleased
 
+### Added
+
+- Cloud sign-in uses the OpenRod fisherman logo and concise, actionable copy. Configuration import appears after connecting Cloud and remains available on the connection, rather than in every page header.
+- OpenRod Cloud can be configured at runtime and selected alongside Local and Remote when creating resources. Sign-in, explicit workspace preparation, connection status, and sandbox copying use the selected cloud account.
+- Configuration imports preview groups, network policies, saved MCPs and skills, and template recipes before copying them to another location. Source organization blocks follow imported groups; credential values stay excluded. Persistent jobs report partial results and support cancellation and retries.
+- Activity history can be imported separately in bounded batches, retaining source identity and timestamps without copying raw payloads.
+- The cloud control plane initializes its authentication, Firestore registry, and private worker services lazily, with deployment preflight/readiness checks and explicit compatibility settings for an existing fleet.
+- Where OpenRod Cloud is configured, a one-time banner announces it. Without a cloud origin, cloud entry points keep saying "Coming soon".
+
 ### Changed
 
 - Resource pages show Local and Remote resources together. Network, Secrets, Templates, MCPs & Skills, and Activity identify each row's source with consistent chips; Groups retains each resource's source when editing membership or rules.

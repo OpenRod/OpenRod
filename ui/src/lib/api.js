@@ -55,7 +55,7 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     currentSignal?.throwIfAborted()
     if (payload.code === LINK_REQUIRED) window.dispatchEvent(new Event(LINK_REQUIRED))
     else if (response.status === 401 || payload.code === 'CLOUD_OWNER_CHANGED') window.dispatchEvent(new Event('openrod-session-expired'))
-    if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { code: payload.code, sandboxes: payload.sandboxes, fix: payload.fix })
+    if (!response.ok) throw Object.assign(new Error(payload.error ?? `Request failed (${response.status})`), { status: response.status, code: payload.code, sandboxes: payload.sandboxes, fix: payload.fix })
     return payload
   }
   return {
@@ -68,6 +68,15 @@ export function createApi(target, signal, locationContext = null, boundOwner = c
     inventory: extraSignal => request('/inventory', { signal: extraSignal, scoped: false }),
     context: loadContext,
     contextKey,
+    capabilities: () => request('/capabilities', { scoped: false }),
+    importCapabilities: () => request('/resource-imports/capabilities'),
+    exportResources: body => request('/resource-imports/export', { method: 'POST', body }),
+    planImport: body => request('/resource-imports/plan', { method: 'POST', body }),
+    importJobs: () => request('/resource-imports'),
+    importJob: id => request(`/resource-imports/${encodeURIComponent(id)}`),
+    executeImport: id => request(`/resource-imports/${encodeURIComponent(id)}/execute`, { method: 'POST', body: { acknowledged: true } }),
+    retryImport: id => request(`/resource-imports/${encodeURIComponent(id)}/retry`, { method: 'POST', body: { acknowledged: true } }),
+    cancelImport: id => request(`/resource-imports/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {} }),
     connections: extraSignal => request('/connections', { signal: extraSignal, scoped: false }),
     connectionJob: (id, extraSignal) => request(`/connections/jobs/${encodeURIComponent(id)}`, { signal: extraSignal, scoped: false }),
     // These manage console connections, so an offline working location must

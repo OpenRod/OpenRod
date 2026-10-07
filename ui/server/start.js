@@ -6,13 +6,26 @@ import fs from 'node:fs'
 import connect from 'connect'
 import serveStatic from 'serve-static'
 import { createSessionRevocations } from './session-revocations.js'
+import { stateDirectory } from './paths.js'
 import { openshellApi } from './api.js'
-import { CLOUD_UNRELEASED, createSecurity, releaseConfig, requestPath } from './security.js'
+import { createSecurity, releaseConfig, requestPath } from './security.js'
 
-export async function createConsoleServer({ config = releaseConfig(), auth, machines, handoffs, connections, dist = path.resolve(import.meta.dirname, '../dist') } = {}) {
-  if (config.mode === 'cloud' && !(auth && machines && handoffs && connections)) throw Error(CLOUD_UNRELEASED)
+export async function createConsoleServer({ config = releaseConfig(), auth, machines, handoffs, connections, runtimeFactory, dist = path.resolve(import.meta.dirname, '../dist'), sessionFile = process.env.OPENROD_SESSION_FILE ?? path.join(stateDirectory(), 'cloud-sessions.sqlite') } = {}) {
   if (!fs.existsSync(path.join(dist, 'index.html'))) throw Error('Build the UI with npm run build before starting the server')
-  const revocations = config.mode === 'cloud' ? createSessionRevocations(path.resolve(import.meta.dirname, '../.state/sessions.sqlite')) : undefined
+  const revocations = config.mode === 'cloud' ? createSessionRevocations(sessionFile) : undefined
+  let runtime
+  if (config.mode === 'cloud' && !(auth && machines && handoffs && connections)) {
+    try {
+      const createRuntime = runtimeFactory ?? (await import('./cloud-runtime.js')).createCloudRuntime
+      runtime = await createRuntime(config, { revocations })
+      ;({ auth, machines, handoffs, connections } = runtime)
+      if (!(auth && machines && handoffs && connections)) throw Error('Cloud runtime initialization is incomplete')
+    } catch (error) {
+      revocations.close()
+      await runtime?.close?.()
+      throw error
+    }
+  }
   const security = createSecurity(config, auth, revocations)
   const app = connect()
   const server = http.createServer(app)
@@ -28,13 +41,21 @@ export async function createConsoleServer({ config = releaseConfig(), auth, mach
     next()
   })
   if (config.mode === 'cloud') {
-    const routes = cloudRouter(security, machines, handoffs, auth, {connections})
+    const routes = cloudRouter(security, machines, handoffs, auth, { connections, ...(runtime?.artifact ? { artifact: runtime.artifact } : {}) })
     app.use(routes.publicRoutes)
     app.use(security.middleware)
     app.use(routes.protectedRoutes)
     server.on('upgrade', routes.upgrade)
   } else openshellApi(security).configureServer({ middlewares: app, httpServer: server, config: { logger: { info: console.info } } })
   app.use('/healthz', (req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('ready') })
+  app.use('/readyz', async (req, res) => {
+    let deadline
+    try {
+      await Promise.race([runtime?.ready?.(), new Promise((_, reject) => { deadline = setTimeout(() => reject(Error('Readiness timed out')), 5000) })])
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ ready: true, mode: config.mode }))
+    } catch { res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ ready: false, mode: config.mode })) }
+    finally { clearTimeout(deadline) }
+  })
   const upgradePaths = config.mode === 'cloud'
     ? ['/api/os/terminal', '/api/cloud/local-connect/os/terminal', '/api/cloud/local-connect/os/ssh']
     : config.mode === 'local' ? ['/api/os/terminal', '/api/os/ssh', '/api/remote/os/terminal', '/api/remote/os/ssh'] : ['/api/os/terminal', '/api/os/ssh']
@@ -44,7 +65,7 @@ export async function createConsoleServer({ config = releaseConfig(), auth, mach
   })
   app.use(serveStatic(dist, { index: 'index.html', dotfiles: 'deny', maxAge: 0 }))
   app.use((req, res) => { res.writeHead(404); res.end('Not found') })
-  server.once('close', () => revocations?.close())
+  server.once('close', () => { revocations?.close(); void runtime?.close?.().catch(error => console.error('Cloud runtime shutdown failed:', error.message)) })
   server.requestTimeout = 35 * 60000
   server.headersTimeout = 15000
   return server
@@ -54,7 +75,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const server = await createConsoleServer()
     const port = Number(process.env.OPENROD_PORT ?? 4600)
     if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('OPENROD_PORT must be between 1024 and 65535')
-    const address = process.env.OPENROD_MODE === 'worker' ? '0.0.0.0' : '127.0.0.1'
+    const address = process.env.OPENROD_MODE === 'worker' ? process.env.OPENROD_WORKER_BIND ?? '0.0.0.0' : '127.0.0.1'
+    if (!['127.0.0.1', '0.0.0.0'].includes(address)) throw Error('OPENROD_WORKER_BIND must be 127.0.0.1 or 0.0.0.0')
     // Local mode prints only the tokened link (from the API plugin); a bare URL would just hit the token wall.
     const mode = process.env.OPENROD_MODE ?? 'local'
     server.listen(port, address, () => { if (mode !== 'local') console.info(`OpenRod ${mode} console listening on ${address}:${port}`) })

@@ -1,3 +1,5 @@
+import { consolidateResources } from '@/lib/resource-sources'
+import { SourceChips, SourceSwitcher, SourceEditProvider, useSourceChanges } from '@/components/resource-sources'
 import * as React from 'react'
 import { ArrowRight, Copy, HardDrive, Pencil, Plus, RotateCw, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -73,7 +75,9 @@ export function TemplatesView() {
     if (!connected(t)) throw new Error(`${locationLabel(owner(t))} is disconnected. Reconnect before continuing.`)
     return createApi(compute?.localViewer ? owner(t).target ?? "local" : api.target, api.signal, t.location.context)
   }
-  const shown = records.filter((t) => (!multipleLocations || !locationFilter || locationKey(t.location) === locationFilter) && `${t.name} ${t.image || ''} ${t.recipe.repository || ''}`.toLowerCase().includes(query.toLowerCase()))
+  const sourceChanges=useSourceChanges(records,location=>scopedApi({location}),load)
+  const combinedRecords=consolidateResources('templates',records)
+  const shown = consolidateResources('templates',records.filter((t) => (!multipleLocations || !locationFilter || locationKey(t.location) === locationFilter) && `${t.name} ${t.image || ''} ${t.recipe.repository || ''}`.toLowerCase().includes(query.toLowerCase())))
   const selectable = shown.filter((t) => !working(t) && connected(t))
   const checkedRecords = records.filter((t) => checked.has(resourceKey(t)) && !working(t) && connected(t))
   const matchingChecked = selectable.filter((t) => checked.has(resourceKey(t))).length
@@ -153,7 +157,7 @@ export function TemplatesView() {
   function edit(target, recipe, replace) {
     if (!connected(target)) return
     setSelectedKey(null)
-    setEditor({ recipe, replace, location: owner(target) })
+    setEditor({ recipe, replace, location: owner(target), record:target.copies ? target : combinedRecords.find(row=>row.copies.some(copy=>resourceKey(copy)===resourceKey(target))) ? {...target,copies:combinedRecords.find(row=>row.copies.some(copy=>resourceKey(copy)===resourceKey(target))).copies} : target })
   }
   function startTemplate(location) {
     if (!location?.connected) return
@@ -172,7 +176,8 @@ export function TemplatesView() {
   function closeEditor() { try { sessionStorage.removeItem(draftKey) } catch {} setEditor(null) }
   async function run(task) { try { await task(); await load() } catch (e) { toast.error(e.message) } }
   return <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
-    {editor && <LocationProvider location={owner(editor)}><ImageTemplateBuilder key={JSON.stringify([locationKey(editor.location), editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onChangeLocation={editor.replace ? undefined : () => { setEditor(null); setChooseLocation(true) }} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></LocationProvider>}
+    {sourceChanges.dialog}
+    {editor && <LocationProvider location={owner(editor)}><SourceEditProvider record={editor.record ?? {...editor,name:editor.recipe?.name}} type="templates" offer={editor.replace ? sourceChanges.offer : ()=>{}}><ImageTemplateBuilder sourceControl={editor.record && <SourceSwitcher record={editor.record} onChange={copy=>edit(copy,copy.recipe,true)} />} key={JSON.stringify([locationKey(editor.location), editor.recipe?.name || 'new'])} initial={editor} draftKey={draftKey} onClose={closeEditor} onChangeLocation={editor.replace ? undefined : () => { setEditor(null); setChooseLocation(true) }} onStarted={(record) => { setSelectedKey(resourceKey({ ...record, location: editor.location })); closeEditor(); load() }} /></SourceEditProvider></LocationProvider>}
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:px-6">
       <SearchInput aria-label="Search image templates" value={query} onValueChange={setQuery} placeholder="Search…" className="mr-auto min-w-32 flex-1 sm:max-w-60" />
       {multipleLocations && <SelectField aria-label="Filter template location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="h-8 rounded-md border bg-card px-2 text-xs">
@@ -203,7 +208,7 @@ export function TemplatesView() {
               <td className="max-w-72 px-4 py-2">
                 <button className="group flex max-w-full items-center gap-2 rounded text-left font-mono text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedKey(resourceKey(t))}><span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><HardDrive className="size-4" strokeWidth={1.5} /></span><span className="truncate group-hover:underline">{t.name}</span></button>
               </td>
-              <td className="px-4 py-2"><PlacementBadge location={owner(t)} /></td>
+              <td className="px-4 py-2"><SourceChips record={t} /></td>
               <td className="px-4 py-2 text-[11px] text-muted-foreground">{t.managed === false ? '-' : startsIn(t.recipe.command)}</td>
               <td className="px-4 py-2"><span className="block max-w-64 truncate font-mono text-[11px] text-muted-foreground" title={t.image || ''}>{t.image || (t.recipe.source === 'image' ? t.recipe.image : 'Not built yet')}</span></td>
               <td className="px-4 py-2"><Status record={t} /></td>
@@ -217,7 +222,7 @@ export function TemplatesView() {
         </div>
       </BlurFade>}
     <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelectedKey(null) }}><DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl">
-      {selected && <><DialogHeader><DialogTitle className="font-mono">{selected.name}</DialogTitle><DialogDescription>{selected.managed === false ? 'Created outside the console. Edit it with the openshell CLI.' : 'OpenShell sandbox template'}</DialogDescription></DialogHeader><div className="flex items-center gap-3"><LocationBadge location={owner(selected)} /><Status record={selected} /></div>
+      {selected && <><DialogHeader><DialogTitle className="font-mono">{selected.name}</DialogTitle><DialogDescription>{selected.managed === false ? 'Created outside the console. Edit it with the openshell CLI.' : 'OpenShell sandbox template'}</DialogDescription></DialogHeader><div className="flex items-center gap-3"><SourceSwitcher record={{...selected,copies:combinedRecords.find(row=>row.copies.some(copy=>resourceKey(copy)===resourceKey(selected)))?.copies}} onChange={copy=>setSelectedKey(resourceKey(copy))} /><Status record={selected} /></div>
         {!connected(selected) && <p role="status" className="text-xs text-muted-foreground">This location is disconnected. Reconnect to use or change this template.</p>}
         <dl className="divide-y rounded-lg border px-4 text-xs">{[
           ['Image', <span key="i" className="break-all font-mono">{selected.image || (selected.recipe.source === 'image' ? selected.recipe.image : 'Not built yet')}</span>],
@@ -260,7 +265,7 @@ export function TemplatesView() {
       <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={() => setRemove(null)}>Cancel</Button><Button variant="destructive" disabled={busy || !remove?.some(connected)} onClick={deleteTemplates}>{busy && <Spinner />}{busy ? 'Deleting…' : deleteErrors.length ? 'Retry deletion' : remove?.length === 1 ? 'Delete template' : 'Delete templates'}</Button></div>
     </DialogContent></Dialog>
     <Dialog open={chooseLocation} onOpenChange={(open) => { setChooseLocation(open); if (!open) setPendingGateway(null) }}><DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-3xl">
-      <LocationStep locations={locations} allowRemote subject="template" connecting={Boolean(pendingGateway)}
+      <LocationStep locations={locations} allowRemote={Boolean(compute?.localViewer)} subject="template" connecting={Boolean(pendingGateway)}
         onPick={(context) => startTemplate(locations.find((location) => locationKey(location) === context))}
         onConnected={(job) => { setPendingGateway(job.gateway); load() }}
         onCancel={() => setChooseLocation(false)} />

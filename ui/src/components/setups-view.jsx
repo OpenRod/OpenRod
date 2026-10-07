@@ -1,3 +1,5 @@
+import { consolidateResources } from '@/lib/resource-sources'
+import { SourceChips, SourceSwitcher, SourceEditProvider, useSourceChanges } from '@/components/resource-sources'
 import { SETUP_AGENTS, setupTarget } from '../../shared/setup-targets.js'
 import * as React from 'react'
 import { ArrowDown, ArrowUp, Check, ChevronRight, FileText, FolderInput, Package, Plug, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
@@ -28,6 +30,7 @@ import { useInventory } from '@/lib/inventory'
 import { SourceStatus, useLocationData } from '@/lib/location-data'
 import { resourceKey } from '@/lib/locations'
 import { LocationStep } from '@/components/location-step'
+import { useCompute } from '@/lib/compute'
 
 const SOURCES = [{ id: 'codex', name: 'Codex', logo: 'codex' }, { id: 'claude', name: 'Claude Code', logo: 'claudecode' }, { id: 'cursor', name: 'Cursor', logo: 'cursor' }]
 const count = (setup, kind) => setup.items.filter((item) => item.kind === kind).length
@@ -100,7 +103,8 @@ function ScopedSetupsView({ sandbox = null, setupIds = [], model }) {
     return () => { alive = false }
   }, [api, scopedLocation])
   const [singleSetups, setSetups] = React.useState(null)
-  const setups = React.useMemo(() => model ? model.sources.flatMap(source => (source.data?.setups ?? []).map(setup=>({...setup,location:source.location}))) : singleSetups, [model?.sources, singleSetups])
+  const rawSetups = React.useMemo(() => model ? model.sources.flatMap(source => (source.data?.setups ?? []).map(setup=>({...setup,location:source.location}))) : singleSetups, [model?.sources, singleSetups])
+  const setups = React.useMemo(() => model ? consolidateResources('setups',rawSetups ?? []) : rawSetups, [rawSetups,Boolean(model)])
   const apiFor = setup => model && setup.location ? model.apiFor(setup.location) : api
   const [error, setError] = React.useState('')
   const [importing, setImporting] = React.useState(false)
@@ -118,12 +122,14 @@ function ScopedSetupsView({ sandbox = null, setupIds = [], model }) {
     try { if (model) await model.refresh(); else setSetups(await api.setups()); setError('') } catch (e) { setError(e.message) }
     finally { setRefreshing(false) }
   }, [api, model?.refresh])
+  const sourceChanges = useSourceChanges(rawSetups ?? [], location => model.apiFor(location), refresh)
   const importJobs = React.useSyncExternalStore(setupImports.subscribe, setupImports.getSnapshot)
   const completedImports = importJobs.filter(job => job.status === 'saved' && (model || job.location?.context === location?.context)).map(job => job.id).join(',')
   React.useEffect(() => { refresh() }, [refresh, completedImports])
   const shown = React.useMemo(() => (setups || []).filter((setup) => {
-    const matches = [setup.name, ...setup.items.flatMap(item => [item.name, ...(item.sources || [])])].join(' ').toLowerCase().includes(query.trim().toLowerCase())
-    return (!sandbox || setupIds.includes(setup.id)) && matches && (status === 'all' || (status === 'review' ? issueCount(setup) > 0 : issueCount(setup) === 0))
+    const copies = setup.copies ?? [setup]
+    const matches = copies.some(copy => [copy.name, ...copy.items.flatMap(item => [item.name, ...(item.sources || [])])].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
+    return (!sandbox || setupIds.includes(setup.id)) && matches && (status === 'all' || (status === 'review' ? copies.some(copy => issueCount(copy) > 0) : copies.every(copy => issueCount(copy) === 0)))
   }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }) * (descending ? -1 : 1)), [setups, query, status, descending, sandbox, setupIds])
   const filtering = Boolean(query || status !== 'all')
   return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -155,18 +161,20 @@ function ScopedSetupsView({ sandbox = null, setupIds = [], model }) {
               <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
             </TableRow></TableHeader>
             <TableBody>{shown.map(setup => {
-              const sources = SOURCES.filter(source => setup.items.some(item => item.sources?.includes(source.id)))
+              const copies = setup.copies ?? [setup]
+              const sources = SOURCES.filter(source => copies.some(copy => copy.items.some(item => item.sources?.includes(source.id))))
+              const countRange = kind => { const values = copies.map(copy => count(copy, kind)); const low = Math.min(...values), high = Math.max(...values); return low === high ? low : `${low}–${high}` }
               return <TableRow key={resourceKey(setup)} className={setup.location?.connected === false ? "opacity-60" : "cursor-pointer hover:bg-muted/40"} onClick={() => { if(setup.location?.connected !== false)setSelected(setup) }}>
                 <TableCell className="max-w-72 px-4 py-2 sm:pl-6"><button disabled={setup.location?.connected === false} aria-label={`Open setup ${setup.name}`} onClick={event => { event.stopPropagation(); setSelected(setup) }} className="group flex max-w-full items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground"><Package className="size-3.5" strokeWidth={1.5} /></span>
                   <span className="truncate font-mono text-xs font-medium group-hover:underline">{setup.name}</span>
                 </button></TableCell>
-                <TableCell className="px-4 py-2">{(setup.location ?? location) ? <PlacementBadge location={setup.location ?? location} /> : <span className="text-[11px] text-muted-foreground">Loading…</span>}</TableCell>
+                <TableCell className="px-4 py-2">{(setup.location ?? location) ? <SourceChips record={{...setup,location:setup.location ?? location}} /> : <span className="text-[11px] text-muted-foreground">Loading…</span>}</TableCell>
                 <TableCell className="px-4 py-2"><div className="flex items-center gap-2">{sources.map(source => <img key={source.id} src={`/logos/agents/${source.logo}.svg`} alt={source.name} title={source.name} className="size-4 object-contain" />)}{!sources.length && <span className="text-muted-foreground">Not reported</span>}</div></TableCell>
-                <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><Plug aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'mcp')}</span></TableCell>
-                <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><FileText aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{count(setup, 'skill')}</span></TableCell>
+                <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><Plug aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{countRange('mcp')}</span></TableCell>
+                <TableCell className="px-4 py-2 tabular-nums"><span className="inline-flex items-center gap-1.5"><FileText aria-hidden="true" className="size-3.5 text-muted-foreground" strokeWidth={1.5} />{countRange('skill')}</span></TableCell>
                 <TableCell className="px-4 py-2 text-[11px] text-muted-foreground">{setup.createdAt ? absoluteTime(setup.createdAt) : 'Not reported'}</TableCell>
-                <TableCell className="px-4 py-2 text-right sm:pr-6"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" disabled={setup.location?.connected === false} aria-label={`Delete setup ${setup.name}`} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
+                <TableCell className="px-4 py-2 text-right sm:pr-6"><Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" disabled={setup.location?.connected === false} aria-label={`Delete setup ${setup.name}`} title={setup.location ? `Delete from ${setup.location.label}` : undefined} onClick={event => { event.stopPropagation(); setDeleteError(''); setDeleting(setup) }}><Trash2 className="size-3.5" /></Button></TableCell>
               </TableRow>
             })}</TableBody>
           </Table>
@@ -189,7 +197,8 @@ function ScopedSetupsView({ sandbox = null, setupIds = [], model }) {
       } else { refresh(); setNetwork(networkOutcome(saved) ? { ...networkOutcome(saved), location: destination } : null) }
     }} /></LocationProvider>}
     {network && <LocationProvider location={network.location ?? location}><SetupNetworkDialog policy={network} onClose={() => setNetwork(null)} /></LocationProvider>}
-    {selected && <LocationProvider location={selected.location ?? location}><SetupDetail setup={selected} sandbox={sandbox} onPrepare={async () => { try { const review = await apiFor(selected).prepareSavedSetup(selected.id); setImporting({ review, name: selected.name + " (updated)", location:selected.location ?? location }); setSelected(null) } catch (e) { setError(e.message) } }} onUpdated={(updated) => { setSelected({...updated,location:selected.location}); if(model)refresh(); else setSetups((current) => current.map((entry) => entry.id === updated.id ? updated : entry)) }} onClose={() => setSelected(null)} /></LocationProvider>}
+    {selected && <LocationProvider location={selected.location ?? location}><SourceEditProvider record={selected} type="setups" offer={sourceChanges.offer}><SetupDetail key={resourceKey(selected)} sourceControl={<SourceSwitcher record={selected} onChange={copy=>setSelected({...copy,...rawSetups.find(item=>resourceKey(item)===resourceKey(copy)),copies:selected.copies})} />} setup={selected} sandbox={sandbox} onPrepare={async () => { try { const review = await apiFor(selected).prepareSavedSetup(selected.id); setImporting({ review, name: selected.name + " (updated)", location:selected.location ?? location }); setSelected(null) } catch (e) { setError(e.message) } }} onUpdated={(updated) => { setSelected({...updated,location:selected.location,copies:selected.copies?.map(copy=>resourceKey(copy)===resourceKey(selected)?{...updated,location:selected.location}:copy)}); if(model)refresh(); else setSetups((current) => current.map((entry) => entry.id === updated.id ? updated : entry)) }} onClose={() => setSelected(null)} /></SourceEditProvider></LocationProvider>}
+    {sourceChanges.dialog}
   </div>
 }
 
@@ -338,6 +347,7 @@ function ImportSetup(props) {
 }
 
 function NewSetupImport({ onClose, onSaved, ...props }) {
+  const compute = useCompute()
   const { locations, refresh } = useInventory()
   const [destination, setDestination] = React.useState(null)
   const [pendingGateway, setPendingGateway] = React.useState(null)
@@ -350,9 +360,9 @@ function NewSetupImport({ onClose, onSaved, ...props }) {
     <ImportSetupForm {...props} onClose={onClose} onChangeLocation={() => setDestination(null)} onSaved={saved => onSaved(saved, destination)} />
   </LocationProvider>
   return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
-    <DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-xl">
-      <LocationStep locations={locations} allowRemote subject="setup" connecting={Boolean(pendingGateway)}
-        onPick={id => { const selected = locations.find(item => (item.id ?? item.context) === id && item.connected); if (selected) setDestination(selected) }}
+    <DialogContent className="gap-4 bg-transparent p-0 ring-0 sm:max-w-3xl">
+      <LocationStep locations={locations} allowRemote={Boolean(compute?.localViewer)} subject="setup" connecting={Boolean(pendingGateway)}
+        onPick={id => { const selected = locations.find(item => (item.id ?? item.context) === id && item.connected); if (!selected) return; if (compute?.localViewer && (selected.cloud || selected.target === 'cloud')) { onClose(); window.dispatchEvent(new CustomEvent('openrod-import', { detail: { destination: selected, type: 'setups' } })); return }; setDestination(selected) }}
         onConnected={job => { setPendingGateway(job.gateway); refresh() }} onCancel={onClose} />
     </DialogContent>
   </Dialog>
@@ -503,7 +513,7 @@ function ImportSetupForm({ onClose, onSaved, onChangeLocation, initialReview = n
   </Dialog>
 }
 
-function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
+function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare, sourceControl }) {
   const api = useApi()
   const location = useLocation()
   const [sandboxes, setSandboxes] = React.useState([])
@@ -537,6 +547,7 @@ function SetupDetail({ setup, sandbox, onUpdated, onClose, onPrepare }) {
   const signInItems = setup.items.filter(item => !item.disabled && !item.issues.length && !item.credentialRef && item.auth?.mode === 'agent-session')
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}><DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
     <DialogHeader><DialogTitle>{setup.name}</DialogTitle><DialogDescription className="sr-only">Manage the MCPs and Skills in this saved setup.</DialogDescription></DialogHeader>
+    <fieldset disabled={busy}>{sourceControl}</fieldset>
     <SetupItemTabs items={setup.items}>{(items) => <div className="max-h-72 divide-y overflow-y-auto rounded-lg border">{items.map((item) => <div key={item.id} className="flex items-start gap-2 px-3 py-2.5">
       <div className="min-w-0 flex-1 self-center">
         {item.issues.length || item.auth?.mode === 'agent-session' ? <details className="group/item">
