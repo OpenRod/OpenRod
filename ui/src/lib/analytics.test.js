@@ -68,7 +68,7 @@ test('schema drops private fields, rejects arbitrary events, and limits feedback
   assert.equal(payload.properties.intent, undefined)
   assert.equal(payload.properties.goal_achieved, undefined)
   assert.equal(payload.properties.$process_person_profile, false)
-  assert.equal(payload.properties.$geoip_disable, true)
+  assert.equal(payload.properties.$geoip_disable, undefined)
   assert.equal(payload.properties.environment, 'production')
   assert.doesNotMatch(JSON.stringify(payload), /private-/)
   assert.equal(h.calls[0].init.credentials, 'omit')

@@ -30,7 +30,7 @@ Events carry the app version, environment, a random installation ID and, while s
 
 Never sent: commands, terminal output, files, sandbox, host or template names, paths, repositories, credentials, URLs and error messages. Error messages are matched in the browser against OpenRod's own wording, and only the resulting category is sent.
 
-PostHog (US) receives the request, so it sees the sender's IP address. GeoIP enrichment and person profiles are turned off in every event. To stop PostHog storing IP addresses, turn on **Discard client IP data** in the project settings.
+PostHog (US) uses the sender's IP address to add an approximate location (country, city) to opted-in usage events. The project has **Discard client IP data** turned on, so the address itself is not stored. Feedback sent with sharing off gets no location. Person profiles are turned off in every event.
 
 The public ingestion token in `ui/shared/analytics-release.json` can only write events. To send to another project, set `OPENROD_POSTHOG_TOKEN` and `OPENROD_POSTHOG_HOST` (a US or EU ingestion host) at build time.
 

@@ -96,7 +96,7 @@ function UsageDetails({ destination, onClose }) {
       {row('Shared', 'Which screens and features you use, whether connecting, creating sandboxes and opening sessions work, and the OpenRod version. Events carry a random ID, not your name or account.')}
       {row('Never shared', 'Commands, terminal output, files, sandbox, host or template names, paths, credentials and error messages.')}
       {row('Feedback', 'The text you send and the OpenRod version. You can send feedback with sharing off; leave out private details.')}
-      {row('Where it goes', `PostHog (${destination}). PostHog sees your IP address when it receives events; OpenRod turns off location lookup and person profiles.`)}
+      {row('Where it goes', `PostHog (${destination}). It uses your IP address to record an approximate location, such as country and city, and doesn’t keep the address.`)}
       {row('Turning it off', <>Turn sharing off in Usage &amp; feedback at any time. Start OpenRod with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">OPENROD_TELEMETRY=0</code> to turn off usage and feedback entirely.</>)}
     </dl>
     <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none px-5 py-3">

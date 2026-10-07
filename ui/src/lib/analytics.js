@@ -151,7 +151,9 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
           // Feedback sent with sharing off carries only what the user typed.
           ...(regular && who.session ? { $session_id: who.session } : {}),
           ...(regular && currentView ? { view: currentView } : {}),
-          ...sanitized, $process_person_profile: false, $geoip_disable: true,
+          // Opted-in usage gets PostHog's approximate location (country, city);
+          // the project discards the IP itself. Feedback-only events get neither.
+          ...sanitized, $process_person_profile: false, ...(regular ? {} : { $geoip_disable: true }),
           ...(event === 'console_opened' ? { first_observed_visit: who.first } : {}),
           ...(explicitFeedback ? { feedback_only: !regular } : {}),
         },
