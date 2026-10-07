@@ -20,6 +20,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { useLive } from "@/lib/live"
+import { UsageButton } from './usage-feedback'
 
 const ENVIRONMENT = [
   { label: "Sandboxes", icon: Box, view: "sandboxes" },
@@ -104,6 +105,7 @@ export function AppSidebar({ view, onNavigate }) {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
+        <UsageButton />
         <ThemeSwitcher />
         {/* The gateway is status, not a destination: its facts live here. */}
         <Popover>

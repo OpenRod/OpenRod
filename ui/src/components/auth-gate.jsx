@@ -4,6 +4,8 @@ import { LocalReturn } from './local-return'
 import { CloudMachine } from './cloud-machine'
 import * as React from 'react'
 import { LINK_REQUIRED } from '@/lib/api'
+import { analytics } from '@/lib/analytics'
+import { UsageProvider } from './usage-feedback'
 import { CloudSignIn } from './cloud-sign-in'
 import { cloudSignInError } from '@/lib/cloud-sign-in-error'
 
@@ -42,6 +44,7 @@ export function AuthGate({ children }) {
         const value = await authRequest('config')
         if (!['local', 'cloud'].includes(value.mode)) throw Error('Invalid console configuration')
         if (!alive) return
+        analytics.configure({ mode: value.mode, enabled: value.telemetryEnabled === true })
         setConfig(value)
         if (value.mode === 'cloud') {
           const response = await fetch('/api/auth/me')
@@ -53,7 +56,7 @@ export function AuthGate({ children }) {
     }
     load()
     const expired = () => { setUser(null); setError('Your session expired. Sign in again.') }
-    const locked = () => setLinkRequired(true)
+    const locked = () => { analytics.stop(); setLinkRequired(true) }
     window.addEventListener('openrod-session-expired', expired)
     window.addEventListener(LINK_REQUIRED, locked)
     return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); window.removeEventListener(LINK_REQUIRED, locked) }
@@ -90,7 +93,7 @@ export function AuthGate({ children }) {
     </section>
   </main>
   if (loading) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading OpenRod…</div>
-  if (config?.mode === 'local') return <LocalComputeProvider><LocalReturn>{children}</LocalReturn></LocalComputeProvider>
+  if (config?.mode === 'local') return <LocalComputeProvider><LocalReturn><UsageProvider>{children}</UsageProvider></LocalReturn></LocalComputeProvider>
   if (user) return <LocalConnect user={user} logout={logout}><CloudComputeProvider user={user} logout={logout}><CloudMachine key={user.uid} logout={logout}>{children}</CloudMachine></CloudComputeProvider></LocalConnect>
   return <CloudSignIn localConnect={window.location.hash.startsWith('#local-connect=')} error={error} busy={signingIn} available={Boolean(config?.firebase)} onLogin={login} />
 }

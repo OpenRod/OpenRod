@@ -14,12 +14,14 @@ import { ConnectionsView } from "@/components/connections-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { CloudAccount } from "@/components/auth-gate"
-import { LiveProvider } from "@/lib/live"
+import { LiveProvider, useLive } from "@/lib/live"
 import { LocationProvider } from "@/lib/location-context"
 import { useInventory } from "@/lib/inventory"
 import { workingLocation, locationIdentity } from "@/lib/working-location"
 import { ResourceImportDialog } from '@/components/resource-import-dialog'
 import { CloudAnnouncement } from '@/components/cloud-announcement'
+import { analytics } from '@/lib/analytics'
+import { useUsageState } from '@/components/usage-feedback'
 
 // xterm.js is only needed by terminal tabs.
 const TerminalView = React.lazy(() => import("@/components/terminal-view").then((m) => ({ default: m.TerminalView })))
@@ -85,6 +87,14 @@ function viewFromLocation() {
   return TITLES[view] ? view : "sandboxes"
 }
 
+// Reports once how the console opened, after its connection state is known.
+function ConsoleOpened() {
+  const { connection } = useLive()
+  const usage = useUsageState()
+  React.useEffect(() => { analytics.observeConsole(connection) }, [connection, usage.sharing])
+  return null
+}
+
 export function App() {
   const api = useApi()
   const compute = useCompute()
@@ -93,6 +103,8 @@ export function App() {
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
   const [createRequest, setCreateRequest] = React.useState(0)
   const [pageLocation, setPageLocation] = React.useState(locationFromHash)
+  const usage = useUsageState()
+  React.useEffect(() => { analytics.observeView(terminal ? 'terminal' : view) }, [view, Boolean(terminal), usage.sharing])
   const [importRequest, setImportRequest] = React.useState(null)
   const inventory = useInventory()
   const location = React.useMemo(() => workingLocation(inventory.locations, null, api.target ?? 'local'), [inventory.locations, api.target])
@@ -146,6 +158,7 @@ export function App() {
 
   return (
     <LocationProvider location={location}><LiveProvider key={locationIdentity(location) ?? 'unscoped'}>
+      <ConsoleOpened />
       <SidebarProvider>
         <AppSidebar view={view} onNavigate={navigate} />
         <SidebarInset className="min-w-0 bg-background">

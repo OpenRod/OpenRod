@@ -45,6 +45,12 @@ export function cloudConfig(env = process.env) {
 export function releaseConfig(env = process.env) {
   return cloudConfig(env)
 }
+// OPENROD_TELEMETRY=0 (or false, off, no) and the DO_NOT_TRACK=1 convention
+// turn off both usage sharing and feedback, whatever the browser chose.
+export function telemetryAllowed(env = process.env) {
+  const value = name => String(env[name] ?? '').trim().toLowerCase()
+  return !['0', 'false', 'off', 'no'].includes(value('OPENROD_TELEMETRY')) && !['1', 'true', 'yes'].includes(value('DO_NOT_TRACK'))
+}
 const COOKIE = '__Host-openrod_session'
 const cookieOf = (req, name = COOKIE) => (req.headers.cookie ?? '').split(';').map(s => s.trim()).find(s => s.startsWith(`${name}=`))?.slice(name.length + 1)
 export function createSecurity(config, auth, revocations = { has: () => false, add: () => { throw Error("Session revocation store is required") } }) {
@@ -88,7 +94,9 @@ export function createSecurity(config, auth, revocations = { has: () => false, a
       const pathname = requestPath(req)
       if (!pathname.startsWith('/api/')) return next()
       checkBoundary(req)
-      if (pathname === '/api/auth/config' && req.method === 'GET') return json(res, 200, { mode: config.mode, ...(config.mode === 'cloud' ? { firebase: config.firebase } : {}) })
+      if (pathname === '/api/auth/config' && req.method === 'GET') return json(res, 200, { mode: config.mode,
+        telemetryEnabled: config.mode === 'local' && telemetryAllowed(),
+        ...(config.mode === 'cloud' ? { firebase: config.firebase } : {}) })
       if (config.mode === 'cloud' && pathname === '/api/auth/session' && req.method === 'POST') {
         if (req.headers['x-openshell-console'] !== '1' || req.headers['content-type'] !== 'application/json') throw fail('Request rejected', 403)
         // nginx overwrites this header from the GCP-appended client address.

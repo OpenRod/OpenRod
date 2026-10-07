@@ -3,6 +3,7 @@ import { createApi } from '@/lib/api'
 import { useCompute } from '@/lib/compute'
 import { localCloudRequest } from '@/lib/local-cloud'
 import { mergeLocationInventories } from '@/lib/location-inventory'
+import { analytics } from '@/lib/analytics'
 
 export function useInventory() {
   const compute = useCompute()
@@ -40,6 +41,7 @@ export function useInventory() {
       }
       previous = sources
       const inventory = mergeLocationInventories(sources)
+      analytics.observeTemplates(inventory.templates)
       setSnapshot({ scope, inventory, error: errors.join('; ') || null })
       timer = setTimeout(load, inventory.templates.some(record => record.status === 'building') ? 1200 : 5000)
     }

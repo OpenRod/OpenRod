@@ -8,6 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useApi, useLocation } from "@/lib/location-context"
 import { LocationBadge } from "@/components/location-badge"
 import { defaultSession, sessionChoices, sessionName, terminalHref, persistentGateway } from "@/lib/sandbox-session"
+import { analytics, analyticsLocation, classifyAnalyticsError } from '@/lib/analytics'
 
 // The terminal itself is always dark, whatever the console's theme.
 const BACKGROUND = "#0b0e14"
@@ -35,6 +36,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
   const [state, setState] = React.useState({ status: "connecting" })
   const [attempt, setAttempt] = React.useState(0)
   const holder = React.useRef(null)
+  const trackedAttempt = React.useRef(null)
   const session = requested ?? (sandbox ? defaultSession(sandbox) : null)
 
   React.useEffect(() => {
@@ -56,6 +58,12 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
   React.useEffect(() => {
     const element = holder.current
     if (!session || !element) return undefined
+    const attemptKey = `${session}:${attempt}`
+    if (trackedAttempt.current?.key !== attemptKey) trackedAttempt.current = {
+      key: attemptKey, flow: analytics.terminalFlow({ location_type: analyticsLocation(location), launch_target: 'browser' }, trackedAttempt.current?.flow),
+    }
+    const tracked = trackedAttempt.current.flow
+    analytics.step(tracked, 'connecting')
     const term = new Terminal({
       cursorBlink: true, disableStdin: true, fontSize: 13, lineHeight: 1.2, scrollback: 10000, theme: THEME,
       fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
@@ -95,13 +103,15 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
             ready = true
             term.options.disableStdin = false
             setState({ status: "live" })
+            analytics.finishFlow(tracked, 'live')
             socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }))
           } else if (message.type === "exit") { setState({ status: "ended", exitCode: message.exitCode }); note(`Session ended with exit code ${message.exitCode}.`) }
-          else if (message.type === "error") { setState({ status: "failed", message: message.message }); note(message.message) }
+          else if (message.type === "error") { if (!ready) analytics.finishFlow(tracked, 'failed', classifyAnalyticsError({ code: message.code, message: message.message })); setState({ status: "failed", message: message.message }); note(message.message) }
         }
-        socket.onclose = () => { if (!closed) setState((s) => (s.status === "ended" || s.status === "failed" ? s : { status: "failed", message: "The connection closed." })) }
+        socket.onclose = () => { if (!closed) { if (!ready) analytics.finishFlow(tracked, 'failed', 'connection_lost'); setState((s) => (s.status === "ended" || s.status === "failed" ? s : { status: "failed", message: "The connection closed." })) } }
       } catch (error) {
         if (closed) return
+        analytics.finishFlow(tracked, 'failed', classifyAnalyticsError(error))
         setState({ status: "failed", message: error.message })
         note(error.message)
       }
@@ -138,7 +148,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 {choices.map((choice) => (
-                  <DropdownMenuItem key={choice.id} render={<a href={terminalHref(name, choice.id, context)} target="_blank" rel="noreferrer" />}>
+                  <DropdownMenuItem key={choice.id} render={<a href={terminalHref(name, choice.id, context)} onClick={event => analytics.terminalClick(event, { location_type: analyticsLocation(location) })} target="_blank" rel="noreferrer" />}>
                     {choice.name}<span className="ml-auto text-[11px] text-muted-foreground">new tab</span>
                   </DropdownMenuItem>
                 ))}

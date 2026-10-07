@@ -154,6 +154,8 @@ More: [docs/remote-hosts.md#troubleshooting](docs/remote-hosts.md#troubleshootin
 
 OpenRod keeps config in `~/.config/openshell` and state in `~/.local/state/openshell-console`. Activity history and webhook credentials are **not encrypted**.
 
+If you opt in, OpenRod sends usage metrics to PostHog so we can see what works and where people get stuck. Never commands, files or names. Change it or send feedback under **Usage & feedback**, or turn it all off with `OPENROD_TELEMETRY=0`. [What is shared](docs/posthog.md).
+
 📖 Full list of files and effects: [docs/data-and-state.md](docs/data-and-state.md)
 
 ---

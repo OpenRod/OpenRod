@@ -29,6 +29,7 @@ import { AGENTS } from "@/lib/image-templates"
 import { QUICK_AGENTS, quickRecipe, quickSession, compatibleProviders, prepareQuickTemplate, prepareQuickSetups } from "@/lib/quick-setup"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AGENT_ACCESS, agentAccessFor, connectorAgents, holdsApiKey } from "../../shared/agent-access.js"
+import { analytics, analyticsLocation } from '@/lib/analytics'
 
 const locationKey = (location) => location?.id ?? location?.context
 const PRIMARY_QUICK_AGENTS = ["claude", "codex", "cursor", "pi", "antigravity", "opencode"]
@@ -137,6 +138,18 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
   const askWhere = !props.initialImageTemplate && (allowRemote || available.length > 1)
   const [step, setStep] = React.useState("where")
   const [pendingGateway, setPendingGateway] = React.useState(null)
+  const exploration = React.useRef(null)
+  React.useEffect(() => {
+    if (props.open && !exploration.current) exploration.current = analytics.exploreFlow('sandbox_creation')
+    if (!props.open) exploration.current = null
+  }, [props.open])
+  React.useEffect(() => {
+    if (props.open) analytics.step(exploration.current, askWhere && step === 'where' ? 'location' : 'configuration')
+  }, [props.open, askWhere, step])
+  function setOpen(value) {
+    if (!value && !exploration.current?.submitted) analytics.finishFlow(exploration.current, 'cancelled')
+    props.onOpenChange(value)
+  }
   React.useEffect(() => {
     if (!props.open) setSelectedContext(null)
     setStep(initialLocationConfirmed ? "form" : "where"); setPendingGateway(null)
@@ -158,14 +171,14 @@ export function CreateSandboxDialog({ locations, location: requestedLocation, on
   const chooser = askWhere && step === "where" ? <LocationStep locations={available} allowRemote={allowRemote} connecting={Boolean(pendingGateway)}
     onPick={(context) => { changeLocation(context); setStep("form") }}
     onConnected={(job) => { setPendingGateway(job.gateway); onRefreshLocations?.() }}
-    onCancel={() => props.onOpenChange(false)} /> : null
+    onCancel={() => setOpen(false)} /> : null
   return <LocationProvider location={location}>
-    <CreateSandboxForm key={locationKey(location) ?? "default"} {...props} locations={available} onLocationChange={changeLocation}
+    <CreateSandboxForm key={locationKey(location) ?? "default"} {...props} onOpenChange={setOpen} analyticsFlow={exploration} locations={available} onLocationChange={changeLocation}
       chooser={chooser} onChangeLocation={askWhere ? () => setStep("where") : undefined} />
   </LocationProvider>
 }
 
-function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate = null, locations, onLocationChange, chooser, onChangeLocation }) {
+function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate = null, locations, onLocationChange, chooser, onChangeLocation, analyticsFlow }) {
   const api = useApi()
   const location = useLocation()
   const reduceMotion = useReducedMotion()
@@ -289,6 +302,7 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     if (location?.connected === false) return
     const missing = [!name && "sandbox-name", mode === "template" && !chosenImage && "sandbox-image-template", !groupReady && "sandbox-groups"].find(Boolean)
     if (missing || !startReady || missingSetupAgent) {
+      analytics.step(analyticsFlow?.current, 'validation', 'blocked', 'unknown')
       setShowMissing(true)
       if (missing) document.getElementById(missing)?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" })
       return
@@ -296,7 +310,11 @@ function CreateSandboxForm({ open, onOpenChange, onStarted, initialImageTemplate
     const files = start === "folder" ? { folder: preview.data.path } : start === "repo" ? { repository: repository.trim() } : {}
     const sandboxName = name.trim(), quick = mode === "quick", agents = agentIds, session = quick ? { session: quickSession(agentIds, openIn) } : {}
     const setups = setupIds, accessReview = setupAccessReview, chosenConnectorIds = chosenConnectors, providers = attachedProviders, targets = setupTargets, groups = group, template = chosenImage
-    sandboxCreations.start({ name: sandboxName, location, task: async ({ signal, progress, build, creating }) => {
+    if (analyticsFlow?.current) analyticsFlow.current.submitted = true
+    sandboxCreations.start({ name: sandboxName, location, analyticsFlow: analyticsFlow?.current,
+      analyticsProperties: { location_type: analyticsLocation(location), creation_mode: mode, file_source: start,
+        agent_ids: agentIds, setup_count: setups.length, provider_count: providers.length, group_count: groups.length },
+      task: async ({ signal, progress, build, creating }) => {
       let environment = template, launchSetupIds = [], launchAccessReview = null, buildName = null
       const cancelBuild = () => { if (buildName) void api.cancelImageBuild(buildName).catch((e) => toast.error(e.message)) }
       signal.addEventListener("abort", cancelBuild)

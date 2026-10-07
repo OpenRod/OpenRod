@@ -72,6 +72,12 @@ These files are not an encrypted secrets vault. Webhook credentials and activity
 
 Legacy checkout policy migration is a one-time copy only for the original local loopback `openshell/default` registration. Other contexts never inherit it; old `ui/.state` activity databases are left untouched. Organization reconciliation is off unless `OPENSHELL_CONSOLE_SWEEP=1`, then fixed to the startup context. Explicit UI policy changes can still alter remote policy. Imported image build recipes and setup commands execute locally and must be trusted before building.
 
+## Optional usage sharing
+
+The authorized local browser can send explicitly allowed product events to PostHog US only after opt-in. There is no SDK, autocapture, replay, person profile, or collection of terminal content, commands, credentials, paths, host names or resource names. The public ingestion token is bundled; it grants ingestion, not project administration or read access. User-written feedback text is sent only on explicit submission and can contain information the user chooses to disclose. PostHog receives the sender’s IP with each request and uses it to add an approximate location to opted-in usage events; the project discards the address itself.
+
+Requests omit cookies and referrers, have a three-second abort timeout, and are dropped silently without retries or disk queues. `OPENROD_TELEMETRY=0` or `DO_NOT_TRACK=1` disables both usage and explicit feedback at runtime; only packages built by the publish workflow report to production, and development capture requires an explicit build setting. Consent is browser-origin scoped. Turning sharing off aborts pending requests and removes anonymous identity and correlation state, but cannot retract events already received. See [usage documentation](docs/posthog.md).
+
 ## Reporting vulnerabilities
 
 Report vulnerabilities privately through GitHub: open this repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/OpenRod/OpenRod/security/advisories/new)). Do not open a public issue, and do not post credentials, exploit details, or real sandbox logs anywhere public. Include the affected version, a minimal reproduction, the impact, and redacted evidence.
