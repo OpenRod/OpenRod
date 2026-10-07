@@ -76,7 +76,7 @@ Legacy checkout policy migration is a one-time copy only for the original local 
 
 The authorized local browser can send explicitly allowed product events to PostHog US only after opt-in. There is no SDK, autocapture, replay, person profile, geo-IP enrichment, or collection of terminal content, commands, credentials, paths, host names or resource names. The public ingestion token is bundled; it grants ingestion, not project administration or read access. User-written feedback text is sent only on explicit submission and can contain information the user chooses to disclose. PostHog necessarily receives connection metadata, including the sender’s IP, even with enrichment disabled.
 
-Requests omit cookies and referrers, have a three-second abort timeout, and are dropped silently without retries or disk queues. `OPENROD_TELEMETRY=0` disables both usage and explicit feedback at runtime; development capture requires an explicit build setting. Consent is browser-origin scoped. Turning sharing off aborts pending requests and removes anonymous identity and correlation state, but cannot retract events already received. See [usage documentation](docs/posthog.md).
+Requests omit cookies and referrers, have a three-second abort timeout, and are dropped silently without retries or disk queues. `OPENROD_TELEMETRY=0` or `DO_NOT_TRACK=1` disables both usage and explicit feedback at runtime; only packages built by the publish workflow report to production, and development capture requires an explicit build setting. Consent is browser-origin scoped. Turning sharing off aborts pending requests and removes anonymous identity and correlation state, but cannot retract events already received. See [usage documentation](docs/posthog.md).
 
 ## Reporting vulnerabilities
 

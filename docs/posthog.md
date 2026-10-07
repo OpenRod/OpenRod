@@ -1,46 +1,43 @@
-# Optional usage and feedback
+# Usage sharing and feedback
 
-OpenRod runs locally. On first opening, a small popup gives a short disclosure with **Share anonymous usage**, **No thanks**, and **What is being shared?**. Usage sharing starts only after the authorized browser user chooses **Share anonymous usage**. **No thanks** or dismissing the initial popup saves sharing off. A saved choice prevents future automatic prompts. **What is being shared?** opens technical details and returns to the popup without recording a choice. There are no follow-up questions or feedback surveys. **Usage & feedback** lets users change sharing, view the details again, or submit feedback manually. General feedback can be sent explicitly while usage sharing is off, using a one-off anonymous ID.
+OpenRod runs on your computer, so the team only learns what works through usage it is allowed to see. Sharing is opt-in.
 
-## Delivery and configuration
+## What users see
 
-A small browser client calls PostHog’s [public capture API](https://posthog.com/docs/api/capture) directly. There is no analytics dependency, SDK download, autocapture, replay, survey SDK, feature-flag request, retry, proxy, or disk queue. At most six requests are in flight, capped at 120 per minute. Each request has a three-second abort timeout. Network, DNS, blocker, HTTP, storage and synchronous exceptions are silent; product operations never await capture. Closing the page can lose an event. Feedback submission closes the form without promising delivery; **Copy text** keeps a copy available to the user.
+On first opening, a small dialog offers **Share usage**, **No thanks** and **What is being shared?**. Nothing is sent before the user chooses to share. **No thanks**, or closing the dialog, saves sharing off, and the dialog doesn't ask again. **Usage & feedback** in the sidebar changes the choice and sends feedback. Feedback can be sent with sharing off.
 
-Production builds use the public ingestion token and US endpoint in `ui/shared/analytics-release.json`, for project 647098. This is a write-only public token, not a personal or administrative API key. For another project, set `OPENROD_POSTHOG_TOKEN` and `OPENROD_POSTHOG_HOST` at build time (US/EU ingestion endpoints only). Set the token to an empty string to build without capture.
+## Turning it off
 
-Set `OPENROD_TELEMETRY=0` (or `false`) before starting the server to disable all usage and feedback requests, even with saved consent. Development capture is off unless `OPENROD_ANALYTICS_DEV=1`; its events carry `environment=development`. Cloud/worker modes, unauthorized pages, launch-token/handoff URLs and development fleet fixtures are excluded. Runtime configuration is returned only after the existing launch-cookie gate; authentication is unchanged.
+- Turn sharing off in **Usage & feedback**. This aborts pending requests and deletes the local IDs. Events PostHog already received stay there.
+- Start OpenRod with `OPENROD_TELEMETRY=0` (or `false`, `off`, `no`), or with `DO_NOT_TRACK=1`, to turn off both usage and feedback whatever the browser chose.
 
-## Events and interpretation
+Only packages built by the publish workflow (`OPENROD_ANALYTICS_RELEASE=1`) report to production. Source builds, forks and previews send nothing. Set `OPENROD_ANALYTICS_DEV=1` at build time to send events marked `environment=development`. Cloud and worker modes never send usage.
 
-Every event has `schema_version`, `app_version`, `environment`, and a random anonymous installation ID. Opted-in events have a session ID with a 30-minute inactivity window and may include a fixed view enum. The current client collects no intent or goal-answer fields. IDs are scoped to browser storage for the console origin, including its port: different browsers or ports are separate observations.
+## What is sent
+
+A small client in the browser posts to PostHog's [capture API](https://posthog.com/docs/api/capture). There is no SDK, autocapture, session replay, retry or stored queue, and delivery failures are silent. Each event passes an allowlist of fields and fixed values; anything else is dropped.
 
 | Event | Meaning |
 | --- | --- |
-| `console_opened` | Initial observable gateway state, including an already connected gateway. `first_observed_visit` means a fresh local anonymous ID, not a verified new user. |
-| `view_opened` | A change to an allowlisted product screen; no URL, referrer or search terms. |
-| `flow_started` | A submitted connection, sandbox creation or session launch attempt. Safe choices/counts only. |
-| `flow_step_changed` | Entered or blocked stage; repeated status polling is deduplicated. Pre-submit exploration has attempt zero. |
-| `flow_finished` | Observed connected, created, live, handoff requested, failed or cancelled result. A stable `flow_id` and attempt correlate supported retries. |
-| `sandbox_ready` | A tracked creation subsequently observed Ready, distinct from its create response. |
-| `feature_used` | Successful template build, setup import/activation, network rule or group membership save, activity filter application, file upload, or sandbox start/stop/delete. |
-| `feedback_submitted` | Manually submitted text (maximum 2,000 characters), marked as general feedback. |
+| `console_opened` | The console's first known connection state. |
+| `view_opened` | A product screen was opened. |
+| `flow_started`, `flow_step_changed`, `flow_finished` | Connecting a gateway, creating a sandbox or opening a session: its stages and result (`connected`, `created`, `live`, `handoff_requested`, `failed`, `cancelled`), with a fixed error category. Only a failed attempt continues as a retry of the same flow. |
+| `sandbox_ready` | A tracked sandbox later became Ready. |
+| `feature_used` | A template build, setup import or activation, network rule or group save, activity filter, file upload, or sandbox start, stop or delete succeeded. |
+| `feedback_submitted` | Text the user typed and sent, up to 2,000 characters. |
 
-A browser session is `live` only after its WebSocket confirms readiness. Native Terminal/VS Code/Cursor success is **handoff_requested**: OpenRod cannot observe whether the external app became useful. Sandbox creation finishes `created`; readiness is a separate event. Closing the creation dialog does not cancel its background job. Pre-submit dialog cancellation has `start_observed=false` and no duration. Reloads, crashes and lost events can leave unmatched starts.
+Events carry the app version, environment, a random installation ID and, while sharing is on, a session ID and the current screen. Feedback sent with sharing off carries only the text and a one-off ID.
 
-The first-opening popup uses compact standard platform styles. Usage collection stays off until sharing is chosen. Sharing, declining or dismissing the initial popup saves a preference and prevents future automatic prompts; it can be changed in **Usage & feedback**. From this popup, opening or closing **What is being shared?** returns without changing consent or starting collection. The details explain predefined events, allowed choices/counts/timing metadata and random IDs, excluded private content, explicitly submitted feedback text, the PostHog region and IP metadata, silent delivery without queues, and opt-out/global disable controls. There are no goal questions, outcome surveys, blocker questions, sampling timers or prompt cooldowns. Feedback stays available manually. Browser-origin consent and safe terminal-flow correlation synchronize between tabs. Revocation aborts in-flight requests and prevents old workflows from being attributed after re-enabling sharing, including suspended tabs.
+Never sent: commands, terminal output, files, sandbox, host or template names, paths, repositories, credentials, URLs and error messages. Error messages are matched in the browser against OpenRod's own wording, and only the resulting category is sent.
 
-## Privacy and local state
+PostHog (US) receives the request, so it sees the sender's IP address. GeoIP enrichment and person profiles are turned off in every event. To stop PostHog storing IP addresses, turn on **Discard client IP data** in the project settings.
 
-An event-specific allowlist strips unknown fields. Names, hosts, paths, repositories, commands, terminal output, setup contents, credential values, request bodies, raw errors and full URLs are never supplied to the transport. Known structured errors map to fixed categories; unknown errors stay `unknown`. Feedback text is the only free-form field and is transmitted only when the user explicitly submits it. Ask users to omit private details.
+The public ingestion token in `ui/shared/analytics-release.json` can only write events. To send to another project, set `OPENROD_POSTHOG_TOKEN` and `OPENROD_POSTHOG_HOST` (a US or EU ingestion host) at build time.
 
-No cookies or referrers are sent. Geo-IP enrichment and person profiles are disabled, although PostHog still receives ordinary network metadata such as IP addresses. Consent is not an assertion of perfect anonymity. Turning sharing off deletes the local ID, session and correlation state, plus legacy goal/prompt preferences, but leaves the sharing preference. Already received events are not retracted. Nothing is stored in the server’s activity archive for telemetry, and there is no offline event backlog.
+## Local state
 
-## Review dashboard
+The browser keeps the choice, the random IDs and, for browser terminals opened in a new tab, a short-lived flow ID that is removed once the tab reads it. Turning sharing off deletes all of it except the choice.
 
-[OpenRod — intent, activation and feedback](https://us.posthog.com/project/647098/dashboard/2172927) uses production events only, with a rolling 30-day window. Its five saved SQL panels are reproduced in [posthog-dashboard.sql](posthog-dashboard.sql). Track activation observations, friction and retry outcomes, meaningful feature use, return activity, and explicit feedback. The adoption panel retains its historical intent column; new events show an unspecified intent because no goal question is asked. Keep browser live sessions and external handoffs separate. Do not interpret absent events as abandonment or compute a delivery/opt-in rate: offline users and declined sharing are unobserved. Anonymous IDs do not equal people; public ingestion tokens also permit spoofed events.
+## Dashboard
 
-Read feedback alongside behavior: repeated failures suggest friction, manual descriptions of unmet needs identify gaps and work that click tracking cannot reveal. CLI-only behavior, external app usage, ignored features, users who decline sharing and offline sessions remain blind spots.
-
-## Verification
-
-`cd ui && npm test && npm run build`. Analytics tests inject storage, clock and transport to verify consent, field filtering, silent failures, bounded requests, revocation, retries, readiness, cross-tab correlation and absence of automatic question state. The isolated browser smoke test uses development events; real Docker/SSH provisioning remains covered by existing server tests and requires a separate live environment.
+The production dashboard is [OpenRod usage and feedback](https://us.posthog.com/project/647098/dashboard/2172927). Its queries are in [posthog-dashboard.sql](posthog-dashboard.sql). Missing events are not evidence of anything: offline users, people who declined and blocked requests are never seen, and anonymous IDs are not people.

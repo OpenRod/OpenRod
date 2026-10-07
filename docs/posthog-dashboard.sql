@@ -19,14 +19,14 @@ WHERE event = 'flow_finished' AND properties.environment = 'production'
   AND timestamp >= now() - INTERVAL 30 DAY
 GROUP BY flow, outcome, error_category, attempt ORDER BY observations DESC;
 
--- Meaningful adoption; intent is historical, with new observations unspecified.
-SELECT coalesce(properties.intent, 'unspecified') AS intent,
-       properties.feature AS feature, properties.action AS action,
+-- Meaningful adoption.
+SELECT properties.feature AS feature, properties.action AS action,
+       properties.location_type AS location_type,
        uniq(distinct_id) AS anonymous_ids, count() AS observations
 FROM events
 WHERE event = 'feature_used' AND properties.environment = 'production'
   AND timestamp >= now() - INTERVAL 30 DAY
-GROUP BY intent, feature, action ORDER BY observations DESC;
+GROUP BY feature, action, location_type ORDER BY observations DESC;
 
 -- Return use: distribution of observed active days, not a cohort retention rate.
 SELECT active_days, count() AS anonymous_ids FROM (
@@ -37,10 +37,8 @@ SELECT active_days, count() AS anonymous_ids FROM (
 ) GROUP BY active_days ORDER BY active_days ASC;
 
 -- Explicit feedback: includes one-off feedback from users with sharing off.
-SELECT timestamp, properties.intent AS intent, properties.prompt AS prompt,
-       properties.category AS category, properties.goal_achieved AS goal_achieved,
-       properties.text AS feedback, properties.feedback_only AS feedback_only,
-       properties.flow_id AS flow_id
+SELECT timestamp, properties.text AS feedback, properties.feedback_only AS feedback_only,
+       properties.app_version AS app_version
 FROM events
 WHERE event = 'feedback_submitted' AND properties.environment = 'production'
   AND timestamp >= now() - INTERVAL 30 DAY
