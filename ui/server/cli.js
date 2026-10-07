@@ -121,7 +121,21 @@ function openBrowser(url, logger) {
   child.unref()
 }
 
+// The API authenticates these upgrades. The CLI must not destroy a cloud
+// relay socket after that asynchronous handler has accepted responsibility.
+export function rejectUnsupportedUpgrade(req, socket) {
+  const pathname = (req.url ?? '').split('?', 1)[0]
+  if (!['/api/os/terminal', '/api/os/ssh', '/api/remote/os/terminal', '/api/remote/os/ssh'].includes(pathname)) socket.destroy()
+}
+
+// The openrod command is the loopback console guarded by its launch token.
+// Cloud and worker deployments start server/start.js instead.
+function assertLocalMode() {
+  if ((process.env.OPENROD_MODE ?? 'local') !== 'local') throw new Error('openrod runs the local console. Unset OPENROD_MODE, or start cloud and worker deployments with server/start.js.')
+}
+
 export async function startConsole(options = parseOptions([]), logger = console) {
+  assertLocalMode()
   const { host, port } = parseOptions(['--host', options.host ?? '127.0.0.1', '--port', String(options.port ?? 4600)])
   let directory
   try {
@@ -129,6 +143,7 @@ export async function startConsole(options = parseOptions([]), logger = console)
     await fs.access(path.join(directory, 'index.html'))
   } catch { throw new Error('Built frontend is missing. Run npm run build from the source checkout before starting or packaging the console.') }
   const { createOpenShellApi, isLocalApiRequest } = await import('./api.js')
+  const { createSecurity } = await import('./security.js')
   const { createLaunchToken, tokenUrl } = await import('./launch-token.js')
   const token = createLaunchToken()
   const serveStatic = staticMiddleware(directory)
@@ -153,9 +168,9 @@ export async function startConsole(options = parseOptions([]), logger = console)
     server.once('error', error)
     server.listen(port, host === 'localhost' ? '127.0.0.1' : host, () => { server.off('error', error); resolve() })
   })
-  try { api = createOpenShellApi({ httpServer: server, logger, token }) }
+  try { api = createOpenShellApi({ httpServer: server, logger, token, security: createSecurity({ mode: 'local' }) }) }
   catch (error) { server.close(); throw error }
-  server.on('upgrade', (req, socket) => { if ((req.url ?? '').split('?', 1)[0] !== '/api/os/terminal') socket.destroy() })
+  server.on('upgrade', rejectUnsupportedUpgrade)
   let closing
   const close = () => {
     if (closing) return closing
@@ -184,6 +199,7 @@ async function main() {
   if (options.help) { process.stdout.write(HELP); return }
   if (options.version) { console.log(JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version); return }
   if (!nodeSupported()) throw new Error(`OpenRod needs Node.js 22.13 or newer, and this is ${process.versions.node}. Install a current release from https://nodejs.org, then run it again.`)
+  assertLocalMode()
   quietSqliteWarning()
   // Before the console starts, so the browser opens on a usable local gateway.
   try {

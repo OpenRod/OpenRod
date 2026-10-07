@@ -1,9 +1,12 @@
 import {createLocalCloudNative} from './local-cloud-native.js'
+import { claimCloudAnnouncement } from './announcements.js'
 import {cloudSshRoute,cloudSshUpgrade} from './cloud-ssh.js'
 import {createLocalCloud} from './local-cloud.js'
 import { cloudOrigin, CLOUD_SOON } from './cloud-origin.js'
 import { setupTargetsFor, validateSetupTargets } from '../shared/setup-targets.js'
 import { localTransfer, importTransfer, exportTransfer } from './cloud-transfer.js'
+import { resourceImportRoute } from './resource-imports.js'
+import { consoleCapabilities } from './capabilities.js'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { scopedStateDirectory, stateDirectory } from './paths.js'
@@ -39,7 +42,7 @@ import { filesRoute, planSeed, receiveUpload, serveDownload, startSeed } from '.
 // header alone is not proof of a local caller when Vite is bound to a LAN
 // address, so check the socket, the Host and the browser's own origin claims.
 export { isLocalApiRequest } from './security.js'
-import { createSecurity, releaseConfig, assertCloudOperation, requestPath } from './security.js'
+import { createSecurity, releaseConfig, assertCloudOperation, requestPath, identityContext } from './security.js'
 import { createLaunchToken, createTokenGate, tokenUrl } from './launch-token.js'
 
 // A mutation must also carry a JSON body and a custom header, which a
@@ -54,14 +57,20 @@ function isMutation(req, security) {
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 const IMAGE = /^[\w./:@-]{1,256}$/
 
-async function body(req, limit = 65536) {
-  let raw = ''
+export async function readRequestBody(req, limit = 65536) {
+  const chunks = []
+  let bytes = 0
   for await (const chunk of req) {
-    raw += chunk
-    if (Buffer.byteLength(raw) > limit) throw Object.assign(new Error('Request too large'), { status: 413 })
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    bytes += buffer.length
+    if (bytes > limit) throw Object.assign(new Error('Request too large'), { status: 413 })
+    chunks.push(buffer)
   }
-  return raw ? JSON.parse(raw) : {}
+  if (!bytes) return {}
+  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))) }
+  catch { throw Object.assign(new Error('Invalid JSON request'), { status: 400 }) }
 }
+const body = readRequestBody
 
 function send(res, status, payload) {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
@@ -146,7 +155,8 @@ export async function createSandbox(input, { sessionOverride = false } = {}) {
   // A built template's agents get their sign-in and model destinations from
   // the reviewed table in shared/agent-access.js, never from the recipe.
   let agentRules = []
-  if (saved?.managed) { try { agentRules = agentAccessRules(saved.recipe) } catch (error) { throw fail(error.message) } }
+  if (input.connectors?.length && !saved?.managed) throw fail('Connectors need a template built in OpenRod.')
+  if (saved?.managed) { try { agentRules = agentAccessRules(saved.recipe, { connectors: input.connectors ?? [] }) } catch (error) { throw fail(error.message) } }
   if (saved) {
     const start = sessionOverride && input.session !== undefined ? String(input.session) : saved.recipe.command.trim()
     let selectedSession
@@ -354,7 +364,7 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
     onReuse: () => logger.warn('The link OpenRod opened in your browser was used a second time. If that wasn’t you, another program may have opened the console first: stop OpenRod with Ctrl+C and start it again.'),
   }) : null
   const runtimes = new Map(), streams = new Set(), sockets = new Set(), pending = new Set(), responses = new Set()
-  const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative() }) : null
+  const localCloud = security.config.mode === 'local' ? createLocalCloud({ native: createLocalCloudNative({ token }) }) : null
   const cloudOff = security.config.mode === 'local' && !cloudOrigin()
   const initialContext = contextSelection()
   const initialKey = contextKey(initialContext)
@@ -512,6 +522,12 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           if (explicitLocation && security.config.mode === 'local') owner = await inventory.resolve(requestedContext)
           else if (requestedContext != null && requestedContext !== contextKey() && !(req.method === 'GET' && parts[0] === 'connections')) return send(res, 409, { error: 'Console context changed. Reload before continuing.' })
           return await runWithContext(owner, async () => {
+          if (req.method === 'GET' && parts.length === 1 && parts[0] === 'capabilities') return send(res, 200, consoleCapabilities(security.config.mode))
+          if (parts.length === 2 && parts[0] === 'announcements' && parts[1] === 'cloud') {
+            if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
+            await body(req)
+            return send(res, 200, await claimCloudAnnouncement({ user: identityContext.getStore()?.uid ?? 'local', available: !cloudOff }))
+          }
           // Connection discovery is available before any gateway is selected.
           // Job reads remain available after that job changes the context.
           if (parts[0] === 'connections') {
@@ -529,11 +545,18 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
             const input = await body(req)
             if (parts.length === 2 && parts[1] === 'connect') return send(res, 200, remoteConnections.begin(input))
             if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'scan') return send(res, 200, await sshHosts.scan(input))
-            if (parts.length === 2 && parts[1] === 'hosts') return send(res, 201, await sshHosts.add(input.token))
+            if (parts.length === 2 && parts[1] === 'hosts') {
+              const saved = await sshHosts.add(input.token)
+              await remoteConnections.unforgetHost(saved.alias)
+              return send(res, 201, saved)
+            }
+            if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'restore') return send(res, 200, await remoteConnections.restoreHost(input.host))
             if (parts.length === 3 && parts[1] === 'hosts' && parts[2] === 'remove') {
               const current = (await remoteConnections.overview()).active
               if (current?.host === input.alias && ['connected', 'connecting'].includes(current.status)) throw fail('Disconnect from this machine before removing it.', 409)
-              return send(res, 200, await sshHosts.remove(input.alias))
+              const removed = await sshHosts.remove(input.alias)
+              await remoteConnections.unforgetHost(removed.alias)
+              return send(res, 200, removed)
             }
             if (parts.length === 2 && parts[1] === 'disconnect') return send(res, 200, await remoteConnections.disconnect())
             if (parts.length === 2 && parts[1] === 'forget') {
@@ -596,7 +619,23 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
             if (remote?.gateway === contextSelection().gateway) await inventory.resolve(contextKey())
           }
           const { store, delivery, hub } = runtimeFor(contextSelection())
+          const importOptions = {
+            sourceKind: security.config.mode === 'local' ? undefined : 'cloud',
+            activityStore: store,
+            onEvent: ({ action, job }) => store.ingest({
+              id: randomUUID(), sandbox: '', at: new Date().toISOString(), kind: 'event', category: 'EVENT',
+              source: 'openrod-import', action, severity: job.status === 'failed' || job.status === 'partial' ? 'WARN' : 'INFO',
+              outcome: job.status === 'completed' ? 'success' : job.status === 'failed' ? 'failure' : undefined,
+              actor: identityContext.getStore()?.email ?? 'Local operator', correlationId: job.id,
+              message: `${action}: ${job.counts.completed}/${job.counts.total} resources completed`,
+              original: { jobId: job.id, source: job.source, destination: job.destination, counts: job.counts },
+            }, contextKey()),
+          }
           if (req.method === 'GET') {
+            if (parts[0] === 'resource-imports') {
+              const result = await resourceImportRoute('GET', parts, undefined, importOptions)
+              return send(res, result === undefined ? 404 : 200, result ?? { error: 'Not found' })
+            }
             if (parts[0] === 'stream') {
               res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' })
               res.write(': connected\n\n')
@@ -651,8 +690,12 @@ export function createOpenShellApi({ httpServer, logger = console, security = cr
           }
           if (!isMutation(req, security)) return send(res, 403, { error: 'Request rejected' })
           if (parts[0] === 'cloud-import' && ['worker', 'local'].includes(security.config.mode)) return send(res, 200, await importTransfer(req, { createSandbox: input => createSandbox(input, { sessionOverride: true }) }))
-          const input = await body(req, ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : parts[0] === 'setups' ? 128 * 1024 : 65536)
+          const input = await body(req, parts[0] === 'resource-imports' ? 8 * 1024 * 1024 : ['image-templates', 'activity'].includes(parts[0]) ? 512 * 1024 : parts[0] === 'setups' ? 128 * 1024 : 65536)
           assertCloudOperation(parts, input)
+          if (parts[0] === 'resource-imports') {
+            const result = await resourceImportRoute('POST', parts, input, importOptions)
+            return send(res, result === undefined ? 404 : 200, result ?? { error: 'Not found' })
+          }
           if (parts[0] === 'cloud-transfer' && security.config.mode === 'local') return send(res, 200, await localTransfer(input))
           if (parts[0] === 'activity' && parts.length === 2) {
             if (parts[1] === 'delete-preview') return send(res, 200, store.previewDeletion(input))

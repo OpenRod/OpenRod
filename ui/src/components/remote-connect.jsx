@@ -1,4 +1,5 @@
 import * as React from "react"
+import { connectionHost } from '@/lib/connection-host'
 import { ChevronDown, CircleAlert, CircleX, Info, Laptop, Loader2, RefreshCw, Server } from "lucide-react"
 
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -8,8 +9,6 @@ import { Label } from "@/components/ui/label"
 import { SelectField } from "@/components/ui/select-field"
 import { api } from "@/lib/api"
 import { analytics, classifyAnalyticsError } from '@/lib/analytics'
-
-const PENDING = ["working", "needs-docker", "needs-install"]
 
 const STATUS = {
   working: { icon: Loader2, tone: "text-muted-foreground animate-spin motion-reduce:animate-none", title: (job) => `Connecting to ${job.host}` },
@@ -59,10 +58,10 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
     api.connections(controller.signal).then((next) => {
       if (generation.current !== id) return
       setConnections(next)
-      const resumable = next.job?.host && PENDING.includes(next.job.status) ? next.job : null
-      if (resumable) { setJob(resumable); setRuntimeInstallation(resumable.runtimeInstallation || "download") }
-      const host = resumable?.host ?? chosen.current ?? initialHost ?? next.active?.host
-      setSelection(next.hosts.some((item) => item.name === host) ? host : next.hosts[0]?.name || "")
+      const { host, job: resumable } = connectionHost(next, initialHost, chosen.current)
+      setJob(resumable)
+      if (resumable) setRuntimeInstallation(resumable.runtimeInstallation || "download")
+      setSelection(host)
     }).catch((reason) => {
       if (generation.current === id && reason.name !== "AbortError") setError(reason.message)
     }).finally(() => { clearTimeout(timeout); if (generation.current === id) setRefreshing(false) })
@@ -123,15 +122,17 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
     <div className="grid gap-2">
       <Label htmlFor={`${prefix}-host`} className="text-xs">SSH host</Label>
       <div className="flex gap-2">
-        <SelectField id={`${prefix}-host`} className="flex-1" value={selected ? selection : ""} disabled={locked || !hosts.length}
+        <SelectField id={`${prefix}-host`} className="flex-1" value={selection} disabled={locked || !hosts.length}
           onChange={(event) => { chosen.current = event.target.value; setSelection(event.target.value); setJob(null); setFile(null); setError(null); setPollError(null) }}>
           <option value="" disabled>{hosts.length ? "Choose a host" : "No hosts in ~/.ssh/config"}</option>
+          {Boolean(selection) && !selected && <option value={selection} disabled>{selection} · Missing from SSH config</option>}
           {hosts.map((item) => <option key={item.name} value={item.name}>{item.label ?? item.name}</option>)}
         </SelectField>
         <Button type="button" variant="outline" size="icon" aria-label="Refresh hosts" disabled={Boolean(busy) || refreshing} onClick={refresh}>
           <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`} />
         </Button>
       </div>
+      {connections && selection && !selected && <p role="status" className="text-muted-foreground">{selection} is no longer in your SSH config. Add it again in Connections, or restore its SSH config entry and refresh.</p>}
       {reuse ? <p className="text-muted-foreground">Connected now. Choose another host to replace this connection.</p>
         : connectedHost && selected && <p className="text-muted-foreground">Connecting {selection} replaces the connection to {connectedHost}.</p>}
       {selected && !selected.managed && !reuse && <p className="text-muted-foreground">First time? Run <code className="rounded bg-muted px-1 font-mono text-foreground">ssh {selection}</code> once to trust the machine.</p>}

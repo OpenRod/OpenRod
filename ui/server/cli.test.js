@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { autoOpen, nodeSupported, parseOptions } from './cli.js'
+import { autoOpen, nodeSupported, parseOptions, startConsole } from './cli.js'
 
 test('requires Node.js 22.13 or newer', () => {
   for (const version of ['20.20.2', '22.12.0', '21.7.3', '18.20.4']) assert.equal(nodeSupported(version), false, version)
@@ -31,4 +31,32 @@ test('opens the browser by default only where there is a screen to open on', () 
   assert.equal(autoOpen({ ...desk, platform: 'linux' }), false)
   assert.equal(autoOpen({ ...desk, platform: 'linux', env: { DISPLAY: ':0' } }), true)
   assert.equal(autoOpen({ ...desk, platform: 'linux', env: { WAYLAND_DISPLAY: 'wayland-0' } }), true)
+})
+
+
+test('CLI guard leaves authenticated terminal and SSH relays to the API and rejects unknown upgrades', async () => {
+  const { rejectUnsupportedUpgrade } = await import('./cli.js')
+  for (const url of ['/api/os/terminal?ticket=one', '/api/os/ssh?ticket=two', '/api/remote/os/terminal?ticket=three&owner=alice', '/api/remote/os/ssh?ticket=four&owner=alice']) {
+    let destroyed = false
+    rejectUnsupportedUpgrade({url}, {destroy(){destroyed=true}})
+    assert.equal(destroyed, false, url)
+  }
+  for (const url of ['/api/remote/os/overview', '/api/remote/os/terminal/extra', '/unknown', undefined]) {
+    let destroyed = false
+    rejectUnsupportedUpgrade({url}, {destroy(){destroyed=true}})
+    assert.equal(destroyed, true, url)
+  }
+})
+
+test('the openrod command refuses cloud and worker modes instead of serving them without its launch token', async () => {
+  const before = process.env.OPENROD_MODE
+  try {
+    for (const mode of ['cloud', 'worker']) {
+      process.env.OPENROD_MODE = mode
+      await assert.rejects(startConsole({ port: 0 }), /local console/)
+    }
+  } finally {
+    if (before === undefined) delete process.env.OPENROD_MODE
+    else process.env.OPENROD_MODE = before
+  }
 })

@@ -1,6 +1,5 @@
 import { useApi, useCompute } from '@/lib/compute'
 import * as React from "react"
-import { Loader2, Plus } from "lucide-react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
 import { SandboxCreationNotifications } from "@/components/sandbox-creation-notices"
 import { GatewayDockerNotifications } from "@/components/gateway-docker"
@@ -14,14 +13,13 @@ import { TemplatesView } from "@/components/image-templates-view"
 import { ConnectionsView } from "@/components/connections-view"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
-import { CloudAccount, useCloudMode } from "@/components/auth-gate"
+import { CloudAccount } from "@/components/auth-gate"
 import { LiveProvider, useLive } from "@/lib/live"
-import { Button } from "@/components/ui/button"
 import { LocationProvider } from "@/lib/location-context"
-import { LocationBadge } from "@/components/location-badge"
-import { connectLocalGateway } from "@/lib/locations"
-import { CopyCommand } from "@/components/copy-command"
-import { INSTALL_COMMAND } from "../shared/openshell-release.js"
+import { useInventory } from "@/lib/inventory"
+import { workingLocation, locationIdentity } from "@/lib/working-location"
+import { ResourceImportDialog } from '@/components/resource-import-dialog'
+import { CloudAnnouncement } from '@/components/cloud-announcement'
 import { analytics } from '@/lib/analytics'
 import { useUsageState } from '@/components/usage-feedback'
 
@@ -66,10 +64,6 @@ function locationFromHash() {
   return { id: JSON.stringify([target ?? "local", JSON.stringify([gateway, workspace])]), context: JSON.stringify([gateway, workspace]), gateway, workspace, connected: true, remote, target, cloud: target === "cloud", label: params.get("label") || (remote ? `SSH · ${gateway}` : "Local") }
 }
 
-function ScopedPage({ location, children }) {
-  return location ? <LocationProvider location={location}><LiveProvider>{children}</LiveProvider></LocationProvider> : children
-}
-
 // A browser terminal is its own tab: `#terminal/<sandbox>?session=<program>`.
 function terminalFromLocation() {
   const match = /^#terminal\/([a-z0-9-]{1,63})(?:\?(.*))?$/.exec(window.location.hash)
@@ -93,62 +87,35 @@ function viewFromLocation() {
   return TITLES[view] ? view : "sandboxes"
 }
 
-function ConnectionGate({ onSetup, onConnections, children }) {
-  const api = useApi()
-  const { connection, overview } = useLive()
+// Reports once how the console opened, after its connection state is known.
+function ConsoleOpened() {
+  const { connection } = useLive()
   const usage = useUsageState()
   React.useEffect(() => { analytics.observeConsole(connection) }, [connection, usage.sharing])
-  const gated = Boolean(onSetup) && connection === "setup-required"
-  const [connections, setConnections] = React.useState(null)
-  const [state, setState] = React.useState({ busy: false, error: null })
-  React.useEffect(() => {
-    if (!gated) return
-    let alive = true
-    api.connections().then((next) => { if (alive) setConnections(next) }).catch(() => { if (alive) setConnections({ locals: [] }) })
-    return () => { alive = false }
-  }, [gated, api])
-  const locals = connections?.locals ?? null
-  if (!onSetup) return children
-  if (connection === "connecting" && !overview) return <section className="p-8">
-    <p role="status" className="text-sm text-muted-foreground">Reading connection settings…</p>
-  </section>
-  if (!gated) return children
-  async function chooseThisComputer() {
-    setState({ busy: true, error: null })
-    try {
-      await connectLocalGateway(api, locals[0].name)
-      window.location.reload()
-    } catch (reason) { setState({ busy: false, error: reason.message }) }
-  }
-  const action = "bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"
-  return (
-    <section aria-labelledby="setup-heading" className="mx-auto my-16 grid w-full max-w-md justify-items-center gap-4 px-6 text-center">
-      <h2 id="setup-heading" className="text-xl font-semibold tracking-tight">Choose where sandboxes run</h2>
-      <p className="text-sm text-muted-foreground">Groups, network rules and secrets need a location. You don’t need a sandbox first.</p>
-      <div className="flex flex-wrap justify-center gap-2">
-        {locals?.length > 0 && <Button onClick={chooseThisComputer} disabled={state.busy} title={`Use the ${locals[0].name} gateway`} className={action}>{state.busy && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}Use this computer</Button>}
-        <Button variant="outline" onClick={onConnections}>Connect a remote machine</Button>
-        <Button variant={locals?.length ? "ghost" : undefined} onClick={onSetup} className={locals?.length ? "" : action}><Plus aria-hidden="true" className="size-4" />New sandbox</Button>
-      </div>
-      {locals?.length === 0 && connections.tools?.openshell === false && <div className="grid w-full gap-2">
-        <p className="text-xs text-muted-foreground">OpenShell isn’t installed. Install it in a terminal, then refresh this page.</p>
-        <CopyCommand command={connections.tools.installCommand ?? INSTALL_COMMAND} />
-      </div>}
-      {state.error && <p role="alert" className="text-xs text-destructive">{state.error}</p>}
-    </section>
-  )
+  return null
 }
 
 export function App() {
-  const cloud = useCloudMode()
   const api = useApi()
   const compute = useCompute()
+  const cloud = !compute?.localViewer
   const [view, setView] = React.useState(viewFromLocation)
   const [terminal, setTerminal] = React.useState(terminalFromLocation)
   const [createRequest, setCreateRequest] = React.useState(0)
   const [pageLocation, setPageLocation] = React.useState(locationFromHash)
   const usage = useUsageState()
   React.useEffect(() => { analytics.observeView(terminal ? 'terminal' : view) }, [view, Boolean(terminal), usage.sharing])
+  const [importRequest, setImportRequest] = React.useState(null)
+  const inventory = useInventory()
+  const location = React.useMemo(() => workingLocation(inventory.locations, null, api.target ?? 'local'), [inventory.locations, api.target])
+  const navigate = React.useCallback((next, requestedLocation) => {
+    const nextLocation = requestedLocation ?? null
+    if (api.signal?.aborted || !TITLES[next]) return
+    setView(next)
+    setPageLocation(nextLocation)
+    const params = nextLocation ? `?${new URLSearchParams({ gateway: nextLocation.gateway, workspace: nextLocation.workspace, label: nextLocation.label, remote: nextLocation.remote ? "1" : "0", ...(nextLocation.target ? { target: nextLocation.target } : {}) })}` : ""
+    window.history.pushState(null, "", next === "sandboxes" && !nextLocation ? window.location.pathname : `#${next}${params}`)
+  }, [api.signal])
   const connectMachine = cloud ? undefined : () => { navigate("sandboxes"); setCreateRequest((value) => value + 1) }
   React.useEffect(() => {
     const sync = () => { setView(viewFromLocation()); setTerminal(terminalFromLocation()); setPageLocation(locationFromHash()) }
@@ -161,17 +128,22 @@ export function App() {
       window.removeEventListener("hashchange", sync)
       window.removeEventListener("openrod-navigate", scopedNavigate)
     }
+  }, [navigate])
+  React.useEffect(() => {
+    const open = event => setImportRequest({ ...event.detail, type: event.detail?.type ?? event.detail?.types?.[0], key: Date.now() })
+    window.addEventListener('openrod-import', open)
+    return () => window.removeEventListener('openrod-import', open)
   }, [])
 
-  function navigate(next, location = null) {
-    if (api.signal?.aborted || !TITLES[next]) return
-    setView(next)
-    setPageLocation(location)
-    const params = location ? `?${new URLSearchParams({ gateway: location.gateway, workspace: location.workspace, label: location.label, remote: location.remote ? "1" : "0", ...(location.target ? { target: location.target } : {}) })}` : ""
-    window.history.pushState(null, "", next === "sandboxes" && !location ? window.location.pathname : `#${next}${params}`)
-  }
-
   if (terminal) {
+    // A fresh terminal tab must resolve its cloud owner before issuing requests.
+    // Otherwise its first request can race account discovery and invalidate it.
+    if (terminal.location?.target === 'cloud' && compute?.localViewer && (compute.checking || !compute.connected)) {
+      return <main className="grid min-h-svh place-items-center p-6"><section className="text-center text-sm">
+        <p role="status">{compute.checking ? 'Checking cloud connection…' : 'Connect to OpenRod Cloud to open this terminal.'}</p>
+        {!compute.checking && <a href="#connections" className="mt-4 inline-block underline underline-offset-4">Open Connections</a>}
+      </section></main>
+    }
     return (
       <>
         <React.Suspense fallback={null}>
@@ -185,36 +157,36 @@ export function App() {
   }
 
   return (
-    <LiveProvider>
+    <LocationProvider location={location}><LiveProvider key={locationIdentity(location) ?? 'unscoped'}>
+      <ConsoleOpened />
       <SidebarProvider>
         <AppSidebar view={view} onNavigate={navigate} />
         <SidebarInset className="min-w-0 bg-background">
+          <CloudAnnouncement />
           <header className="flex h-14 shrink-0 items-center border-b border-border bg-card px-4 sm:px-6">
             <SidebarTrigger className="mr-2 md:hidden" />
             <h1 className="text-[18px] font-semibold tracking-tight">{TITLES[view]}</h1>
-            {pageLocation && <span className="ml-3"><LocationBadge location={pageLocation} /></span>}
             <CloudAccount />
           </header>
           <SetupImportNotifications />
           <SandboxCreationNotifications />
           {!cloud && <GatewayDockerNotifications />}
-          <PageBoundary key={`${view}:${pageLocation?.target ?? ""}:${pageLocation?.context ?? ""}`} view={view}>
-          <ScopedPage location={pageLocation}>
-          <ConnectionGate onSetup={view === "sandboxes" || view === "templates" || view === "connections" ? undefined : connectMachine} onConnections={() => navigate("connections")}>
+          <PageBoundary key={`${view}:${locationIdentity(location) ?? 'unscoped'}`} view={view}>
+
           {view === "sandboxes" && <SandboxesView onNavigate={navigate} allowRemote={!cloud} createRequest={createRequest} onCreateRequestHandled={() => setCreateRequest(0)} />}
-          {view === "activity" && <ActivityView />}
-          {view === "groups" && <GroupsView onNavigate={navigate} />}
-          {(view === "egress" || view === "ingress") && <NetworkView tab={view} onNavigate={navigate} />}
-          {view === "secrets" && <SecretsView />}
+          {view === "activity" && <ActivityView combined />}
+          {view === "groups" && <GroupsView combined onNavigate={navigate} />}
+          {(view === "egress" || view === "ingress") && <NetworkView combined tab={view} onNavigate={navigate} requestedLocation={pageLocation} />}
+          {view === "secrets" && <SecretsView combined />}
           {view === "templates" && <TemplatesView />}
-          {view === "setups" && <SetupsView />}
+          {view === "setups" && <SetupsView combined />}
           {view === "connections" && !cloud && <ConnectionsView onCreateSandbox={connectMachine} />}
-          </ConnectionGate>
-          </ScopedPage>
+
           </PageBoundary>
         </SidebarInset>
         <Toaster position="bottom-right" />
+        {importRequest && <ResourceImportDialog key={importRequest.key} request={importRequest} onClose={() => setImportRequest(null)} />}
       </SidebarProvider>
-    </LiveProvider>
+    </LiveProvider></LocationProvider>
   )
 }

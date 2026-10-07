@@ -45,6 +45,18 @@ test('cloud requires a verified session and a current verified Google account', 
   }
   await assert.rejects(createSecurity(cloudConfig(env), { verifySessionCookie: async () => { throw Error('revoked') } }).authenticate(request()), { status: 401 })
 })
+
+test('legacy session cookie is accepted only when explicitly configured for deployment continuity', async () => {
+  const req=request({headers:{...request().headers,cookie:'__Host-legacy_session=valid'}})
+  await assert.rejects(createSecurity(cloudConfig(env),auth()).authenticate(req),{status:401})
+  assert.equal((await createSecurity(cloudConfig({...env,OPENROD_SESSION_COOKIE:'__Host-legacy_session'}),auth()).authenticate(req)).uid,'user-1')
+  assert.throws(()=>cloudConfig({...env,OPENROD_SESSION_COOKIE:'insecure_cookie'}),/__Host-/)
+  assert.throws(()=>cloudConfig({...env,OPENROD_WORKER_PROTOCOL:'legacy'}),/OPENROD_LEGACY_HEADER_PREFIX/)
+  for (const prefix of ['x-openrod', 'acme', 'x-acme-', 'x-Acme']) assert.throws(()=>cloudConfig({...env,OPENROD_WORKER_PROTOCOL:'legacy',OPENROD_LEGACY_HEADER_PREFIX:prefix}),/OPENROD_LEGACY_HEADER_PREFIX/)
+  assert.equal(cloudConfig({...env,OPENROD_WORKER_PROTOCOL:'legacy',OPENROD_LEGACY_HEADER_PREFIX:'x-acme'}).proxyClientIpHeader,'x-openrod-client-ip')
+  assert.equal(cloudConfig({...env,OPENROD_PROXY_CLIENT_IP_HEADER:'x-acme-client-ip'}).proxyClientIpHeader,'x-acme-client-ip')
+  for (const header of ['x-forwarded-for','x-real-ip','client-ip','X-Acme-Client-Ip']) assert.throws(()=>cloudConfig({...env,OPENROD_PROXY_CLIENT_IP_HEADER:header}),/PROXY_CLIENT_IP_HEADER/)
+})
 test('cloud rejects forged hosts, origins and cross-site requests including WebSockets', async () => {
   const security = createSecurity(cloudConfig(env), auth())
   for (const headers of [ { host: 'evil.example' }, { host: 'acme.openrod.example', origin: 'https://evil.example' }, { host: 'acme.openrod.example', 'sec-fetch-site': 'cross-site' } ]) {
@@ -57,6 +69,8 @@ test('customer requests cannot read host folders or launch host applications', (
     for (const parts of [['local-folder'], ['sandboxes', 'box', 'editor'], ['sandboxes', 'box', 'terminal']]) assert.throws(() => assertCloudOperation(parts, {}), { status: 403 })
     assert.throws(() => assertCloudOperation(['sandboxes'], { folder: '/etc' }), { status: 403 })
     assert.doesNotThrow(() => assertCloudOperation(['sandboxes'], { repository: 'https://github.com/example/repo' }))
+    for (const action of ['expose', 'extend']) assert.throws(() => assertCloudOperation(['ingress', action]), { status: 501 })
+    assert.doesNotThrow(() => assertCloudOperation(['ingress', 'close']))
   })
   assert.doesNotThrow(() => assertCloudOperation(['local-folder'], {}))
 })

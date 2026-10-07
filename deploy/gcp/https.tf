@@ -3,7 +3,7 @@ resource "google_compute_health_check" "console" {
   name = local.name
   http_health_check {
     port         = 8080
-    request_path = "/healthz"
+    request_path = "/readyz"
   }
 }
 resource "google_compute_security_policy" "console" {

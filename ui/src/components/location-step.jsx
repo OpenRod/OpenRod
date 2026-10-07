@@ -1,6 +1,6 @@
 import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ArrowLeft, ArrowUpRight, Laptop, Loader2, Server } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, Cloud, Laptop, Loader2, Server } from "lucide-react"
 
 import { RemoteConnect } from "@/components/remote-connect"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -8,11 +8,12 @@ import { Button } from "@/components/ui/button"
 import { DotPattern } from "@/components/ui/dot-pattern"
 import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
+import { useCompute } from "@/lib/compute"
 import { connectLocalGateway } from "@/lib/locations"
 
 export function StepTrail({ step, subject = "sandbox" }) {
   return <ol aria-label="Steps" className="flex items-center gap-2 text-[11px] text-muted-foreground">
-    {["Location", subject === "template" ? "Template" : "Sandbox"].map((label, index) => {
+    {["Location", subject === "setup" ? "Setup" : subject === "template" ? "Template" : "Sandbox"].map((label, index) => {
       const current = index + 1 === step
       const finished = index + 1 < step
       return <React.Fragment key={label}>
@@ -29,8 +30,8 @@ export function StepTrail({ step, subject = "sandbox" }) {
 // The chosen location in a form header, with a way back to the location step.
 export function LocationChip({ location, onChange }) {
   return <span className="flex items-center gap-1.5 rounded-full border border-border bg-muted/30 py-0.5 pr-1 pl-2.5 text-[11px] text-muted-foreground">
-    {location?.remote ? <Server aria-hidden="true" className="size-3" /> : <Laptop aria-hidden="true" className="size-3" />}
-    <span className="max-w-40 truncate text-foreground">{location?.remote ? hostOf(location) : "This computer"}</span>
+    {location?.cloud || location?.target === "cloud" ? <Cloud aria-hidden="true" className="size-3" /> : location?.remote ? <Server aria-hidden="true" className="size-3" /> : <Laptop aria-hidden="true" className="size-3" />}
+    <span className="max-w-40 truncate text-foreground">{location?.cloud || location?.target === "cloud" ? "OpenRod Cloud" : location?.remote ? hostOf(location) : "This computer"}</span>
     <Button type="button" variant="ghost" size="sm" className="h-5 rounded-full px-2 text-[11px]" onClick={onChange}>Change</Button>
   </span>
 }
@@ -75,7 +76,7 @@ export function ServerArt({ live }) {
   </svg>
 }
 
-function CloudArt() {
+export function CloudArt() {
   return <svg viewBox="0 0 76 48" className="h-16 w-auto text-foreground" aria-hidden="true">
     {/* The top arc rises above y=0, so the drawing sits 3 units lower. */}
     <g transform="translate(0 3)">
@@ -130,13 +131,45 @@ function Place({ index, scene, live, title, caption, tone = "idle", disabled, on
 
 export function LocationStep({ locations, allowRemote, onPick, onConnected, onCancel, connecting, subject = "sandbox" }) {
   const reduce = useReducedMotion()
+  const compute = useCompute()
   const [view, setView] = React.useState("choose")
+  const [cloudBusy, setCloudBusy] = React.useState(false)
+  const [cloudStage, setCloudStage] = React.useState("")
+  const [cloudPending, setCloudPending] = React.useState(false)
+  const preparation = React.useRef(null)
+  React.useEffect(() => () => preparation.current?.abort(), [])
   const [locals, setLocals] = React.useState(null)
   const [missingCli, setMissingCli] = React.useState(false)
   const [localBusy, setLocalBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
-  const local = locations.find((location) => !location.remote)
-  const remote = locations.find((location) => location.remote)
+  const cloud = locations.find(location => location.cloud || location.target === "cloud")
+  const local = locations.find(location => !location.remote && !location.cloud && location.target !== "cloud")
+  const remote = locations.find(location => location.remote && !location.cloud && location.target !== "cloud")
+  const cloudOnly = !compute?.localViewer && Boolean(cloud)
+  React.useEffect(() => {
+    if (cloudPending && cloud?.connected) { setCloudPending(false); setCloudBusy(false); onPick(cloud.id ?? cloud.context) }
+  }, [cloudPending, cloud, onPick])
+
+  React.useEffect(() => {
+    if (!cloudPending) return
+    const timer = setTimeout(() => { setCloudPending(false); setCloudBusy(false); setError("Cloud is ready but its locations could not load. Refresh the connection and try again.") }, 60000)
+    return () => clearTimeout(timer)
+  }, [cloudPending])
+
+  async function chooseCloud() {
+    if (cloud?.connected) { onPick(cloud.id ?? cloud.context); return }
+    const controller = new AbortController()
+    preparation.current = controller
+    setError(null); setCloudBusy(true); setCloudStage(compute?.connected ? "Preparing…" : "Signing in…")
+    try {
+      await compute.prepare({ signal: controller.signal, onProgress: value => setCloudStage(value.machine?.status === "ready" ? "Loading workspace…" : "Preparing…") })
+      controller.signal.throwIfAborted()
+      setCloudPending(true)
+      onConnected?.({ target: "cloud", gateway: null })
+    } catch (reason) { if (reason.name !== "AbortError") setError(reason.message); setCloudBusy(false); setCloudPending(false) }
+    finally { preparation.current = null }
+  }
+  function cancelCloud() { preparation.current?.abort(); compute?.cancelConnect?.(); setCloudPending(false); setCloudBusy(false) }
 
   // Before any gateway is chosen, the inventory has no Local entry; offer the registered gateway instead.
   React.useEffect(() => {
@@ -149,40 +182,45 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   async function chooseRegisteredLocal() {
     setLocalBusy(true); setError(null)
     try {
-      await connectLocalGateway(api, locals[0].name)
-      window.location.reload()
+      const job = await connectLocalGateway(api, locals[0].name)
+      onConnected(job)
     } catch (reason) { setError(reason.message); setLocalBusy(false) }
   }
 
   const slide = reduce ? {} : { initial: { opacity: 0, x: view === "remote" ? 24 : -24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: view === "remote" ? -24 : 24 }, transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] } }
   const localCaption = local ? (local.connected ? "Local gateway" : "Disconnected") : locals?.length ? `Use ${locals[0].name}` : locals ? (missingCli ? "OpenShell isn’t installed" : "No local gateway running") : "Checking…"
 
+  const cloudCaption = cloudBusy ? cloudStage : cloud?.connected ? "Ready to use" : compute?.checking ? "Checking connection…" : !compute?.available ? "Coming soon" : compute?.connected ? "Start cloud machine" : "Connect your account"
+
   return <div className="flex min-h-0 flex-col gap-6 rounded-xl bg-popover p-7 ring-1 ring-foreground/10">
     <DialogHeader className="gap-3">
-      <StepTrail step={1} subject={subject} />
+      {!['workspace', 'resource'].includes(subject) && <StepTrail step={1} subject={subject} />}
       <div className="flex items-center gap-2">
         {view === "remote" && <Button type="button" variant="ghost" size="icon-sm" aria-label="Back to locations" onClick={() => setView("choose")}><ArrowLeft /></Button>}
-        <DialogTitle>{view === "remote" ? "Connect a machine" : "Where should it run?"}</DialogTitle>
+        <DialogTitle>{view === "remote" ? "Connect a machine" : subject === "resource" ? "Create in" : subject === "workspace" ? "Work in" : subject === "setup" ? "Import to" : "Where should it run?"}</DialogTitle>
       </div>
-      <DialogDescription className={view === "remote" ? "sr-only" : "text-xs"}>{view === "remote" ? `Connect an SSH host to ${subject === "sandbox" ? "run sandboxes on" : "build templates on"}.` : `Pick a location for this ${subject}.`}</DialogDescription>
+      <DialogDescription className={view === "remote" || ['setup', 'workspace', 'resource'].includes(subject) ? "sr-only" : "text-xs"}>{view === "remote" ? `Connect an SSH host to ${subject === "workspace" ? "work on" : subject === "setup" ? "import your setup to" : subject === "sandbox" ? "run sandboxes on" : "build templates on"}.` : subject === "workspace" ? "Choose a working location." : `Pick a location for this ${subject}.`}</DialogDescription>
     </DialogHeader>
 
     <div className="-m-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
       <AnimatePresence mode="wait" initial={false}>
         {view === "choose" ? <motion.div key="choose" {...slide} className="grid gap-3">
-          <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-3" : ""}`}>
-          <Place index={0} scene="local" live={local?.connected} title="This computer" caption={localCaption} tone={local?.connected ? "live" : "idle"}
+          <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-3" : cloud && !cloudOnly ? "sm:grid-cols-2" : ""}`}>
+          {!cloudOnly && <Place index={0} scene="local" live={local?.connected} title="This computer" caption={localCaption} tone={local?.connected ? "live" : "idle"}
             disabled={local ? !local.connected : !locals?.length || localBusy}
             onClick={() => local ? onPick(local.id ?? local.context) : chooseRegisteredLocal()}
-            trailing={localBusy && <Loader2 className="size-4 animate-spin text-muted-foreground" />} />
+            trailing={localBusy && <Loader2 className="size-4 animate-spin text-muted-foreground" />} />}
           {allowRemote && <Place index={1} scene="remote" live={remote?.connected} title="Remote machine"
             caption={remote?.connected ? `Connected · ${hostOf(remote)}` : remote ? `${hostOf(remote)} · Disconnected` : "Your server, over SSH"}
             tone={remote?.connected ? "live" : remote ? "warn" : "idle"} onClick={() => setView("remote")} />}
-          {allowRemote && <Place index={2} scene="cloud" title="Cloud" caption="Coming soon" disabled trailing={<span aria-hidden="true" />} />}
+          {(allowRemote || cloud) && <Place index={2} scene="cloud" title="OpenRod Cloud" caption={cloudCaption} live={cloud?.connected} tone={cloud?.connected ? "live" : cloudBusy ? "warn" : "idle"}
+            disabled={cloudBusy || (!cloud?.connected && (!compute?.available || compute?.checking))} onClick={chooseCloud}
+            trailing={cloudBusy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : undefined} />}
           </div>
+          {cloudBusy && <div role="status" className="flex items-center justify-between gap-3 text-xs text-muted-foreground"><span>{cloudStage === "Signing in…" ? "Complete sign-in in the new window." : cloudPending ? "Loading your cloud locations…" : "Preparing OpenRod Cloud. The first start can take a few minutes."}</span><Button variant="ghost" size="sm" onClick={cancelCloud}>Cancel</Button></div>}
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <div className="mt-3 flex justify-end">
-            <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+            <Button type="button" variant="ghost" onClick={() => { cancelCloud(); onCancel() }}>Cancel</Button>
           </div>
         </motion.div> : <motion.div key="remote" {...slide}>
           {connecting ? <div role="status" className="grid place-items-center gap-3 py-16 text-xs text-muted-foreground">

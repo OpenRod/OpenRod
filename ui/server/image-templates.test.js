@@ -742,7 +742,8 @@ for (const cancellation of [false,true]) test(`Docker ${cancellation ? 'cancella
   const script = `const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});console.log(child.pid);setInterval(()=>{},1000)`
   let child, deadline
   try {
-    const result = runDocker(['build'], {job,timeout:250,spawnProcess:(_command,_args,options)=>{
+    // Cancellation must win on its own, never by racing a slow helper start against the timeout.
+    const result = runDocker(['build'], {job,timeout:cancellation ? 10_000 : 250,spawnProcess:(_command,_args,options)=>{
       child = spawn(process.execPath,['-e',script],options)
       if(cancellation) child.stdout.once('data',()=>{job.cancelled=true;job.child.kill('SIGKILL')})
       return child

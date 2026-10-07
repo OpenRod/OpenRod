@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Ellipsis, Plus, RefreshCw, Server, SquarePlus } from "lucide-react"
+import { Cloud, Ellipsis, FolderInput, Plus, RefreshCw, Server, SquarePlus } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -14,9 +14,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AddSshDialog } from "@/components/add-ssh-dialog"
-import { ServerArt } from "@/components/location-step"
+import { CloudArt, ServerArt } from "@/components/location-step"
 import { RemoteConnect } from "@/components/remote-connect"
 import { api } from "@/lib/api"
+import { useCompute } from "@/lib/compute"
 import { useInventory } from "@/lib/inventory"
 import { cn } from "@/lib/utils"
 
@@ -69,6 +70,22 @@ function HostRow({ row, count, working, onToggle, onCreate, menu }) {
 // turning another on replaces the current one.
 export function ConnectionsView({ onCreateSandbox }) {
   const inventory = useInventory()
+  const compute = useCompute()
+  const [cloudWorking, setCloudWorking] = React.useState(false)
+  const [cloudError, setCloudError] = React.useState("")
+  const [offerImport, setOfferImport] = React.useState(false)
+  const cloudPreparation = React.useRef(null)
+  React.useEffect(() => () => cloudPreparation.current?.abort(), [])
+  const cloudLocation = inventory.locations.find(location => location.cloud || location.target === "cloud")
+  const cloudReady = Boolean(cloudLocation?.connected)
+  async function connectCloud() {
+    const controller = new AbortController()
+    cloudPreparation.current = controller
+    setCloudWorking(true); setCloudError("")
+    try { await compute.prepare({ signal: controller.signal }); controller.signal.throwIfAborted(); setOfferImport(true); inventory.refresh() }
+    catch (reason) { if (reason.name !== "AbortError") setCloudError(reason.message) }
+    finally { setCloudWorking(false); cloudPreparation.current = null }
+  }
   const [overview, setOverview] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [working, setWorking] = React.useState(null)
@@ -144,6 +161,36 @@ export function ConnectionsView({ onCreateSandbox }) {
   return <>
     <div className="h-[calc(100svh-3.5rem)] overflow-y-auto">
       <div className="grid gap-8 px-4 py-5 sm:px-6">
+        <section aria-label="OpenRod Cloud" className="grid gap-4">
+          <div><h2 className="text-sm font-medium">OpenRod Cloud</h2><p className="mt-0.5 text-xs text-muted-foreground">Manage your cloud connection.</p></div>
+          <BlurFade duration={0.2} offset={4} blur="3px">
+            <div className={list}>
+              <div className="flex flex-wrap items-center gap-3.5 px-4 py-3 sm:px-5">
+                <span aria-hidden="true" className="flex w-8 shrink-0 justify-center [&_svg]:h-7"><CloudArt /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium">{compute?.user?.email || 'OpenRod Cloud'}</p>
+                  <p role="status" className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {cloudReady && <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-500" />}
+                    {compute?.checking ? 'Checking connection…' : cloudWorking ? compute?.connecting ? 'Signing in…' : 'Starting cloud machine…' : cloudReady ? `Connected · ${plural(inventory.sandboxes.filter(item => item.location?.cloud).length, 'sandbox', 'sandboxes')}` : compute?.connected ? 'Signed in · machine not ready' : compute?.available ? 'Not connected' : (compute?.status?.reason || 'Coming soon')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {cloudWorking ? <Button variant="ghost" size="sm" onClick={() => { cloudPreparation.current?.abort(); compute.cancelConnect() }}><Spinner />Cancel</Button> : <>
+                    {cloudReady && !offerImport ? <Button variant="outline" size="sm" onClick={() => window.dispatchEvent(new CustomEvent('openrod-import', { detail: { destination: cloudLocation } }))}><FolderInput className="size-3.5" />Import data</Button>
+                      : !cloudReady && <Button variant="outline" size="sm" disabled={!compute?.available || compute?.checking} onClick={connectCloud}><Cloud className="size-3.5" />{compute?.connected ? 'Start cloud machine' : 'Connect'}</Button>}
+                    {compute?.connected && <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="OpenRod Cloud actions" />}><Ellipsis className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => compute.refresh().then(() => inventory.refresh()).catch(reason => setCloudError(reason.message))}>Refresh connection</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => compute.disconnect().catch(reason => setCloudError(reason.message))}>Disconnect account</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
+                  </>}
+                </div>
+              </div>
+              {offerImport && cloudReady && <div className="flex flex-wrap items-center gap-3 border-t px-4 py-3 sm:px-5">
+                <p className="min-w-0 flex-1 text-xs text-muted-foreground">Bring your local setup?</p>
+                <Button variant="ghost" size="sm" onClick={() => setOfferImport(false)}>Not now</Button>
+                <Button size="sm" onClick={() => { setOfferImport(false); window.dispatchEvent(new CustomEvent('openrod-import', { detail: { destination: cloudLocation } })) }}><FolderInput className="size-3.5" />Import data</Button>
+              </div>}
+              {(cloudError || compute?.error) && <p role="alert" className="border-t px-4 py-2 text-xs text-destructive sm:px-5">{cloudError || compute.error}</p>}
+            </div>
+          </BlurFade>
+        </section>
         {error && <div role="alert" className="flex items-center gap-3 text-xs text-red-600"><span>{error}</span><Button variant="outline" size="sm" onClick={() => load()}>Retry</Button></div>}
         {!overview && !error && <p role="status" className="py-20 text-center text-sm text-muted-foreground">Reading connections…</p>}
         {overview && <>
@@ -154,6 +201,7 @@ export function ConnectionsView({ onCreateSandbox }) {
                 <p className="mt-0.5 text-xs text-muted-foreground">Added in OpenRod. One machine is connected at a time.</p>
               </div>
               <Button variant="ghost" size="icon-sm" aria-label="Refresh connections" onClick={() => load()} className="text-muted-foreground"><RefreshCw /></Button>
+              {overview.forgottenHosts?.length > 0 && <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" />}>Restore</DropdownMenuTrigger><DropdownMenuContent align="end">{overview.forgottenHosts.map(host => <DropdownMenuItem key={host} onClick={() => act(host, () => api.restoreSshHost(host), "Couldn’t restore it")}>Restore {host}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
               <Button size="sm" onClick={() => setAdding(true)} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />Add</Button>
             </div>
             {mine.length > 0
@@ -198,7 +246,7 @@ export function ConnectionsView({ onCreateSandbox }) {
     <Dialog open={Boolean(wizard)} onOpenChange={(open) => { if (!open) setWizard(null) }}>
       <DialogContent className="sm:max-w-3xl" aria-describedby={undefined}>
         <DialogHeader><DialogTitle>{wizard?.replacing ? "Switch host" : "Connect a remote machine"}</DialogTitle></DialogHeader>
-        {wizard && <RemoteConnect initialHost={wizard.host} connectedHost={wizard.replacing ?? null} onUseConnected={() => setWizard(null)}
+        {wizard && <RemoteConnect key={wizard.host} initialHost={wizard.host} connectedHost={wizard.replacing ?? null} onUseConnected={() => setWizard(null)}
           onConnected={(job) => { setWizard(null); toast.success(`Connected to ${job.host}`); load(); inventory.refresh() }} onBack={() => setWizard(null)} />}
       </DialogContent>
     </Dialog>

@@ -285,5 +285,6 @@ export async function discover({ sources, home = os.homedir() }) {
 
 export function publicItem(item) {
   const { root, config, files, _sourceCredentials, ...rest } = item
-  return { ...rest, sourceCredentialFields: item.sourceCredentialFields || Object.keys(_sourceCredentials || {}), ...(config ? { configuration: config.url ? { endpoint: config.url } : { command: config.command, args: config.args } } : {}), ...(files ? { files: files.map(({ path, content, encoding, archiveEntries }) => ({ path, bytes: Buffer.byteLength(content, encoding === 'base64' ? 'base64' : 'utf8'), ...(encoding ? { encoding, archiveEntries } : {}) })) } : {}) }
+  const contentDigest = hash(JSON.stringify(canonical({kind:item.kind, name:item.name, config, files, disabled:Boolean(item.disabled), credentialRef:item.credentialRef, credentialBindings:item.credentialBindings, requirements:item.requirements, auth:item.auth})))
+  return { ...rest, contentDigest, sourceCredentialFields: item.sourceCredentialFields || Object.keys(_sourceCredentials || {}), ...(config ? { configuration: config.url ? { endpoint: config.url } : { command: config.command, args: config.args } } : {}), ...(files ? { files: files.map(({ path, content, encoding, archiveEntries }) => ({ path, bytes: Buffer.byteLength(content, encoding === 'base64' ? 'base64' : 'utf8'), ...(encoding ? { encoding, archiveEntries } : {}) })) } : {}) }
 }

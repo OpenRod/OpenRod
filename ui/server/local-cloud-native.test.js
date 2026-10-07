@@ -17,13 +17,19 @@ test('managed SSH config pins cloud host key and preserves unrelated SSH config'
   try {
     await fs.mkdir(path.join(home, '.ssh')); const existing = 'Host my-work\n  HostName work.example\n'
     await fs.writeFile(path.join(home, '.ssh/config'), existing)
-    const native = module.createLocalCloudNative({ home, node: '/usr/bin/node', helper: '/openrod/cloud-ssh-proxy.cjs', env: { PATH: '/usr/bin:/bin' } })
+    const native = module.createLocalCloudNative({ home, token: 'a'.repeat(43), node: '/usr/bin/node', helper: '/openrod/cloud-ssh-proxy.cjs', env: { PATH: '/usr/bin:/bin' } })
     const response = res(); assert.equal(await native(req('POST'), response, '/api/os/sandboxes/demo/ssh-config', services()), true)
     const { config, alias, command } = response.value
     assert.match(alias, /^openrod-cloud-[0-9a-f]{16}-demo$/)
     assert.match(config, /StrictHostKeyChecking yes/)
     assert.match(config, /UserKnownHostsFile/)
     assert.match(config, /cloud-ssh-proxy.cjs/)
+    assert.match(config, /--auth-file/)
+    assert.ok(!config.includes('a'.repeat(43)))
+    const authFile = (await fs.readdir(path.join(home, '.config/openrod'))).find(name => name.startsWith('cloud_ssh_auth_'))
+    const authPath = path.join(home, '.config/openrod', authFile)
+    assert.equal((await fs.stat(authPath)).mode & 0o777, 0o600)
+    assert.deepEqual(JSON.parse(await fs.readFile(authPath, 'utf8')), { origin: 'http://localhost:4311', cookie: 'openrod_token_4311=' + 'a'.repeat(43) })
     assert.match(command, /ssh.*-F/)
     assert.doesNotMatch(config, /secret-grant|StrictHostKeyChecking no|Bearer/)
     const installed = await fs.readFile(path.join(home, '.ssh/config'), 'utf8'); assert.ok(installed.endsWith(existing))

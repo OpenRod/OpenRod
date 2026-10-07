@@ -28,7 +28,7 @@ npm ci
 npm run dev
 ```
 
-Node.js 22.13+ is required for the SQLite-backed activity archive. See the [Quick start](README.md#-quick-start) requirements: OpenShell CLI/gateway 0.1.2, OpenSSH and OpenSSL locally, a running local Docker for Quick setup and template builds, and a trusted native Linux/rootful Docker host for remote compute. Use disposable gateway state and an approved host for mutation checks.
+Node.js 22.13+ is required for the SQLite-backed activity archive. Development also needs OpenShell CLI/gateway 0.1.2 installed in advance, since `npm run dev` doesn't offer to install it (see the [Quick start](README.md#-quick-start)), OpenSSH and OpenSSL locally, a running local Docker for Quick setup and template builds, and a trusted native Linux/rootful Docker host for remote compute. Use disposable gateway state and an approved host for mutation checks.
 
 First-run development is intentionally unconfigured. A CLI active-gateway suggestion alone must not activate collection. **New sandbox → Where should it run?** selects the local gateway (**This computer**) or probes an SSH alias (**Remote machine**); missing runtime images are downloaded on the host or uploaded as a package. Never reconfigure the original local gateway, install Docker with automatic privilege escalation, or accept TLS keys through browser forms.
 

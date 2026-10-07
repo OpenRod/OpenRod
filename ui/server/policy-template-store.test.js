@@ -68,3 +68,13 @@ test('legacy custom files can be edited and deleted without reappearing', async 
   assert.equal(await reopen().find('existing'), null)
   assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'existing.json'), 'utf8')).name, 'Existing')
 })
+
+test('exclusive imported policy saves reject existing and concurrently claimed identities', async t => {
+  const { store } = await fixture(t)
+  await assert.rejects(store.save({ ...BUILTIN_TEMPLATES[0], isNew: true }), error => error.status === 409)
+  const policy = { ...BUILTIN_TEMPLATES[0], id: 'imported-base', name: 'Imported base', isNew: true }
+  const results = await Promise.allSettled([store.save(policy), store.save({ ...policy, name: 'Concurrent overwrite' })])
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+  assert.equal(results.find(result => result.status === 'rejected').reason.status, 409)
+  assert.equal((await store.find('imported-base')).name, 'Imported base')
+})

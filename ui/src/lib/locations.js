@@ -8,7 +8,7 @@ export const resourceKey = (record) => JSON.stringify([[record.location?.target 
 
 const connectionAttempts = new WeakMap()
 
-// Selecting a local gateway is a job; reload only after it has switched the context.
+// Selecting a local gateway is a job; continue only after the context switches.
 export async function connectLocalGateway(api, name, interval = 1000) {
   const previous = connectionAttempts.get(api)
   const tracked = analytics.startFlow('gateway_connection', { location_type: 'local' }, previous?.outcome === 'failed' ? previous : null)

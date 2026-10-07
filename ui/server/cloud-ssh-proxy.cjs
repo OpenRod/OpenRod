@@ -2,6 +2,7 @@
 'use strict'
 // OpenSSH invokes this helper locally. Grants remain inside OpenRod's local server;
 // this process obtains only a single-use, account-scoped SSH stream ticket.
+const fs = require('node:fs/promises')
 const { WebSocket, createWebSocketStream } = require('ws')
 
 function validate(options) {
@@ -18,24 +19,41 @@ function parseProxyArgs(args) {
   const options = {}
   for (let i = 0; i < args.length; i += 2) {
     const flag = args[i]
-    if (!['--origin', '--sandbox', '--owner', '--context'].includes(flag) || !args[i + 1] || Object.hasOwn(options, flag.slice(2))) throw Error('Invalid OpenRod SSH proxy arguments')
+    if (!['--origin', '--sandbox', '--owner', '--context', '--auth-file'].includes(flag) || !args[i + 1] || Object.hasOwn(options, flag.slice(2))) throw Error('Invalid OpenRod SSH proxy arguments')
     options[flag.slice(2)] = args[i + 1]
   }
   return validate(options)
 }
 async function runProxy(options, { input = process.stdin, output = process.stdout, fetchRequest = fetch, signal } = {}) {
   validate(options)
+  let cookie
+  if (options['auth-file']) {
+    try {
+      const file = await fs.open(options['auth-file'], require('node:fs').constants.O_RDONLY | require('node:fs').constants.O_NOFOLLOW)
+      try {
+        const stat = await file.stat()
+        if (!stat.isFile() || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid()) || stat.size > 4096) throw Error('Invalid credential file')
+        const auth = JSON.parse(await file.readFile('utf8'))
+        if (auth.origin !== options.origin || typeof auth.cookie !== 'string' || !/^openrod_token_[0-9]+=[A-Za-z0-9_-]{32,256}$/.test(auth.cookie)) throw Error('Invalid credential')
+        cookie = auth.cookie
+      } finally { await file.close() }
+    } catch { throw Error('Local OpenRod SSH credentials are unavailable. Open the sandbox from OpenRod again.') }
+  }
   const response = await fetchRequest(`${options.origin}/api/remote/os/sandboxes/${options.sandbox}/ssh-ticket`, {
-    method: 'POST', headers: { 'x-openrod-local-owner': options.owner, Origin: options.origin, 'content-type': 'application/json', 'x-openshell-console': '1' },
+    method: 'POST', headers: { ...(cookie ? { Cookie: cookie } : {}), 'x-openrod-local-owner': options.owner, Origin: options.origin, 'content-type': 'application/json', 'x-openshell-console': '1' },
     body: JSON.stringify({ owner: options.owner, ...(options.context ? { context: options.context } : {}) }), redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
   })
-  if (!response.ok) throw Error(`Local OpenRod SSH authorization failed (${response.status}). Reconnect to OpenRod Cloud.`)
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    if (error.code === 'CONSOLE_TOKEN_REQUIRED') throw Error('Local OpenRod console authorization expired. Open the sandbox from OpenRod again.')
+    throw Error(`Local OpenRod SSH authorization failed (${response.status}). Reconnect to OpenRod Cloud.`)
+  }
   const body = await response.json()
   if (typeof body.ticket !== 'string' || !/^[A-Za-z0-9-]{1,100}$/.test(body.ticket)) throw Error('Invalid SSH ticket from local OpenRod')
   const url = new URL('/api/remote/os/ssh', options.origin); url.protocol = 'ws:'; url.searchParams.set('ticket', body.ticket); url.searchParams.set('owner', options.owner)
   if (options.context) url.searchParams.set('context', options.context)
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, { origin: options.origin, handshakeTimeout: 30000, maxPayload: 1024 * 1024 })
+    const ws = new WebSocket(url, { origin: options.origin, headers: cookie ? { Cookie: cookie } : {}, handshakeTimeout: 30000, maxPayload: 1024 * 1024 })
     let stream, settled = false
     const abort = () => { ws.terminate(); finish(Error('OpenRod SSH connection canceled')) }
     const finish = error => {

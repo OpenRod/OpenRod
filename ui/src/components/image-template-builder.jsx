@@ -44,7 +44,7 @@ export function ImageTemplateBuilder(props) {
   return <ScopedImageTemplateBuilder key={location?.id ?? location?.context ?? 'default'} {...props} />
 }
 
-function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted, onChangeLocation }) {
+function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted, onChangeLocation, sourceControl }) {
   const api = useApi()
   const location = useLocation()
   const reduceMotion = useReducedMotion()
@@ -163,6 +163,7 @@ function ScopedImageTemplateBuilder({ initial, draftKey, onClose, onStarted, onC
       <DialogDescription className="text-xs">
         {build ? 'Built on the console’s Docker engine. For an SSH host, the image is built for its architecture and transferred before the template is saved.' : 'Boots an image you already have, as is.'}
       </DialogDescription>
+      <fieldset disabled={busy || JSON.stringify(recipe)!==JSON.stringify(newRecipe(initial?.recipe))}>{sourceControl}</fieldset>
       {location?.connected === false && <p role="alert" className="text-xs text-destructive">This location is disconnected. Choose a connected location to save a template.</p>}
     </DialogHeader>
 

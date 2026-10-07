@@ -7,6 +7,8 @@ import { useInventory } from "@/lib/inventory"
 import { LocationProvider, useApi, useLocation } from "@/lib/location-context"
 import { locationLabel, resourceKey } from "@/lib/locations"
 import { LocationBadge } from "@/components/location-badge"
+import { RemoteConnect } from "@/components/remote-connect"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Notice } from "@/components/notice"
 import { PlacementBadge, PlacementPill } from "@/components/placement-badge"
 import { PLACEMENTS, placementOf } from "@/lib/placement"
@@ -57,11 +59,12 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const live = useDemoFleet(useLive())
   const inventory = useInventory()
   const { locations } = inventory
+  const [reconnectHost, setReconnectHost] = React.useState(null)
   const inheritedLocation = useLocation()
   const [selectedContext, setSelectedContext] = React.useState(null)
   const defaultContext = locationKey(inheritedLocation) ?? selectedContext
-  const locationFilter = locationKey(inheritedLocation) ?? ""
   const [creationLocation, setCreationLocation] = React.useState(null)
+  const [confirmedCreationLocation, setConfirmedCreationLocation] = React.useState(false)
   const [handoff, setHandoff] = React.useState(null)
   const canConnect = allowRemote
   React.useEffect(() => {
@@ -70,8 +73,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     return () => { alive = false }
   }, [api])
   const defaultLocation = locations.find((location) => locationKey(location) === defaultContext)
-  const availableLocation = locations.find((location) => locationKey(location) === locationFilter && location.connected)
-    ?? (defaultLocation?.connected ? defaultLocation : null)
+  const availableLocation = (defaultLocation?.connected ? defaultLocation : null)
     ?? locations.find((location) => location.target === api.target && !location.remote && location.connected)
     ?? locations.find((location) => location.target === api.target && location.connected)
   const chosenLocation = locations.find((location) => locationKey(location) === locationKey(creationLocation)) ?? creationLocation ?? availableLocation
@@ -98,7 +100,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
   const [deleteErrors, setDeleteErrors] = React.useState([])
   const [creating, setCreating] = React.useState(Boolean(compute?.createRequested))
   React.useEffect(() => {
-    if (compute?.createRequested) { setCreating(true); compute.requestCreate(false) }
+    if (compute?.createRequested) { if (compute.createRequested.location) { setCreationLocation(compute.createRequested.location); setConfirmedCreationLocation(true) }; setCreating(true); compute.requestCreate(false) }
   }, [compute?.createRequested])
   const [now, setNow] = React.useState(Date.now)
   const search = React.useRef(null)
@@ -154,19 +156,19 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     inventory.refresh()
   }, [jobs])
   const all = React.useMemo(() => summarize(sandboxes), [sandboxes])
-  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox), type: PLACEMENTS[placementOf(sandbox.location)].label, image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, locationLabel(sandbox.location), PLACEMENTS[placementOf(sandbox.location)].label, ownerOf(sandbox), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes])
+  const indexed = React.useMemo(() => sandboxes.map((sandbox) => ({ sandbox, owner: ownerOf(sandbox, compute?.connected ? compute.user : null), type: PLACEMENTS[placementOf(sandbox.location)].label, image: imageName(sandbox.image, sandbox.imageTemplateName), search: [sandbox.name, sandbox.id, sandbox.image, sandbox.imageTemplateName, locationLabel(sandbox.location), PLACEMENTS[placementOf(sandbox.location)].label, ownerOf(sandbox, compute?.connected ? compute.user : null), ...(sandbox.providers ?? [])].join(" ").toLowerCase() })), [sandboxes, compute?.connected, compute?.user])
   // Every value a filterable column holds, with how many sandboxes have it.
   const columnValues = React.useMemo(() => Object.fromEntries(Object.entries(filterValue).map(([column, of]) => {
     const counts = new Map()
     for (const row of indexed) counts.set(of(row), (counts.get(of(row)) ?? 0) + 1)
+    for (const value of filters[column]) if (!counts.has(value)) counts.set(value, 0)
     const values = [...counts.keys()].sort(column === "phase" ? (a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b) : collator.compare)
     return [column, values.map((value) => ({ value, label: column === "phase" ? STATUS[value].label : value, count: counts.get(value) }))]
-  })), [indexed])
+  })), [indexed, filters])
   const ordered = React.useMemo(() => {
     const q = deferredQuery.trim().toLowerCase()
     const since = filters.createdAt ? now - Number(filters.createdAt) * 86400000 : null
-    const matched = indexed.filter((row) => (!locationFilter || locationKey(row.sandbox.location) === locationFilter)
-      && Object.entries(filterValue).every(([column, of]) => !filters[column].length || filters[column].includes(of(row)))
+    const matched = indexed.filter((row) => Object.entries(filterValue).every(([column, of]) => !filters[column].length || filters[column].includes(of(row)))
       && (since === null || Date.parse(row.sandbox.createdAt) >= since)
       && (!q || row.search.includes(q)))
     const value = (row) => sort.key === "owner" || sort.key === "image" || sort.key === "type" ? row[sort.key] : sort.key === "startedAt" ? row.sandbox.phase === "ready" ? row.sandbox.startedAt : null : row.sandbox[sort.key]
@@ -177,7 +179,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
       const delta = collator.compare(av ?? "", bv ?? "")
       return (sort.direction === "asc" ? delta : -delta) || collator.compare(a.sandbox.name, b.sandbox.name)
     })
-  }, [indexed, filters, locationFilter, deferredQuery, sort, now])
+  }, [indexed, filters, deferredQuery, sort, now])
   // Keep selection tied to identity across sorting, filters, and live updates.
   React.useEffect(() => {
     const available = new Set(sandboxes.filter((sandbox) => sandbox.location?.connected && !live.demo).map(keyOf))
@@ -242,7 +244,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     }
   }
   const virtual = useVirtualRows({ count: ordered.length, rowHeight: ROW_HEIGHT })
-  React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, filters, locationFilter, sort])
+  React.useEffect(() => { virtual.scrollToTop() }, [deferredQuery, filters, sort])
   const points = React.useMemo(() => bucketBoxes(sandboxes, 30, now), [sandboxes, now])
   const clearFilters = () => { setQuery(""); setFilters(NO_FILTERS) }
   const filtering = query || Object.values(filters).some((value) => value.length)
@@ -259,7 +261,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
     overview: locationKey(openedLocation) === defaultContext ? live.overview : { gateway: { name: openedLocation?.gateway, workspace: openedLocation?.workspace, remote: openedLocation?.remote } },
     refresh: inventory.refresh,
   } : null
-  const beginCreation = () => { setCreationLocation(availableLocation ?? null); setCreating(true) }
+  const beginCreation = () => { setConfirmedCreationLocation(false); setCreationLocation(availableLocation ?? null); setCreating(true) }
   React.useEffect(() => { if (createRequest) { beginCreation(); onCreateRequestHandled?.() } }, [createRequest])
 
   return (
@@ -267,7 +269,7 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
       <div className="flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 px-4 pt-4 pb-3 sm:px-6">
           <div className="flex flex-wrap gap-1" role="group" aria-label="Sandbox status">
-            {FILTERS.filter((key) => ["all", "running", "sleeping"].includes(key) || all.status[key] > 0).map((key) => <button key={key} aria-pressed={key === "all" ? !filters.phase.length : filters.phase.length === 1 && filters.phase[0] === key} onClick={() => setFilter("phase", key === "all" ? [] : [key])}
+            {FILTERS.filter((key) => ["all", "running", "sleeping"].includes(key) || all.status[key] > 0 || filters.phase.includes(key)).map((key) => <button key={key} aria-pressed={key === "all" ? !filters.phase.length : filters.phase.length === 1 && filters.phase[0] === key} onClick={() => setFilter("phase", key === "all" ? [] : [key])}
               className={`rounded-md px-3 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${(key === "all" ? !filters.phase.length : filters.phase.length === 1 && filters.phase[0] === key) ? "bg-accent/70" : "hover:bg-muted/60"}`}>
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{key !== "all" && <span aria-hidden="true" className={`size-1.5 rounded-full ${STATUS[key].bar}`} />}{key === "all" ? "Sandboxes" : STATUS[key].label}</span>
               <span className="mt-1 block font-mono text-lg leading-none tabular-nums"><NumberTicker value={key === "all" ? all.total : all.status[key]} /></span>
@@ -279,11 +281,11 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
           {Object.entries(all.status).map(([key, value]) => value > 0 && <span key={key} className={STATUS[key].strip} style={{ width: `${value / all.total * 100}%` }} />)}
         </div>
         {inventory.error && sandboxes.length > 0 && <Notice id="sandboxes:inventory-error" tone="warning" title="Inventory refresh failed" actions={<Button size="xs" variant="outline" onClick={inventory.refresh}>Retry</Button>}>Showing the last reading. {inventory.error}</Notice>}
-        {locations.filter((location) => !location.connected).map((location) => <LocationReconnect key={locationKey(location)} location={location} onReconnected={inventory.refresh} />)}
         {live.demo && <p className="border-b border-border px-6 py-2 text-xs text-amber-700">Preview · synthetic sandbox data</p>}
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
           <SearchInput ref={search} value={query} onValueChange={setQuery} placeholder="Search name, owner, image…" aria-label="Search sandboxes" className="mr-auto w-full sm:w-64" />
           {filtering && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="size-3" />Clear</Button>}
+          {locations.filter(location => location.remote && !location.connected && location.host).map(location => <Button key={locationKey(location)} variant="ghost" size="sm" className="h-7 gap-1.5 rounded-full px-2 text-[11px] text-muted-foreground" title={`Reconnect to ${location.host}`} onClick={() => setReconnectHost(location.host)}><span aria-hidden="true" className="size-1.5 rounded-full bg-stone-400" />{location.host} · Offline</Button>)}
           <Button variant="ghost" size="icon-sm" aria-label="Refresh sandboxes" onClick={inventory.refresh}><RefreshCw className="size-3.5" /></Button>
           <Button size="sm" disabled={!availableLocation && !canConnect} onClick={beginCreation} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90"><Plus className="size-3.5" />New sandbox</Button>
         </div>
@@ -334,7 +336,8 @@ export function SandboxesView({ onNavigate, allowRemote = false, createRequest =
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <LocationProvider location={chosenLocation}><CreateSandboxDialog open={creating} onOpenChange={setCreating} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} onRefreshLocations={inventory.refresh} allowRemote={canConnect} /></LocationProvider>
+      <Dialog open={Boolean(reconnectHost)} onOpenChange={open => { if (!open) setReconnectHost(null) }}><DialogContent className="sm:max-w-3xl" aria-describedby={undefined}><DialogHeader><DialogTitle>Connect to {reconnectHost}</DialogTitle></DialogHeader>{reconnectHost && <RemoteConnect key={reconnectHost} initialHost={reconnectHost} onConnected={() => { setReconnectHost(null); inventory.refresh() }} onBack={() => setReconnectHost(null)} />}</DialogContent></Dialog>
+      <LocationProvider location={chosenLocation}><CreateSandboxDialog initialLocationConfirmed={confirmedCreationLocation} open={creating} onOpenChange={setCreating} locations={locations} location={chosenLocation} onLocationChange={setCreationLocation} onRefreshLocations={inventory.refresh} allowRemote={canConnect} /></LocationProvider>
     </>
   )
 }
@@ -355,34 +358,6 @@ const InventoryRow = React.memo(function InventoryRow({ row, now, index, onOpen,
     <td className={cell}><span className="block truncate tabular-nums" title={sandbox.createdAt || "Not reported"}>{elapsedSince(sandbox.createdAt, now)}{sandbox.createdAt ? " ago" : ""}</span></td>
   </tr>
 })
-
-// Brings a disconnected SSH location back with the connect call the dialog
-// uses. A host that needs Docker or runtime images is left to the dialog.
-function LocationReconnect({ location, onReconnected }) {
-  const api = useApi()
-  const [state, setState] = React.useState({ busy: false, error: null })
-  const mounted = React.useRef(true)
-  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  async function reconnect() {
-    setState({ busy: true, error: null })
-    try {
-      let job = await api.connect({ host: location.host })
-      while (job.status === "working") {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        job = await api.connectionJob(job.id)
-      }
-      if (job.status !== "ready") throw new Error(job.error || `${location.host} needs setup. Use New sandbox → Remote to finish connecting.`)
-      onReconnected()
-      if (mounted.current) setState({ busy: false, error: null })
-    } catch (reason) {
-      if (mounted.current) setState({ busy: false, error: reason.message })
-    }
-  }
-  return <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">
-    <span>{locationLabel(location)} disconnected. Its last inventory is retained; reconnect to use these resources.{location.error ? ` ${location.error}` : ""}{state.error ? ` ${state.error}` : ""}</span>
-    {location.host && <Button size="xs" variant="outline" disabled={state.busy} onClick={reconnect}><RefreshCw className={`size-3 ${state.busy ? "animate-spin motion-reduce:animate-none" : ""}`} />{state.busy ? "Reconnecting…" : "Reconnect"}</Button>}
-  </div>
-}
 
 function SelectionCheckbox({ label, checked, mixed = false, disabled, onChange }) {
   const ref = React.useRef(null)

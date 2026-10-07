@@ -91,6 +91,23 @@ export async function localEngine({ execute = run } = {}) {
 async function deploymentEngine(target) {
   return target.remote ? remoteImageEngine(target, { execute: run }) : localEngine()
 }
+// Cache fast path only when the gateway's actual Docker engine is established.
+// Inspect the pinned image; never run a container or pull an image for this probe.
+export async function preparationImageRuntime(target, reference, { execute = run, guard = gatewayDocker } = {}) {
+  if (!target) return null
+  let engine
+  if (target.remote) engine = await remoteImageEngine(target, { execute })
+  else {
+    const status = await guard?.status({ fresh: true })
+    if (status?.state !== 'ok' || status.gateway !== target.name || !status.driver?.engineId || status.driver.engineId !== status.build?.engineId) return null
+    engine = await localEngine({ execute })
+    if (engine.engineId !== status.driver.engineId) return null
+  }
+  const info = await inspect(reference, engine, { execute })
+  const node = info.Config?.Env?.find(value => value.startsWith('NODE_VERSION='))?.slice('NODE_VERSION='.length)
+  if (!/^22\.\d+\.\d+$/.test(node ?? '') || !['amd64', 'arm64'].includes(info.Architecture)) return null
+  return { node, arch: info.Architecture === 'amd64' ? 'x64' : 'arm64', platform: 'linux', libc: 'glibc' }
+}
 async function inspect(reference, engine, { execute = run, job, architecture = engine.architecture } = {}) {
   const image = JSON.parse(await execute(['image', 'inspect', reference], { engine, job }))[0]
   if (image.Os !== 'linux') throw fail('Choose a Linux container image.')
