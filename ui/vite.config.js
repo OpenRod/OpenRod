@@ -4,6 +4,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { openshellApi } from "./server/api.js";
+import { DEFAULT_CLOUD_ORIGIN } from "./shared/cloud-origin.js";
 
 // The console talks to the gateway only through ./server, which holds the
 // operator's mTLS bundle. Bound to loopback: this surface is the gateway's
@@ -17,7 +18,7 @@ export default defineConfig(({ mode }) => {
   return {
   plugins: [react(), tailwindcss(), openshellApi()],
   define: {
-    __OPENROD_CLOUD_ORIGIN__: JSON.stringify(process.env.OPENROD_CLOUD_ORIGIN ?? ''),
+    __OPENROD_CLOUD_ORIGIN__: JSON.stringify(process.env.OPENROD_CLOUD_ORIGIN ?? DEFAULT_CLOUD_ORIGIN),
     // Only the publish workflow sets OPENROD_ANALYTICS_RELEASE=1, so source builds,
     // forks and previews never report to the production dashboard.
     __OPENROD_ANALYTICS__: JSON.stringify({ projectToken: env.OPENROD_POSTHOG_TOKEN ?? release.projectToken,

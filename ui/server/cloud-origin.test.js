@@ -11,8 +11,10 @@ import { tokenCookie } from './launch-token.js'
 import { releaseConfig } from './security.js'
 const TOKEN = 'test-launch-token-' + 'x'.repeat(32)
 
-test('cloud origin is unset by default and must be an HTTPS origin when configured', () => {
-  assert.equal(cloudOrigin({}), null)
+test('cloud defaults to the hosted console and supports overrides or explicit disabling', () => {
+  assert.equal(cloudOrigin({}), 'https://console.openrod.io')
+  assert.equal(cloudOrigin({ OPENROD_CLOUD_ORIGIN: '' }), null)
+  assert.equal(cloudOrigin({ OPENROD_CLOUD_ORIGIN: '   ' }), null)
   assert.equal(cloudOrigin({ OPENROD_CLOUD_ORIGIN: 'https://cloud.example.test' }), 'https://cloud.example.test')
   for (const value of ['http://cloud.example.test', 'https://cloud.example.test/path', 'https://user@cloud.example.test', 'nope']) assert.throws(() => cloudOrigin({ OPENROD_CLOUD_ORIGIN: value }), /OPENROD_CLOUD_ORIGIN/)
 })
@@ -28,14 +30,17 @@ test('cloud and worker startup fail closed without deployment configuration', as
   }
 })
 
-test('local console reports unconfigured status and refuses cloud operations', { timeout: 15000 }, async (t) => {
+for (const enabled of [true, false]) test(`local console ${enabled ? 'offers hosted cloud without contacting it before sign-in' : 'refuses cloud operations when explicitly disabled'}`, { timeout: 15000 }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'console-cloud-soon-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const moduleUrl = new URL('./api.js', import.meta.url).href
   const env = { ...process.env, XDG_CONFIG_HOME: path.join(root, 'config'), OPENSHELL_CONSOLE_DATA_DIR: path.join(root, 'state'), OPENSHELL_GATEWAY: '', OPENSHELL_WORKSPACE: '', OPENSHELL_CONSOLE_SWEEP: '', OPENROD_MODE: 'local' }
-  delete env.OPENROD_CLOUD_ORIGIN
+  if (enabled) delete env.OPENROD_CLOUD_ORIGIN
+  else env.OPENROD_CLOUD_ORIGIN = ''
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
     import { createServer } from 'node:http'
+    import https from 'node:https'
+    https.request = () => { throw new Error('Unexpected outbound cloud request before sign-in') }
     import { createOpenShellApi } from ${JSON.stringify(moduleUrl)}
     const server = createServer((request, response) => api.middleware(request, response, () => response.writeHead(404).end()))
     const api = createOpenShellApi({ httpServer: server, token: ${JSON.stringify(TOKEN)} })
@@ -67,8 +72,28 @@ test('local console reports unconfigured status and refuses cloud operations', {
   const status = await fetch(origin + '/api/local-cloud/status', { headers: { origin, cookie } })
   assert.equal(status.status, 200)
   const connection = await status.json()
-  assert.equal(connection.available, false)
+  assert.equal(connection.available, enabled)
   assert.equal(connection.connected, false)
+  if (enabled) {
+    assert.equal(connection.origin, 'https://console.openrod.io')
+    const anonymous = await fetch(origin + '/api/local-cloud/status')
+    assert.equal(anonymous.status, 401)
+    for (const [method, route] of [['GET', '/api/local-cloud/machine'], ['POST', '/api/local-cloud/machine'], ['GET', '/api/remote/os/sandboxes']]) {
+      const response = await fetch(origin + route, { method, headers, ...(method === 'POST' ? { body: '{}' } : {}) })
+      assert.equal(response.status, 401, route)
+    }
+    const start = await fetch(origin + '/api/local-cloud/start', { method: 'POST', headers, body: JSON.stringify({ origin }) })
+    assert.equal(start.status, 200)
+    const handoff = await start.json()
+    const cloudUrl = new URL(handoff.url)
+    assert.equal(cloudUrl.origin, connection.origin)
+    assert.equal(cloudUrl.searchParams.get('handoff'), '1')
+    const bound = JSON.parse(Buffer.from(cloudUrl.hash.slice('#local-connect='.length), 'base64url'))
+    assert.equal(bound.origin, origin)
+    assert.equal(bound.nonce, handoff.nonce)
+    assert.equal(bound.challenge, handoff.challenge)
+    return
+  }
   for (const [method, route, body] of requests) {
     const response = await fetch(origin + route, { method, headers: body ? headers : { origin, cookie }, body: body && JSON.stringify(body) })
     assert.equal(response.status, 409, route)
