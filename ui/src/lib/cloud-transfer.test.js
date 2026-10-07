@@ -3,9 +3,10 @@ import assert from 'node:assert/strict'
 import { cloudHandoffUrl, isCloudReadyMessage, CLOUD_ORIGIN as DEFAULT_ORIGIN } from './cloud-transfer.js'
 const CLOUD_ORIGIN = 'https://cloud.example.test'
 
-test('cloud stays unavailable without a configured origin', () => {
-  assert.equal(DEFAULT_ORIGIN, '')
-  assert.throws(() => cloudHandoffUrl('http://localhost:5173', 'nonce'), /coming soon/)
+test('cloud handoffs default to the hosted console and refuse an explicitly disabled origin', () => {
+  assert.equal(DEFAULT_ORIGIN, 'https://console.openrod.io')
+  assert.equal(new URL(cloudHandoffUrl('http://localhost:5173', 'nonce')).origin, DEFAULT_ORIGIN)
+  assert.throws(() => cloudHandoffUrl('http://localhost:5173', 'nonce', ''), /coming soon/)
 })
 
 test('handoff URL contains only local origin and fresh nonce', () => {

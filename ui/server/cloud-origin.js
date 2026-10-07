@@ -1,7 +1,9 @@
-// Cloud is unavailable unless OPENROD_CLOUD_ORIGIN names an HTTPS origin; local endpoints then refuse before contacting any cloud service.
+import { DEFAULT_CLOUD_ORIGIN } from '../shared/cloud-origin.js'
+
+// Local clients use the hosted console by default. An explicit empty override disables cloud.
 export const CLOUD_SOON = 'Cloud is coming soon.'
 export function cloudOrigin(env = process.env) {
-  const value = env.OPENROD_CLOUD_ORIGIN?.trim()
+  const value = (env.OPENROD_CLOUD_ORIGIN ?? DEFAULT_CLOUD_ORIGIN).trim()
   if (!value) return null
   let url
   try { url = new URL(value) } catch { throw Error('OPENROD_CLOUD_ORIGIN must be an HTTPS origin without a path') }
