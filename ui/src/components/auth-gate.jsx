@@ -55,7 +55,7 @@ export function AuthGate({ children }) {
       finally { if (alive) setLoading(false) }
     }
     load()
-    const expired = () => { analytics.stop(); setUser(null); setError('Your session expired. Sign in again.') }
+    const expired = () => { setUser(null); setError('Your session expired. Sign in again.') }
     const locked = () => { analytics.stop(); setLinkRequired(true) }
     window.addEventListener('openrod-session-expired', expired)
     window.addEventListener(LINK_REQUIRED, locked)

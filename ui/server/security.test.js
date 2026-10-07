@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cloudConfig, createSecurity, isLocalApiRequest, identityContext, assertCloudOperation } from './security.js'
+import { cloudConfig, createSecurity, isLocalApiRequest, identityContext, assertCloudOperation, telemetryAllowed } from './security.js'
 const env = { OPENROD_MODE: 'cloud', OPENROD_ORG_ID: 'acme', OPENROD_PUBLIC_ORIGIN: 'https://acme.openrod.example', GOOGLE_CLOUD_PROJECT: 'openrod-test', OPENROD_FIREBASE_API_KEY: 'public-key', OPENROD_FIREBASE_AUTH_DOMAIN: 'openrod-test.firebaseapp.com' }
 const request = (extra = {}) => ({ method: 'GET', url: '/api/os/overview', headers: { host: 'acme.openrod.example', cookie: '__Host-openrod_session=valid', origin: env.OPENROD_PUBLIC_ORIGIN }, socket: { remoteAddress: '127.0.0.1' }, ...extra })
 const account = { uid: 'user-1', email: 'user@example.com', emailVerified: true, providerData: [{providerId: 'google.com'}], customClaims: { openrod_org: 'acme', openrod_role: 'admin' } }
@@ -19,8 +19,12 @@ test('anonymous localhost use remains protected against remote and cross-site ca
 })
 
 test('local runtime telemetry override is exposed without enabling cloud capture', async t => {
-  const before = process.env.OPENROD_TELEMETRY
-  t.after(() => { if (before === undefined) delete process.env.OPENROD_TELEMETRY; else process.env.OPENROD_TELEMETRY = before })
+  const before = process.env.OPENROD_TELEMETRY, dnt = process.env.DO_NOT_TRACK
+  delete process.env.DO_NOT_TRACK
+  t.after(() => {
+    if (before === undefined) delete process.env.OPENROD_TELEMETRY; else process.env.OPENROD_TELEMETRY = before
+    if (dnt === undefined) delete process.env.DO_NOT_TRACK; else process.env.DO_NOT_TRACK = dnt
+  })
   const req = { method: 'GET', url: '/api/auth/config', headers: { host: '127.0.0.1:4600' }, socket: { remoteAddress: '127.0.0.1' } }
   for (const setting of ['0', 'false', 'FALSE', '1', '']) {
     process.env.OPENROD_TELEMETRY = setting
@@ -31,6 +35,11 @@ test('local runtime telemetry override is exposed without enabling cloud capture
   let cloud
   await createSecurity(cloudConfig(env), auth()).middleware(request({ url: '/api/auth/config' }), { writeHead: () => {}, end: body => { cloud = JSON.parse(body) } }, () => assert.fail('must return config'))
   assert.equal(cloud.telemetryEnabled, false)
+})
+test('telemetry turns off for common off values and DO_NOT_TRACK', () => {
+  for (const value of ['0', 'false', 'off', 'no', ' 0 ', 'OFF']) assert.equal(telemetryAllowed({ OPENROD_TELEMETRY: value }), false)
+  for (const value of ['1', 'true', 'yes', ' 1']) assert.equal(telemetryAllowed({ DO_NOT_TRACK: value }), false)
+  for (const env of [{}, { OPENROD_TELEMETRY: '1' }, { DO_NOT_TRACK: '0' }, { OPENROD_TELEMETRY: 'on', DO_NOT_TRACK: '' }]) assert.equal(telemetryAllowed(env), true)
 })
 test('cloud requires a verified session and a current verified Google account', async () => {
   const security = createSecurity(cloudConfig(env), auth())

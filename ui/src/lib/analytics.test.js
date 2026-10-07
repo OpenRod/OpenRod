@@ -14,6 +14,7 @@ function harness(options = {}) {
     randomUUID: () => `${(++sequence).toString(16).padStart(8, '0')}-0000-4000-8000-000000000000`, now: () => time,
     fetch: (url, init) => { calls.push({ url, init, event: JSON.parse(init.body) }); return options.send?.(url, init) ?? Promise.resolve({ ok: true }) },
     setTimer: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, at: time + delay }); return id }, clearTimer: id => timers.delete(id),
+    replaceLocation: options.replaceLocation ?? (() => {}),
   })
   return { client, data, calls, storage, configure: () => client.configure({ mode: 'local', enabled: true }),
     enable() { this.configure(); client.setSharing(true) },
@@ -77,7 +78,8 @@ test('schema drops private fields, rejects arbitrary events, and limits feedback
   assert.deepEqual(sanitizeEvent('feedback_submitted', { prompt: 'outcome', category: 'setup', intent: 'project', goal_achieved: 'yes', flow_id: '00000001-0000-4000-8000-000000000000', text: '  requested feedback  ' }), { text: 'requested feedback' })
   assert.deepEqual(sanitizeEvent('feedback_submitted', { prompt: 'general', category: 'general', text: 'manual' }), { prompt: 'general', category: 'general', text: 'manual' })
   assert.equal(sanitizeEvent('feature_used', { text: 'secret', count: -1 }).text, undefined)
-  assert.equal(classifyAnalyticsError({ message: 'host private-host timed out' }), 'unknown')
+  // Messages are classified locally; only the fixed category is ever sent.
+  assert.equal(classifyAnalyticsError({ message: 'host private-host timed out' }), 'timeout')
 })
 
 test('failed, rejected, synchronous and timed-out requests are never retried or persisted', async () => {
@@ -178,24 +180,6 @@ test('pre-submission cancellation is distinguishable from a submitted attempt', 
   assert.equal(h.calls.some(call => call.event.event === 'flow_started'), false)
 })
 
-test('legacy goals and feedback prompts are ignored and cleared on opt-out', async () => {
-  const h = harness()
-  const legacy = ['openrod.intent.v1', 'openrod.feedback-candidate.v1', 'openrod.feedback-last.v1']
-  h.data.set(legacy[0], 'tools')
-  h.data.set(legacy[1], JSON.stringify({ prompt: 'outcome', flow_id: '00000001-0000-4000-8000-000000000000', at: 1800000000000 }))
-  h.data.set(legacy[2], '1800000000000')
-  h.enable(); h.client.observeConsole('live'); await tick()
-  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'intent'), false)
-  assert.equal(Object.hasOwn(h.client.getSnapshot(), 'candidate'), false)
-  assert.equal(h.calls[0].event.properties.intent, undefined)
-  assert.equal(h.client.setIntent, undefined)
-  assert.equal(h.client.promptEligible, undefined)
-  assert.equal(h.client.promptInteraction, undefined)
-  h.client.setSharing(false)
-  assert.ok(legacy.every(key => !h.data.has(key)))
-  assert.deepEqual([...h.data], [[USAGE_KEY, 'no']])
-})
-
 test('successful sessions and native handoffs never create automatic question state', async () => {
   const h = harness(); h.enable()
   for (const outcome of ['live', 'handoff_requested']) {
@@ -278,4 +262,97 @@ test('a suspended tab cannot attach an old flow after a rapid off/on toggle else
   const next = suspended.client.startFlow('session_launch', {}, old)
   assert.notEqual(next.id, old.id)
   assert.equal(next.attempt, 1)
+})
+
+test('opting out aborts pending requests and clears the identity, session and correlation', () => {
+  const h = harness({ send: () => new Promise(() => {}) }); h.enable()
+  h.client.capture('view_opened'); h.client.startFlow('session_launch')
+  assert.ok(h.data.has('openrod.usage-id.v1') && h.data.has('openrod.usage-session.v1'))
+  const pending = h.calls.map(call => call.init.signal)
+  h.client.setSharing(false)
+  assert.ok(pending.every(signal => signal.aborted))
+  assert.deepEqual([...h.data], [[USAGE_KEY, 'no']])
+})
+
+test('a console with telemetry turned off sends neither usage nor feedback', () => {
+  const h = harness(); h.client.configure({ mode: 'local', enabled: false }); h.client.setSharing(true)
+  assert.equal(h.client.submitFeedback({ prompt: 'general', category: 'general', text: 'hello' }), false)
+  h.client.capture('view_opened'); h.client.observeConsole('live')
+  assert.equal(h.calls.length, 0)
+  assert.equal(h.client.getSnapshot().available, false)
+})
+
+test('feedback sent with sharing off carries only the typed text and a one-off ID', () => {
+  const h = harness(); h.configure(); h.client.setSharing(false)
+  h.client.observeView('connections')
+  assert.equal(h.client.submitFeedback({ prompt: 'general', category: 'general', text: 'needs a dark terminal' }), true)
+  const { event, distinct_id, properties } = h.calls[0].event
+  assert.equal(event, 'feedback_submitted')
+  assert.deepEqual(Object.keys(properties).sort(), ['$geoip_disable', '$process_person_profile', 'app_version', 'category', 'environment', 'feedback_only', 'prompt', 'schema_version', 'text'])
+  assert.equal(properties.feedback_only, true)
+  h.client.submitFeedback({ prompt: 'general', category: 'general', text: 'again' })
+  assert.notEqual(h.calls[1].event.distinct_id, distinct_id)
+  assert.deepEqual([...h.data], [[USAGE_KEY, 'no']])
+})
+
+test('events are sent with keepalive so a reload right after does not drop them', () => {
+  const h = harness(); h.enable(); h.client.capture('view_opened')
+  assert.equal(h.calls[0].init.keepalive, true)
+})
+
+test('only failed attempts and pre-submit exploration continue a flow; others start fresh', async () => {
+  const h = harness(); h.enable()
+  const first = h.client.startFlow('gateway_connection', { location_type: 'ssh' })
+  const unrelated = h.client.startFlow('gateway_connection', { location_type: 'ssh' }, first); await tick()
+  assert.notEqual(unrelated.id, first.id); assert.equal(unrelated.attempt, 1)
+  assert.ok(h.calls.some(call => call.event.event === 'flow_finished' && call.event.properties.flow_id === first.id && call.event.properties.outcome === 'cancelled'))
+  h.client.finishFlow(unrelated, 'failed', 'ssh_auth')
+  const retry = h.client.startFlow('gateway_connection', { location_type: 'ssh' }, unrelated)
+  assert.equal(retry.id, unrelated.id); assert.equal(retry.attempt, 2)
+  h.client.finishFlow(retry, 'connected')
+  const again = h.client.startFlow('gateway_connection', { location_type: 'ssh' }, retry)
+  assert.notEqual(again.id, retry.id); assert.equal(again.attempt, 1)
+  const explored = h.client.exploreFlow('sandbox_creation')
+  const submitted = h.client.startFlow('sandbox_creation', { location_type: 'local' }, explored)
+  assert.equal(submitted.id, explored.id); assert.equal(submitted.attempt, 1)
+  assert.equal(h.client.startFlow('session_launch', {}, submitted).id === submitted.id, false)
+})
+
+test('a restored terminal flow is consumed, so reloading the tab starts a new one', async () => {
+  let href = 'http://127.0.0.1:4600/#terminal/box?gateway=g&workspace=w'
+  const replaced = []
+  const h = harness({ getLocation: () => href, replaceLocation: url => { replaced.push(url); href = url } }); h.enable()
+  const anchor = { href }
+  h.client.terminalClick({ currentTarget: anchor }); await tick()
+  href = anchor.href
+  const restored = h.client.terminalFlow({ location_type: 'local' })
+  assert.equal(replaced.at(-1), 'http://127.0.0.1:4600/#terminal/box?gateway=g&workspace=w')
+  assert.equal(JSON.parse(h.data.get('openrod.terminal-flows.v1')).length, 0)
+  href = anchor.href
+  const reloaded = h.client.terminalFlow({ location_type: 'local' })
+  assert.notEqual(reloaded.id, restored.id)
+})
+
+test('a tracked template build counts when the finished record has no build time', async () => {
+  const h = harness(); h.enable()
+  h.client.templateStarted({ name: 'tools', status: 'building', startedAt: '2026-10-07T00:00:00.000Z' }, { context: 'ctx', target: 'cloud' })
+  h.client.observeTemplates([{ name: 'tools', status: 'ready', location: { context: 'ctx' } }]); await tick()
+  assert.equal(h.calls.length, 1)
+  assert.equal(h.calls[0].event.properties.location_type, 'cloud')
+})
+
+test('error categories come from OpenRod wording without sending the message', () => {
+  const cases = [
+    [{ message: 'Host key verification failed for private-host' }, 'host_key'],
+    [{ message: 'private@private-host: Permission denied (publickey).' }, 'ssh_auth'],
+    [{ message: 'Docker isn’t running. Start Docker Desktop (or the Docker service), then try again.' }, 'docker_unavailable'],
+    [{ message: 'The openshell CLI is not installed on this machine.' }, 'openshell_missing'],
+    [{ code: 'GATEWAY_DOCKER_MISMATCH', message: 'x' }, 'docker_unavailable'],
+    [{ status: 504, message: 'x' }, 'timeout'],
+    [{ status: 503, message: 'x' }, 'gateway_unavailable'],
+    [Object.assign(new TypeError('Failed to fetch')), 'connection_lost'],
+    [{ message: 'Something else' }, 'unknown'],
+    [null, 'unknown'],
+  ]
+  for (const [error, category] of cases) assert.equal(classifyAnalyticsError(error), category)
 })

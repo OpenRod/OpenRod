@@ -47,7 +47,7 @@ export function RemoteConnect({ onConnected, onBack, initialHost, connectedHost 
     if (!job || !tracked.current) return
     if (job.status === 'needs-docker') analytics.step(tracked.current, 'needs_docker', 'blocked', 'docker_missing')
     else if (job.status === 'needs-install') analytics.step(tracked.current, 'needs_runtime', 'blocked', 'runtime_missing')
-    else if (job.status === 'failed') analytics.finishFlow(tracked.current, 'failed', classifyAnalyticsError({ code: job.code }))
+    else if (job.status === 'failed') analytics.finishFlow(tracked.current, 'failed', classifyAnalyticsError({ message: job.error }))
   }, [job?.status, job?.id])
 
   React.useEffect(() => {

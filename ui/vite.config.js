@@ -18,9 +18,12 @@ export default defineConfig(({ mode }) => {
   plugins: [react(), tailwindcss(), openshellApi()],
   define: {
     __OPENROD_CLOUD_ORIGIN__: JSON.stringify(process.env.OPENROD_CLOUD_ORIGIN ?? ''),
+    // Only the publish workflow sets OPENROD_ANALYTICS_RELEASE=1, so source builds,
+    // forks and previews never report to the production dashboard.
     __OPENROD_ANALYTICS__: JSON.stringify({ projectToken: env.OPENROD_POSTHOG_TOKEN ?? release.projectToken,
-      host: env.OPENROD_POSTHOG_HOST ?? release.host, version, environment: mode === 'production' ? 'production' : 'development',
-      enabled: mode === 'production' || env.OPENROD_ANALYTICS_DEV === '1' }),
+      host: env.OPENROD_POSTHOG_HOST ?? release.host, version,
+      environment: env.OPENROD_ANALYTICS_RELEASE === '1' ? 'production' : 'development',
+      enabled: env.OPENROD_ANALYTICS_RELEASE === '1' || env.OPENROD_ANALYTICS_DEV === '1' }),
   },
   resolve: {
     alias: {

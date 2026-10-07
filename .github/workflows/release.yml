@@ -44,6 +44,9 @@ jobs:
       - name: Use an npm that supports trusted publishing
         run: npm install -g npm@^11.5.1
       - run: npm publish --provenance --access public
+        # Only published packages report usage, and only after a user opts in.
+        env:
+          OPENROD_ANALYTICS_RELEASE: '1'
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

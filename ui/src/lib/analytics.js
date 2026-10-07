@@ -4,18 +4,15 @@
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i
 export const USAGE_KEY = 'openrod.usage.v1'
 const ID_KEY = 'openrod.usage-id.v1'
-const LEGACY_INTENT_KEY = 'openrod.intent.v1'
 const SESSION_KEY = 'openrod.usage-session.v1'
-const LEGACY_PROMPT_KEY = 'openrod.feedback-last.v1'
 const TERMINAL_KEY = 'openrod.terminal-flows.v1'
-const LEGACY_CANDIDATE_KEY = 'openrod.feedback-candidate.v1'
 const choices = (...values) => value => values.includes(value) ? value : undefined
 const uuid = value => typeof value === 'string' && UUID.test(value) ? value : undefined
 const number = value => Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), 86400000) : undefined
 const boolean = value => typeof value === 'boolean' ? value : undefined
 const view = choices('sandboxes', 'activity', 'groups', 'egress', 'ingress', 'secrets', 'templates', 'setups', 'connections', 'terminal')
 const flow = choices('gateway_connection', 'sandbox_creation', 'session_launch')
-const location = choices('local', 'ssh', 'unknown')
+const location = choices('local', 'ssh', 'cloud', 'unknown')
 const errorCategory = choices('docker_missing', 'docker_unavailable', 'openshell_missing', 'gateway_unavailable', 'ssh_auth', 'host_key', 'runtime_missing', 'image_build', 'credentials_missing', 'setup_import', 'policy', 'file_seed', 'timeout', 'connection_lost', 'unknown')
 const flowFields = { flow, flow_id: uuid, attempt: number, location_type: location, launch_target: choices('browser', 'terminal', 'vscode', 'cursor') }
 const text = value => typeof value === 'string' ? value.trim().slice(0, 2000) : undefined
@@ -42,21 +39,32 @@ export function sanitizeEvent(event, properties = {}) {
   return safe
 }
 
-// Match structured codes only. Error messages can contain private host/path data.
+// Only the category leaves the browser. Messages can contain private hosts or
+// paths, so they are matched here against OpenRod's own wording and dropped.
+const ERROR_PATTERNS = [
+  [/host key/i, 'host_key'],
+  [/permission denied|publickey|authentication failed/i, 'ssh_auth'],
+  [/docker (engine )?is missing|docker isn.t installed|install docker/i, 'docker_missing'],
+  [/docker isn.t running|docker daemon|reach docker|docker.*not available/i, 'docker_unavailable'],
+  [/openshell (cli )?is not installed|openshell isn.t installed/i, 'openshell_missing'],
+  [/runtime (image|package)|sandbox runtime/i, 'runtime_missing'],
+  [/timed out/i, 'timeout'],
+  [/gateway/i, 'gateway_unavailable'],
+]
 export function classifyAnalyticsError(error) {
-  const codes = {
-    DOCKER_NOT_INSTALLED: 'docker_missing', DOCKER_UNAVAILABLE: 'docker_unavailable', GATEWAY_DOCKER_MISMATCH: 'docker_unavailable',
-    OPENSHELL_NOT_INSTALLED: 'openshell_missing', SSH_AUTH_FAILED: 'ssh_auth', HOST_KEY_REJECTED: 'host_key',
-    RUNTIME_MISSING: 'runtime_missing', IMAGE_BUILD_FAILED: 'image_build', CREDENTIALS_MISSING: 'credentials_missing',
-    SETUP_IMPORT_FAILED: 'setup_import', GATEWAY_UNAVAILABLE: 'gateway_unavailable',
-  }
-  if (error?.name === 'TimeoutError') return 'timeout'
-  return codes[error?.code] ?? 'unknown'
+  if (error?.name === 'TimeoutError' || error?.status === 504) return 'timeout'
+  if (error?.code === 'GATEWAY_DOCKER_MISMATCH') return 'docker_unavailable'
+  const message = typeof error?.message === 'string' ? error.message : ''
+  for (const [pattern, category] of ERROR_PATTERNS) if (pattern.test(message)) return category
+  if (error?.name === 'TypeError') return 'connection_lost'
+  if (error?.status === 502 || error?.status === 503) return 'gateway_unavailable'
+  return 'unknown'
 }
 
 export function createAnalytics({ getStorage = () => window.localStorage, getLocation = () => window.location.href,
   randomUUID = () => crypto.randomUUID(), now = () => Date.now(), fetch: send = (...args) => fetch(...args),
   setTimer = setTimeout, clearTimer = clearTimeout,
+  replaceLocation = url => window.history.replaceState(window.history.state, '', url),
   config = typeof __OPENROD_ANALYTICS__ === 'undefined' ? {} : __OPENROD_ANALYTICS__,
 } = {}) {
   let authorized = false, runtimeEnabled = false, storageFailed = false, currentView, lastView, opened = false, firstVisit
@@ -104,7 +112,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       try {
         storage().setItem(USAGE_KEY, value ? 'yes' : 'no')
         if (!value) {
-          for (const key of [ID_KEY, SESSION_KEY, TERMINAL_KEY, LEGACY_INTENT_KEY, LEGACY_PROMPT_KEY, LEGACY_CANDIDATE_KEY]) storage().removeItem(key)
+          for (const key of [ID_KEY, SESSION_KEY, TERMINAL_KEY]) storage().removeItem(key)
           halt()
         }
       } catch { storageFailed = true; halt() }
@@ -140,8 +148,9 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       const payload = {
         api_key: config.projectToken, event, distinct_id: who.id, timestamp: new Date(now()).toISOString(),
         properties: { schema_version: 1, app_version: config.version, environment: config.environment,
-          ...(who.session ? { $session_id: who.session } : {}),
-          ...(currentView ? { view: currentView } : {}),
+          // Feedback sent with sharing off carries only what the user typed.
+          ...(regular && who.session ? { $session_id: who.session } : {}),
+          ...(regular && currentView ? { view: currentView } : {}),
           ...sanitized, $process_person_profile: false, $geoip_disable: true,
           ...(event === 'console_opened' ? { first_observed_visit: who.first } : {}),
           ...(explicitFeedback ? { feedback_only: !regular } : {}),
@@ -152,7 +161,8 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       try {
         Promise.resolve(send(`${config.host}/i/v0/e/`, { method: 'POST', headers: { 'content-type': 'text/plain' },
           body: JSON.stringify(payload), signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer',
-          cache: 'no-store', redirect: 'error', keepalive: false,
+          // Survives the reload that follows a local gateway connection.
+          cache: 'no-store', redirect: 'error', keepalive: true,
         })).then(done, done)
       } catch { done() }
       return true // Attempted, never a delivery acknowledgement.
@@ -172,7 +182,13 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       refresh()
       if (!state.available || state.sharing !== true || !flow(kind)) return null
       const installationId = identity().id
-      if (previous?.generation !== generation || previous?.installationId !== installationId) previous = null
+      if (previous?.generation !== generation || previous?.installationId !== installationId || previous?.flow !== kind) previous = null
+      // Only a failed attempt, or the exploration before the first submit,
+      // continues. Anything still running is superseded by this new flow.
+      if (previous && previous.outcome !== 'failed' && previous.started !== null) {
+        if (!previous.outcome) finishFlow(previous, 'cancelled')
+        previous = null
+      }
       const item = { generation, installationId, id: previous?.id ?? randomUUID(), flow: kind, attempt: (previous?.attempt ?? 0) + 1, started: now(), properties: sanitizeEvent('flow_started', properties) }
       capture('flow_started', { ...item.properties, flow: kind, flow_id: item.id, attempt: item.attempt })
       step(item, kind === 'session_launch' ? 'requesting' : kind === 'gateway_connection' ? 'connecting' : 'preparing_tools')
@@ -222,7 +238,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
     })
   }
   function submitFeedback(properties) {
-    capture('feedback_submitted', properties, { explicitFeedback: true })
+    return capture('feedback_submitted', properties, { explicitFeedback: true })
   }
   // Only safe correlation metadata is stored, never a name, command, or host.
   function terminalClick(event, properties = {}) {
@@ -240,6 +256,17 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       } catch { /* Losing correlation cannot affect the link. */ }
     })
   }
+  // A restored flow is consumed, so a reload or a copied link starts a new one.
+  function forgetTerminalFlow(saved, id) {
+    try { storage().setItem(TERMINAL_KEY, JSON.stringify(saved.filter(item => item.id !== id))) } catch { /* stale state */ }
+    safe(() => {
+      const url = new URL(getLocation())
+      const [path, query = ''] = url.hash.split('?')
+      const params = new URLSearchParams(query); params.delete('analyticsFlow')
+      url.hash = params.size ? `${path}?${params}` : path
+      replaceLocation(url.href)
+    })
+  }
   function readTerminalFlows() {
     let values = []
     try { values = JSON.parse(storage().getItem(TERMINAL_KEY) || '[]') } catch { /* stale state */ }
@@ -251,7 +278,8 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       if (previous) return startFlow('session_launch', properties, previous)
       const id = new URLSearchParams(new URL(getLocation()).hash.split('?')[1]).get('analyticsFlow')
       const installationId = identity().id
-      const restored = readTerminalFlows().find(item => item.id === id && item.installationId === installationId)
+      const saved = readTerminalFlows(), restored = saved.find(item => item.id === id && item.installationId === installationId)
+      if (id) forgetTerminalFlow(saved, id)
       if (!restored) return startFlow('session_launch', { ...properties, launch_target: 'browser' })
       return { generation, installationId, id: restored.id, flow: 'session_launch', attempt: number(restored.attempt) ?? 1, started: restored.started, properties: sanitizeEvent('flow_started', restored.properties) }
     }, null)
@@ -271,7 +299,9 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
         const key = JSON.stringify([record.location?.context, record.name]), tracked = templates.get(key)
         if (!tracked) continue
         if (tracked.installationId !== storage().getItem(ID_KEY) || now() - tracked.at > 1800000) { templates.delete(key); continue }
-        if (record.startedAt !== tracked.startedAt || record.location?.connected === false) continue
+        // A finished template record has no build start time; a different
+        // start time means a newer build replaced the tracked one.
+        if ((record.startedAt && record.startedAt !== tracked.startedAt) || record.location?.connected === false) continue
         if (record.status === 'ready') { templates.delete(key); capture('feature_used', { feature: 'template', action: 'built', location_type: tracked.location_type }) }
         else if (record.status === 'failed') templates.delete(key)
       }
@@ -285,7 +315,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
 }
 
 export const analytics = createAnalytics()
-export const analyticsLocation = value => value?.remote ? 'ssh' : 'local'
+export const analyticsLocation = value => value?.target === 'cloud' ? 'cloud' : value?.remote ? 'ssh' : 'local'
 
 // Capture successful product mutations at the shared API boundary. Only fixed
 // method/path patterns select events; no path, response, or request body is sent.

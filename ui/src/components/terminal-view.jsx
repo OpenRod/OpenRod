@@ -106,7 +106,7 @@ export function TerminalView({ name, session: requested, setupLogin, mcp }) {
             analytics.finishFlow(tracked, 'live')
             socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }))
           } else if (message.type === "exit") { setState({ status: "ended", exitCode: message.exitCode }); note(`Session ended with exit code ${message.exitCode}.`) }
-          else if (message.type === "error") { if (!ready) analytics.finishFlow(tracked, 'failed', classifyAnalyticsError({ code: message.code })); setState({ status: "failed", message: message.message }); note(message.message) }
+          else if (message.type === "error") { if (!ready) analytics.finishFlow(tracked, 'failed', classifyAnalyticsError({ code: message.code, message: message.message })); setState({ status: "failed", message: message.message }); note(message.message) }
         }
         socket.onclose = () => { if (!closed) { if (!ready) analytics.finishFlow(tracked, 'failed', 'connection_lost'); setState((s) => (s.status === "ended" || s.status === "failed" ? s : { status: "failed", message: "The connection closed." })) } }
       } catch (error) {
