@@ -49,31 +49,31 @@ export function UsageProvider({ children }) {
         {dialog === 'usage' ? <>
           <DialogHeader>
             <DialogTitle>Help improve OpenRod</DialogTitle>
-            <DialogDescription>Share usage metrics with PostHog. Never commands, files or names.</DialogDescription>
+            <DialogDescription>Share anonymous usage data with us?</DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => chooseSharing(false)}>No thanks</Button>
-            <Button type="button" size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share usage</Button>
+            <Button type="button" size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share</Button>
           </div>
-          <Button type="button" size="sm" variant="ghost" className="justify-self-start text-muted-foreground" onClick={() => setDialog('usage-details')}>What is being shared?</Button>
+          <Button type="button" size="sm" variant="ghost" className="justify-self-start text-muted-foreground" onClick={() => setDialog('usage-details')}>What do you collect?</Button>
         </> : dialog === 'settings' ? <>
           <DialogHeader>
             <DialogTitle>Usage and feedback</DialogTitle>
-            <DialogDescription>Usage metrics help improve OpenRod. Never commands, files or names.</DialogDescription>
+            <DialogDescription>Anonymous usage data helps us improve OpenRod.</DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-between gap-3 text-xs" role="status">
             <span className="flex items-center gap-2"><span className="text-muted-foreground">Usage sharing</span>
               <Badge variant={state.available && state.sharing ? 'secondary' : 'outline'}>{state.available && state.sharing ? 'On' : 'Off'}</Badge></span>
             {state.available && (state.sharing
               ? <Button size="sm" variant="outline" onClick={() => chooseSharing(false)}>Turn off</Button>
-              : <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share usage</Button>)}
+              : <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share</Button>)}
           </div>
           {!state.available && <p className="text-xs text-muted-foreground">Usage sharing and feedback are turned off for this console.</p>}
           <div className="flex flex-wrap gap-2 border-t pt-3">
             <Button size="sm" variant="outline" onClick={() => setDialog('feedback')}>Give feedback</Button>
-            <Button size="sm" variant="ghost" onClick={() => open('details')}>What is being shared?</Button>
+            <Button size="sm" variant="ghost" onClick={() => open('details')}>What do you collect?</Button>
           </div>
-        </> : details ? <UsageDetails destination={state.destination} onClose={close} /> : dialog === 'feedback' ? <FeedbackForm canSend={state.available} onClose={() => setDialog(null)} /> : null}
+        </> : details ? <UsageDetails onClose={close} /> : dialog === 'feedback' ? <FeedbackForm canSend={state.available} onClose={() => setDialog(null)} /> : null}
       </DialogContent>
     </Dialog>
   </UsageContext.Provider>
@@ -85,20 +85,20 @@ export function UsageButton() {
   return <SidebarMenuButton size="sm" className="text-muted-foreground" onClick={() => open()}><MessageSquare aria-hidden="true" />Usage &amp; feedback</SidebarMenuButton>
 }
 
-function UsageDetails({ destination, onClose }) {
-  const row = (title, text) => <div><dt className="text-[10px] font-medium text-muted-foreground">{title}</dt><dd>{text}</dd></div>
+function UsageDetails({ onClose }) {
   return <>
     <DialogHeader className="shrink-0 border-b border-border px-5 py-4 pr-12">
-      <DialogTitle>What is being shared?</DialogTitle>
-      <DialogDescription className="text-xs">Nothing is sent until you choose to share.</DialogDescription>
+      <DialogTitle>What we collect</DialogTitle>
+      <DialogDescription className="sr-only">What usage sharing sends</DialogDescription>
     </DialogHeader>
-    <dl className="min-h-0 divide-y divide-border overflow-y-auto px-5 text-xs leading-relaxed [&>div]:py-3 [&_dd]:mt-1">
-      {row('Shared', 'Which screens and features you use, whether connecting, creating sandboxes and opening sessions work, and the OpenRod version. Events carry a random ID, not your name or account.')}
-      {row('Never shared', 'Commands, terminal output, files, sandbox, host or template names, paths, credentials and error messages.')}
-      {row('Feedback', 'The text you send and the OpenRod version. You can send feedback with sharing off; leave out private details.')}
-      {row('Where it goes', `PostHog (${destination}). It uses your IP address to record an approximate location, such as country and city, and doesn’t keep the address.`)}
-      {row('Turning it off', <>Turn sharing off in Usage &amp; feedback at any time. Start OpenRod with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">OPENROD_TELEMETRY=0</code> to turn off usage and feedback entirely.</>)}
-    </dl>
+    <div className="grid gap-3 px-5 py-4 text-xs leading-relaxed">
+      <ul className="grid list-disc gap-1 pl-4">
+        <li>Which features you use and whether they work</li>
+        <li>Your OpenRod version and approximate location (country, city)</li>
+        <li>A random ID, never your name or account</li>
+      </ul>
+      <p className="text-muted-foreground">Never your commands, files, terminal output, names, paths or credentials. Change this anytime in Usage &amp; feedback.</p>
+    </div>
     <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none px-5 py-3">
       <Button type="button" size="sm" variant="outline" onClick={onClose}>Done</Button>
     </DialogFooter>

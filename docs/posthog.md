@@ -4,7 +4,7 @@ OpenRod runs on your computer, so the team only learns what works through usage 
 
 ## What users see
 
-On first opening, a small dialog offers **Share usage**, **No thanks** and **What is being shared?**. Nothing is sent before the user chooses to share. **No thanks**, or closing the dialog, saves sharing off, and the dialog doesn't ask again. **Usage & feedback** in the sidebar changes the choice and sends feedback. Feedback can be sent with sharing off.
+On first opening, a small dialog asks **Help improve OpenRod: share anonymous usage data with us?** with **Share**, **No thanks** and **What do you collect?**. Nothing is sent before the user chooses to share. **No thanks**, or closing the dialog, saves sharing off, and the dialog doesn't ask again. **Usage & feedback** in the sidebar changes the choice and sends feedback. Feedback can be sent with sharing off.
 
 ## Turning it off
 
