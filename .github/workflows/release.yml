@@ -43,11 +43,17 @@ jobs:
       - run: npm test
       - name: Use an npm that supports trusted publishing
         run: npm install -g npm@^11.5.1
-      - run: npm publish --provenance --access public
+      # A pre-release such as v0.1.3-rc.1 goes to the next tag, so npx openrod
+      # keeps installing the latest release until the final one ships.
+      - run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then tag=next; else tag=latest; fi
+          npm publish --provenance --access public --tag "$tag"
         # Only published packages report usage, and only after a user opts in.
         env:
           OPENROD_ANALYTICS_RELEASE: '1'
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=--prerelease; else prerelease=; fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes $prerelease
