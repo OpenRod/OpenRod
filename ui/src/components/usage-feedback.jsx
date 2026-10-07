@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { MessageSquare } from 'lucide-react'
+import { toast } from 'sonner'
 import { analytics } from '@/lib/analytics'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -48,26 +49,26 @@ export function UsageProvider({ children }) {
         {dialog === 'usage' ? <>
           <DialogHeader>
             <DialogTitle>Help improve OpenRod</DialogTitle>
-            <DialogDescription>Share anonymous metrics via PostHog.</DialogDescription>
+            <DialogDescription>Share usage metrics with PostHog. Never commands, files or names.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => chooseSharing(false)}>No thanks</Button>
-            <Button type="button" size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share anonymous usage</Button>
+            <Button type="button" size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share usage</Button>
           </div>
           <Button type="button" size="sm" variant="ghost" className="justify-self-start text-muted-foreground" onClick={() => setDialog('usage-details')}>What is being shared?</Button>
         </> : dialog === 'settings' ? <>
           <DialogHeader>
             <DialogTitle>Usage and feedback</DialogTitle>
-            <DialogDescription>Share anonymous usage metrics with PostHog ({state.destination}) to improve OpenRod. No commands or project content.</DialogDescription>
+            <DialogDescription>Usage metrics help improve OpenRod. Never commands, files or names.</DialogDescription>
           </DialogHeader>
-          <div className="flex items-center gap-2 text-xs" role="status">
-            <span className="text-muted-foreground">Usage sharing</span>
-            <Badge variant={state.available && state.sharing ? 'secondary' : 'outline'}>{state.available && state.sharing ? 'On' : 'Off'}</Badge>
+          <div className="flex items-center justify-between gap-3 text-xs" role="status">
+            <span className="flex items-center gap-2"><span className="text-muted-foreground">Usage sharing</span>
+              <Badge variant={state.available && state.sharing ? 'secondary' : 'outline'}>{state.available && state.sharing ? 'On' : 'Off'}</Badge></span>
+            {state.available && (state.sharing
+              ? <Button size="sm" variant="outline" onClick={() => chooseSharing(false)}>Turn off</Button>
+              : <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share usage</Button>)}
           </div>
-          {state.available ? <div className="flex flex-wrap justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={() => chooseSharing(false)}>Turn sharing off</Button>
-            <Button size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share anonymous usage</Button>
-          </div> : <p className="text-xs text-muted-foreground">Usage sharing is disabled for this console.</p>}
+          {!state.available && <p className="text-xs text-muted-foreground">Usage sharing and feedback are turned off for this console.</p>}
           <div className="flex flex-wrap gap-2 border-t pt-3">
             <Button size="sm" variant="outline" onClick={() => setDialog('feedback')}>Give feedback</Button>
             <Button size="sm" variant="ghost" onClick={() => open('details')}>What is being shared?</Button>
@@ -85,18 +86,18 @@ export function UsageButton() {
 }
 
 function UsageDetails({ destination, onClose }) {
+  const row = (title, text) => <div><dt className="text-[10px] font-medium text-muted-foreground">{title}</dt><dd>{text}</dd></div>
   return <>
     <DialogHeader className="shrink-0 border-b border-border px-5 py-4 pr-12">
       <DialogTitle>What is being shared?</DialogTitle>
-      <DialogDescription className="text-xs">Usage metrics are sent only after you choose to share.</DialogDescription>
+      <DialogDescription className="text-xs">Nothing is sent until you choose to share.</DialogDescription>
     </DialogHeader>
     <dl className="min-h-0 divide-y divide-border overflow-y-auto px-5 text-xs leading-relaxed [&>div]:py-3 [&_dd]:mt-1">
-      <div><dt className="text-[10px] font-medium text-muted-foreground">Usage events</dt><dd>Screens opened, connection and sandbox actions, session launches, feature use, and structured success or error categories.</dd></div>
-      <div><dt className="text-[10px] font-medium text-muted-foreground">Event metadata</dt><dd>App version, environment, timestamps, random browser and session IDs, predefined options, counts and durations. Sessions expire after 30 minutes of inactivity.</dd></div>
-      <div><dt className="text-[10px] font-medium text-muted-foreground">Excluded content</dt><dd>No commands, terminal output, project content, resource names, hosts, paths, credentials, full URLs or raw errors. No session replay or automatic click tracking.</dd></div>
-      <div><dt className="text-[10px] font-medium text-muted-foreground">Manual feedback</dt><dd>Only text you explicitly submit, up to 2,000 characters. You can send feedback with usage sharing off; please omit private details.</dd></div>
-      <div><dt className="text-[10px] font-medium text-muted-foreground">Delivery</dt><dd>Sent directly to PostHog in the {destination}. PostHog receives network metadata such as your IP address; GeoIP enrichment and person profiles are disabled. Blocked or offline delivery fails silently, with a 3-second timeout, no retries and no stored queue.</dd></div>
-      <div><dt className="text-[10px] font-medium text-muted-foreground">Your controls</dt><dd>Turn sharing off in Usage &amp; feedback to clear local IDs. To disable both usage and feedback requests, start OpenRod with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">OPENROD_TELEMETRY=0</code>. Previously received events are not deleted.</dd></div>
+      {row('Shared', 'Which screens and features you use, whether connecting, creating sandboxes and opening sessions work, and the OpenRod version. Events carry a random ID, not your name or account.')}
+      {row('Never shared', 'Commands, terminal output, files, sandbox, host or template names, paths, credentials and error messages.')}
+      {row('Feedback', 'Only the text you send. You can send feedback with sharing off; leave out private details.')}
+      {row('Where it goes', `PostHog (${destination}). PostHog sees your IP address when it receives events; OpenRod turns off location lookup and person profiles.`)}
+      {row('Turning it off', <>Turn sharing off in Usage &amp; feedback at any time. Start OpenRod with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">OPENROD_TELEMETRY=0</code> to turn off usage and feedback entirely.</>)}
     </dl>
     <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none px-5 py-3">
       <Button type="button" size="sm" variant="outline" onClick={onClose}>Done</Button>
@@ -106,16 +107,20 @@ function UsageDetails({ destination, onClose }) {
 
 function FeedbackForm({ canSend, onClose }) {
   const [comment, setComment] = React.useState('')
+  const [failed, setFailed] = React.useState(false)
   const prefix = React.useId()
-  const copy = () => { try { void navigator.clipboard.writeText(comment).catch(() => {}) } catch { /* optional */ } }
+  const copy = () => { try { void navigator.clipboard.writeText(comment).then(() => toast.success('Copied'), () => {}) } catch { /* optional */ } }
   function submit(event) {
     event.preventDefault()
-    analytics.submitFeedback({ prompt: 'general', category: 'general', text: comment })
+    if (!analytics.submitFeedback({ prompt: 'general', category: 'general', text: comment })) { setFailed(true); return }
+    toast.success('Thanks for the feedback')
     onClose()
   }
   return <form onSubmit={submit} className="grid gap-4">
-    <DialogHeader><DialogTitle>Give feedback</DialogTitle><DialogDescription>Feedback goes to PostHog. Please omit private details.</DialogDescription></DialogHeader>
-    <div className="grid gap-1.5"><Label htmlFor={`${prefix}-text`}>Feedback</Label><Textarea id={`${prefix}-text`} value={comment} onChange={event => setComment(event.target.value)} maxLength={2000} rows={4} /></div>
-    <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button><Button type="button" variant="outline" size="sm" disabled={!comment.trim()} onClick={copy}>Copy text</Button><Button type="submit" size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" disabled={!canSend || !comment.trim()}>Send feedback</Button></div>
+    <DialogHeader><DialogTitle>Give feedback</DialogTitle><DialogDescription>Sent to the OpenRod team through PostHog. Leave out private details.</DialogDescription></DialogHeader>
+    <div className="grid gap-1.5"><Label htmlFor={`${prefix}-text`}>Feedback</Label><Textarea id={`${prefix}-text`} value={comment} onChange={event => { setComment(event.target.value); setFailed(false) }} maxLength={2000} rows={4} /></div>
+    {!canSend ? <p className="text-xs text-muted-foreground">Feedback is turned off for this console. Copy your text to share it another way.</p>
+      : failed && <p role="alert" className="text-xs text-destructive">Couldn’t send it right now. Copy your text, or try again.</p>}
+    <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button><Button type="button" variant="outline" size="sm" disabled={!comment.trim()} onClick={copy}>Copy text</Button><Button type="submit" size="sm" disabled={!canSend || !comment.trim()} className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90">Send feedback</Button></div>
   </form>
 }
