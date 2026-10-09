@@ -12,7 +12,7 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 - Local OpenRod connects to the hosted cloud by default, without requiring `OPENROD_CLOUD_ORIGIN`. Set it to another HTTPS origin to use your own deployment, or leave it explicitly empty to disable Cloud.
 - Cloud provisioning shows an active setup indicator, explains that high demand can extend the wait, and says the workspace opens automatically when ready.
-- Cloud sign-in and machine setup show the OpenRod Cloud animation with rotating agents, and their wait and error messages are shorter.
+- Cloud sign-in and machine setup show the OpenRod Cloud animation with rotating agents, note that high demand can slow them down, and have shorter wait and error messages.
 
 ## 0.1.3
 

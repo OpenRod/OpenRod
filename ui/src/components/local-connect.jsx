@@ -23,7 +23,7 @@ export function LocalConnect({ children, user, logout }) {
   return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
     {valid && !error && <CloudAgents />}
     <h1 className="text-2xl font-semibold">{error || !valid ? 'Sign-in interrupted' : 'Finishing sign-in…'}</h1>
-    <p className="mt-3 text-sm text-muted-foreground">{valid && !error ? `Signed in as ${user.email}. This window closes automatically.` : 'Start again from local OpenRod.'}</p>
+    <p className="mt-3 text-sm text-muted-foreground">{valid && !error ? <>Signed in as {user.email}.<br />High demand may slow this down.</> : 'Start again from local OpenRod.'}</p>
     {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
     {(error || !valid) && <button className="mt-5 block w-full text-xs underline" onClick={logout}>Sign out</button>}
   </section></main>
