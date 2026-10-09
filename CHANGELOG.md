@@ -7,6 +7,7 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 ### Changed
 
 - Cloud provisioning shows an active setup indicator, explains that high demand can extend the wait, and reassures users that their workspace opens automatically without refreshing.
+- Cloud sign-in and machine setup show the OpenRod Cloud animation with rotating agents, and their wait and error messages are shorter.
 
 ## 0.2.0
 

@@ -1,0 +1,10 @@
+.cloud-agents { display:block; width:220px; height:auto; margin:0 auto 16px; overflow:visible; animation:cloud-agents-bob 7s ease-in-out infinite; }
+.cloud-agents .cloud-spark { fill:#8ca8a2; }
+.cloud-agents text { font-family:monospace; }
+.cloud-agents .cloud-card-face { opacity:0; transition:opacity 180ms ease; }
+.cloud-agents .cloud-card-face.is-active { opacity:1; }
+@keyframes cloud-agents-bob { 50% { transform:translateY(-4px); } }
+@media(prefers-reduced-motion:reduce) {
+  .cloud-agents { animation:none; }
+  .cloud-agents .cloud-card-face { transition:none; }
+}
