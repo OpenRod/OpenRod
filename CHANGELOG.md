@@ -2,6 +2,12 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Cloud provisioning shows an active setup indicator, explains that high demand can extend the wait, and reassures users that their workspace opens automatically without refreshing.
+
 ## 0.2.0
 
 ### Added
