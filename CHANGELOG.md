@@ -29,6 +29,7 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 ### Fixed
 
+- Adding a secret to a selected location no longer crashes while credentials are loading.
 - A disconnected SSH location no longer blocks Local resource pages or imports, and retained remote inventory no longer requires a persistent banner.
 - Reconnecting an SSH location selects the requested host instead of falling back to another configured host.
 - Forgetting a remote connection removes its host from the Connections list across restarts; forgotten hosts can be restored explicitly.
