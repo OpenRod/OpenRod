@@ -2,6 +2,16 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## 0.2.0
+
+### Added
+
+- OpenRod Cloud is available at `https://console.openrod.io`. Connect your Google account from local OpenRod and prepare a dedicated cloud machine to use cloud sandboxes, files, terminals and imports.
+
+### Changed
+
+- Local OpenRod connects to the hosted cloud by default, without requiring `OPENROD_CLOUD_ORIGIN`. Set it to another HTTPS origin to use your own deployment, or leave it explicitly empty to disable Cloud.
+
 ## 0.1.3
 
 ### Added
