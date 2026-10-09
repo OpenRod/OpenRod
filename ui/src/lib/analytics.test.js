@@ -356,3 +356,34 @@ test('error categories come from OpenRod wording without sending the message', (
   ]
   for (const [error, category] of cases) assert.equal(classifyAnalyticsError(error), category)
 })
+
+
+test('explicit decline sends one unlinked event and leaves sharing off', () => {
+  const h = harness(); h.configure(); h.client.observeView('connections')
+  assert.equal(h.client.declineSharing(), true)
+  assert.equal(h.calls.length, 1)
+  assert.equal(h.calls[0].event.event, 'telemetry_declined')
+  assert.deepEqual(Object.keys(h.calls[0].event.properties).sort(), ['$geoip_disable', '$process_person_profile', 'app_version', 'environment', 'schema_version'])
+  assert.equal(h.calls[0].event.properties.$geoip_disable, true)
+  assert.deepEqual([...h.data], [[USAGE_KEY, 'no']])
+  h.client.declineSharing(); assert.equal(h.calls[0].init.signal.aborted, false); h.client.capture('telemetry_declined'); h.client.capture('view_opened'); h.client.observeConsole('live')
+  assert.equal(h.calls.length, 1)
+})
+
+test('declining after opt-in clears IDs and aborts usage before the unlinked event', () => {
+  const h = harness({ send: () => new Promise(() => {}) }); h.enable(); h.client.capture('view_opened')
+  const previous = h.calls[0]
+  h.client.declineSharing()
+  assert.equal(previous.init.signal.aborted, true)
+  assert.notEqual(h.calls[1].event.distinct_id, previous.event.distinct_id)
+  assert.equal(h.calls[1].init.signal.aborted, false)
+  assert.deepEqual([...h.data], [[USAGE_KEY, 'no']])
+})
+
+test('implicit dismissal, disabled telemetry, cloud and private URLs send no decline event', () => {
+  const implicit = harness(); implicit.configure(); implicit.client.setSharing(false); assert.equal(implicit.calls.length, 0)
+  for (const options of [{ config: { enabled: false } }, { config: { projectToken: '' } }, { getLocation: () => 'http://localhost/?token=secret' }, { getStorage: () => { throw Error('denied') } }]) {
+    const h = harness(options); h.configure(); h.client.declineSharing(); assert.equal(h.calls.length, 0)
+  }
+  const cloud = harness(); cloud.client.configure({mode:'cloud',enabled:true}); cloud.client.declineSharing(); assert.equal(cloud.calls.length,0)
+})

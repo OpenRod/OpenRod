@@ -19,6 +19,7 @@ const text = value => typeof value === 'string' ? value.trim().slice(0, 2000) : 
 const agentIds = value => Array.isArray(value) ? [...new Set(value.filter(id => ['claude', 'codex', 'cursor', 'pi', 'antigravity', 'opencode', 'aider', 'copilot', 'kiro', 'droid'].includes(id)))].slice(0, 12) : undefined
 const configFields = { creation_mode: choices('quick', 'template'), file_source: choices('empty', 'folder', 'repo'), agent_ids: agentIds, setup_count: number, provider_count: number, group_count: number }
 const EVENTS = {
+  telemetry_declined: {},
   console_opened: { gateway_state: choices('available', 'setup_required', 'unavailable'), first_observed_visit: boolean, connection_method: choices('automatic', 'manual', 'existing', 'unknown') },
   view_opened: { previous_view: view },
   flow_started: { ...flowFields, ...configFields },
@@ -31,6 +32,7 @@ const EVENTS = {
 
 export function sanitizeEvent(event, properties = {}) {
   if (!Object.hasOwn(EVENTS, event)) return null
+  if (event === 'telemetry_declined') return {}
   const safe = {}
   for (const [key, validate] of Object.entries({ view, ...EVENTS[event] })) {
     const value = validate(properties[key])
@@ -119,6 +121,16 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       refresh()
     })
   }
+  function declineSharing() {
+    return safe(() => {
+      refresh()
+      if (state.sharing === false) return false
+      const report = state.available
+      // Revoke usage and erase correlation before sending the one-off choice.
+      setSharing(false)
+      return report && state.sharing === false && capture('telemetry_declined', {}, { explicitDecline: true })
+    }, false)
+  }
   function identity() {
     const store = storage()
     let id = uuid(store.getItem(ID_KEY)), session
@@ -130,10 +142,12 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
     store.setItem(SESSION_KEY, JSON.stringify({ id: session.id, at: now() }))
     return { id, session: session.id, first: firstVisit }
   }
-  function capture(event, properties = {}, { explicitFeedback = false } = {}) {
+  function capture(event, properties = {}, { explicitFeedback = false, explicitDecline = false } = {}) {
     return safe(() => {
       refresh()
-      if (!state.available || (state.sharing !== true && !(explicitFeedback && event === 'feedback_submitted'))) return false
+      const decline = explicitDecline && event === 'telemetry_declined' && state.sharing === false
+      if (event === 'telemetry_declined' && !decline) return false
+      if (!state.available || (state.sharing !== true && !decline && !(explicitFeedback && event === 'feedback_submitted'))) return false
       const sanitized = sanitizeEvent(event, properties)
       if (!sanitized) return false
       // Recheck the stored preference before every request, including in other tabs.
@@ -152,7 +166,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
           ...(regular && who.session ? { $session_id: who.session } : {}),
           ...(regular && currentView ? { view: currentView } : {}),
           // Opted-in usage gets PostHog's approximate location (country, city);
-          // the project discards the IP itself. Feedback-only events get neither.
+          // the project discards the IP itself. Feedback-only and decline events get neither.
           ...sanitized, $process_person_profile: false, ...(regular ? {} : { $geoip_disable: true }),
           ...(event === 'console_opened' ? { first_observed_visit: who.first } : {}),
           ...(explicitFeedback ? { feedback_only: !regular } : {}),
@@ -309,7 +323,7 @@ export function createAnalytics({ getStorage = () => window.localStorage, getLoc
       }
     })
   }
-  return { configure, setSharing, refresh, capture, observeConsole, observeView, startFlow, exploreFlow, step, finishFlow, ready, templateStarted, observeTemplates,
+  return { configure, setSharing, declineSharing, refresh, capture, observeConsole, observeView, startFlow, exploreFlow, step, finishFlow, ready, templateStarted, observeTemplates,
     submitFeedback, terminalClick, terminalFlow,
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) }, getSnapshot: () => state,
     stop: () => { authorized = false; halt(); refresh() },

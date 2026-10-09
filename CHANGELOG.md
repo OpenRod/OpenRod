@@ -6,6 +6,8 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 
 ### Added
 
+- Count explicit usage-sharing declines with one anonymous PostHog event, without saving an identity or collecting location. Closing the prompt sends nothing.
+
 - OpenRod Cloud is available at `https://console.openrod.io`. Connect your Google account from local OpenRod and prepare a dedicated cloud machine to use cloud sandboxes, files, terminals and imports.
 
 ### Changed

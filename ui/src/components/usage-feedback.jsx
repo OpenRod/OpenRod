@@ -32,13 +32,14 @@ export function UsageProvider({ children }) {
     return () => { window.removeEventListener('storage', changed); window.removeEventListener('focus', changed) }
   }, [])
   const open = React.useCallback((next = 'settings') => setDialog(next), [])
-  function chooseSharing(value) {
-    analytics.setSharing(value)
+  function chooseSharing(value, explicit = true) {
+    if (!value && explicit) analytics.declineSharing()
+    else analytics.setSharing(value)
     setDialog(null)
   }
   function close() {
     if (dialog === 'usage-details') setDialog('usage')
-    else if (dialog === 'usage') chooseSharing(false)
+    else if (dialog === 'usage') chooseSharing(false, false)
     else setDialog(null)
   }
   const details = dialog === 'details' || dialog === 'usage-details'
@@ -49,10 +50,10 @@ export function UsageProvider({ children }) {
         {dialog === 'usage' ? <>
           <DialogHeader>
             <DialogTitle>Help improve OpenRod</DialogTitle>
-            <DialogDescription>Share anonymous usage data with us?</DialogDescription>
+            <DialogDescription>Share anonymous usage data with us? Declining sends one anonymous count, then stops usage sharing.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => chooseSharing(false)}>No thanks</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => chooseSharing(false)}>Don’t send data</Button>
             <Button type="button" size="sm" className="bg-[var(--action)] text-[var(--action-foreground)] hover:bg-[var(--action)]/90" onClick={() => chooseSharing(true)}>Share</Button>
           </div>
           <Button type="button" size="sm" variant="ghost" className="justify-self-start text-muted-foreground" onClick={() => setDialog('usage-details')}>What do you collect?</Button>
@@ -97,6 +98,7 @@ function UsageDetails({ onClose }) {
         <li>Your OpenRod version and approximate location (country, city)</li>
         <li>A random ID, never your name or account</li>
       </ul>
+      <p className="text-muted-foreground">Choosing “Don’t send data” or “Turn off” sends one anonymous choice event, without a saved ID or location. Closing this prompt sends nothing.</p>
       <p className="text-muted-foreground">Never your commands, files, terminal output, names, paths or credentials. Change this anytime in Usage &amp; feedback.</p>
     </div>
     <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none px-5 py-3">
