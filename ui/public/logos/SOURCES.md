@@ -33,6 +33,7 @@ Every SVG in this directory is bundled locally so the console never contacts a l
 | `agents/openclaw-color.svg` | Lobe Icons | `openclaw-color` |
 | `agents/opencode.svg` | Lobe Icons | `opencode` |
 | `agents/pi.svg` | Lobe Icons | `pi` |
+| `../cloud-agents/codex-character.png` | OpenRod authors | Codex character from the OpenRod website cloud |
 | `templates/debian.svg` | Devicon | `debian-original` |
 | `templates/nodejs.svg` | Devicon | `nodejs-original` |
 | `templates/python.svg` | Devicon | `python-original` |
