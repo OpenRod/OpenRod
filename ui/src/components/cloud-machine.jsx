@@ -40,9 +40,14 @@ export function CloudMachine({children,logout}) {
   return()=>{window.removeEventListener('message',receive);clearInterval(timer)}
  },[machine?.status])
  if(machine?.status==='ready'&&(!transfer||transfer.status==='done'))return <>{transfer?.message&&<Notice id="cloud-transfer" tone="success" title="Workspace continued in the cloud" onDismiss={()=>setTransfer(null)}>{transfer.message}</Notice>}{children}</>
+ const starting=!transfer&&!error&&(preparing||(machine&&!['none','ready','error'].includes(machine.status)))
  return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-md text-center">
-  <h1 className="text-2xl font-semibold">{transfer?'Continuing your workspace…':machine?.status==='none'?'Start OpenRod Cloud':'Starting your cloud machine…'}</h1>
-  <p className="mt-3 text-sm text-muted-foreground">{transfer?'Keep the local OpenRod tab open while your files are copied and your template is rebuilt.':'Your account has one dedicated machine. Its first start can take several minutes.'}</p>
+  <h1 className="text-2xl font-semibold">{transfer?'Continuing your workspace…':!starting&&machine?.status==='none'?'Start OpenRod Cloud':'Starting your cloud machine…'}</h1>
+  <p className="mt-3 text-sm text-muted-foreground">{transfer?'Keep the local OpenRod tab open while your files are copied and your template is rebuilt.':starting?'Setup may take longer during periods of high demand. Your workspace will open automatically when it’s ready.':'Your account has one dedicated machine. Its first start can take several minutes.'}</p>
+  {starting&&<div role="status" className="mt-5 rounded-lg bg-muted/50 p-4 text-sm">
+   <div className="flex items-center justify-center gap-2"><Spinner aria-hidden="true" /><span>Setting up your dedicated machine</span></div>
+   <p className="mt-2 text-muted-foreground">Keep this tab open—there’s no need to refresh.</p>
+  </div>}
   {(error||transfer?.message)&&<p role="alert" className="mt-4 text-sm text-destructive">{transfer?.message??error}</p>}
   {!transfer&&(machine?.status==='none'||error)&&<Button disabled={preparing} className="mt-5" onClick={prepare}>{preparing&&<Spinner />}{error?'Try again':'Start cloud machine'}</Button>}
   {transfer&&<button onClick={()=>{handoff.current=null;setTransfer(null);window.location.hash=''}} className="mt-4 text-sm underline">Open cloud workspace</button>}
