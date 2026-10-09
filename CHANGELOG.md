@@ -2,15 +2,11 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
-## 0.2.0-rc.4
+## 0.2.0
 
 ### Added
 
 - Count explicit usage-sharing declines with one anonymous PostHog event, without saving an identity or collecting location. Closing the prompt sends nothing.
-
-## 0.2.0
-
-### Added
 
 - OpenRod Cloud is available at `https://console.openrod.io`. Connect your Google account from local OpenRod and prepare a dedicated cloud machine to use cloud sandboxes, files, terminals and imports.
 
