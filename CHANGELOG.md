@@ -7,6 +7,7 @@ All notable changes to OpenRod are documented here. The project follows [Semanti
 ### Changed
 
 - Choosing OpenRod Cloud in local OpenRod shows the OpenRod Cloud animation in the location dialog while you sign in and the cloud machine starts. If you close the dialog, setup keeps going and appears as a notification.
+- After you disconnect your cloud account in local OpenRod, connecting again shows Google's account picker instead of reusing the account you were signed in with.
 
 ## 0.2.0
 

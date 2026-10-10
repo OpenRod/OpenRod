@@ -8,6 +8,7 @@ import { analytics } from '@/lib/analytics'
 import { UsageProvider } from './usage-feedback'
 import { CloudSignIn } from './cloud-sign-in'
 import { cloudSignInError } from '@/lib/cloud-sign-in-error'
+import { CHOOSE_ACCOUNT, choosesAccount } from '@/lib/local-cloud'
 
 // Only cloud sign-in needs Firebase, so the local console never downloads it.
 const firebaseSdk = () => Promise.all([import('firebase/app'), import('firebase/auth')])
@@ -46,7 +47,15 @@ export function AuthGate({ children }) {
         if (!alive) return
         analytics.configure({ mode: value.mode, enabled: value.telemetryEnabled === true })
         setConfig(value)
-        if (value.mode === 'cloud') {
+        // A computer that disconnected asks for a fresh account choice; the
+        // existing session stays until a new sign-in replaces it.
+        const chooseAccount = value.mode === 'cloud' && window.location.hash.startsWith('#local-connect=') && choosesAccount(window.location.search)
+        if (chooseAccount) {
+          const url = new URL(window.location.href)
+          url.searchParams.delete(CHOOSE_ACCOUNT)
+          window.history.replaceState(null, '', url)
+        }
+        if (value.mode === 'cloud' && !chooseAccount) {
           const response = await fetch('/api/auth/me')
           if (response.ok) { const session = await response.json(); if (alive) setUser(session.user) }
           else if (response.status !== 401) { const result = await response.json(); throw Error(result.error ?? 'Authentication unavailable') }

@@ -122,14 +122,24 @@ test('saving and clearing local recipe recovery does not resurrect the legacy dr
 
 const deferred = () => { let resolve, reject; const promise = new Promise((yes,no)=>{resolve=yes;reject=no}); return {promise,resolve,reject} }
 const flush = () => new Promise(resolve=>setImmediate(resolve))
-function signInHarness(request) {
+function signInHarness(request, options = {}) {
   const listeners = new Set(), navigated = []
   const popup = {closed:false,close(){this.closed=true},location:{set href(value){navigated.push(value)}}}
   const events = {addEventListener:(_type,listener)=>listeners.add(listener),removeEventListener:(_type,listener)=>listeners.delete(listener)}
-  const attempt = connect.createLocalSignInAttempt({popup,origin:'http://localhost:4600',cloud:CLOUD,request,events,focus:()=>{},setTimer:()=>1,clearTimer:()=>{}})
+  const attempt = connect.createLocalSignInAttempt({popup,origin:'http://localhost:4600',cloud:CLOUD,request,events,focus:()=>{},setTimer:()=>1,clearTimer:()=>{},...options})
   const receive = (nonce, type = 'openrod-local-connected') => { for (const listener of listeners) listener({source:popup,origin:CLOUD,data:{type,nonce,code:'a'.repeat(64)+'.'+'b'.repeat(64)}}) }
   return {attempt,popup,navigated,receive,listeners}
 }
+test('a sign-in after disconnect asks the cloud console for an account choice', async () => {
+  const url = 'https://cloud.example.test/?handoff=1#local-connect=abc'
+  const fresh = signInHarness(async () => ({nonce:'attempt-a',url}))
+  const choosing = signInHarness(async () => ({nonce:'attempt-b',url}), {chooseAccount:true})
+  await flush()
+  assert.deepEqual(fresh.navigated,[url])
+  assert.deepEqual(choosing.navigated,['https://cloud.example.test/?handoff=1&account=choose#local-connect=abc'])
+  assert.equal(connect.choosesAccount('?handoff=1&account=choose'),true)
+  assert.equal(connect.choosesAccount('?handoff=1'),false)
+})
 test('cancelling before delayed start suppresses popup navigation and cancels the returned nonce', async () => {
   const start = deferred(), calls = []
   const flow = signInHarness(async (path,body)=>{calls.push({path,body});return path==='start'?start.promise:{connected:false}})
