@@ -50,15 +50,14 @@ function CloudReadyGate({ children, status, onStatus, onCancel }) {
     if (ready) return
     const controller = new AbortController()
     setError('')
-    localCloudRequest('machine', requested ? {} : undefined, { signal: controller.signal }).then(value => { if (value.machine?.status === 'none') { setMachine(value.machine); return null }; return waitForCloudReady(() => localCloudRequest('machine', undefined, { signal: controller.signal }), { signal: controller.signal, onProgress: value => { setMachine(value.machine); onStatus(value) } }) })
+    localCloudRequest('machine', requested ? {} : undefined, { signal: controller.signal }).then(value => { if (value.machine?.status === 'none' && !requested) { setRequested(true); return null }; return waitForCloudReady(() => localCloudRequest('machine', undefined, { signal: controller.signal }), { signal: controller.signal, onProgress: value => { setMachine(value.machine); onStatus(value) } }) })
       .then(value => { if (value) setReady(true) }).catch(e => { if (e.name !== 'AbortError') setError(e.message) })
     return () => controller.abort()
   }, [retry, ready, onStatus, requested])
   if (ready) return children
   return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
-    <h1 className="text-2xl font-semibold">{machine?.status === "none" ? "Start OpenRod Cloud" : "Starting your cloud machine…"}</h1>
+    <h1 className="text-2xl font-semibold">Starting your cloud machine…</h1>
     <p role="status" className="mt-3 text-sm text-muted-foreground">{machine?.message || 'Your account has one dedicated machine. Its first start can take several minutes.'}</p>
-    {machine?.status === 'none' && !error && <Button className="mt-5" onClick={() => setRequested(true)}>Start cloud machine</Button>}
     {error && <><p role="alert" className="mt-4 text-sm text-destructive">{error}</p><button className="mt-4 text-sm underline" onClick={() => { setRequested(true); setRetry(n => n + 1) }}>Try again</button></>}
     <button className="mt-6 block w-full text-xs underline" onClick={onCancel}>Use local compute</button>
     {CLOUD_ORIGIN && <a href={CLOUD_ORIGIN} target="_blank" rel="noopener noreferrer" className="mt-4 block text-xs underline">Open cloud console</a>}
