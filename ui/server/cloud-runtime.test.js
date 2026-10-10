@@ -47,7 +47,8 @@ test('actual worker server verifies signed owner requests without Firebase initi
 test('cloud preflight validates fleet capacity, subnet region and reviewed artifact', async t => {
   const { env } = await fixture(t)
   assert.equal(cloudRuntimeConfig(config, env).databaseId, 'openrod-cloud')
-  for (const count of ['0', '101', '1.5', 'NaN']) assert.throws(() => cloudRuntimeConfig(config, { ...env, OPENROD_MAX_MACHINES: count }), /OPENROD_MAX_MACHINES/)
+  assert.equal(cloudRuntimeConfig(config, { ...env, OPENROD_MAX_MACHINES: '200' }).maxMachines, 200)
+  for (const count of ['0', '1001', '1.5', 'NaN']) assert.throws(() => cloudRuntimeConfig(config, { ...env, OPENROD_MAX_MACHINES: count }), /OPENROD_MAX_MACHINES/)
   assert.throws(() => cloudRuntimeConfig(config, { ...env, OPENROD_WORKER_SUBNET: 'projects/openrod-test/regions/us-west1/subnetworks/openrod' }), /region/)
   await verifyWorkerArtifact(env.OPENROD_WORKER_ARTIFACT, env.OPENROD_WORKER_ARTIFACT_SHA256)
   await assert.rejects(verifyWorkerArtifact(env.OPENROD_WORKER_ARTIFACT, 'f'.repeat(64)), /checksum/)

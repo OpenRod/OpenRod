@@ -8,7 +8,7 @@ export function machineName(uid,prefix='openrod-user') {
 }
 export function createMachineStore(db,{maxMachines=10,now=()=>Date.now(),prefix='openrod-user'}={}) {
  workerPrefix(prefix)
- if(!Number.isInteger(maxMachines)||maxMachines<1||maxMachines>100)throw Error('Fleet limit must be between 1 and 100')
+ if(!Number.isInteger(maxMachines)||maxMachines<1||maxMachines>1000)throw Error('Fleet limit must be between 1 and 1000')
  const ref=uid=>db.collection('machines').doc(machineName(uid,prefix))
  return {
   async reserve(identity) {
