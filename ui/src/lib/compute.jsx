@@ -7,6 +7,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { localCloudRequest, waitForCloudReady, prepareCloudMachine, createLocalSignInAttempt } from './local-cloud.js'
 
 const ComputeContext = React.createContext(null)
+// Set by Disconnect: the next sign-in picks a Google account instead of
+// reusing the cloud console's existing session.
+const CHOOSE_ACCOUNT_KEY = 'openrod-cloud-choose-account'
+const storedFlag = { get: () => { try { return localStorage.getItem(CHOOSE_ACCOUNT_KEY) === '1' } catch { return false } }, set: on => { try { on ? localStorage.setItem(CHOOSE_ACCOUNT_KEY, '1') : localStorage.removeItem(CHOOSE_ACCOUNT_KEY) } catch {} } }
 const ApiContext = React.createContext(null)
 export const useCompute = () => React.useContext(ComputeContext)
 export function useApi() {
@@ -69,6 +73,11 @@ export function LocalComputeProvider({ children }) {
   const [connecting, setConnecting] = React.useState(false)
   const [createRequested, requestCreate] = React.useState(false)
   const pending = React.useRef(null)
+  // Cloud setup outlives the location dialog that starts it: sign-in and a
+  // first machine start can take minutes, so the dialog may close meanwhile.
+  const [cloudSetup, setCloudSetup] = React.useState(null)
+  const [setupWatchers, setSetupWatchers] = React.useState(0)
+  const setupRun = React.useRef(null)
   const refresh = React.useCallback(async (signal) => {
     const value = await localCloudRequest('status', undefined, { signal })
     setStatus(current => ({ ...current, ...value }))
@@ -83,7 +92,7 @@ export function LocalComputeProvider({ children }) {
     localCloudRequest('status').then(value => { if (alive) { setStatus(value); setError(value.error ?? '') } }).catch(e => { if (alive) { setError(e.message); setStatus({ connected: false, available: false }) } })
     const expired = () => { setStatus(current => ({ ...current, connected: false, machine: null })); setError('Your cloud connection expired. Connect again to continue.') }
     window.addEventListener('openrod-session-expired', expired)
-    return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); pending.current?.cancel('Cloud connection cancelled.') }
+    return () => { alive = false; window.removeEventListener('openrod-session-expired', expired); pending.current?.cancel('Cloud connection cancelled.'); setupRun.current?.controller.abort() }
   }, [])
   React.useEffect(() => {
     if (!status?.connected || !status.expires) return
@@ -108,7 +117,7 @@ export function LocalComputeProvider({ children }) {
     if (pending.current) throw new Error('A cloud sign-in is already open.')
     const popup = window.open('about:blank', '_blank', 'popup,width=760,height=720')
     if (!popup) throw new Error('Allow popups to connect your local OpenRod to cloud.')
-    const attempt = createLocalSignInAttempt({ popup, origin: window.location.origin, cloud: status.origin || CLOUD_ORIGIN })
+    const attempt = createLocalSignInAttempt({ popup, origin: window.location.origin, cloud: status.origin || CLOUD_ORIGIN, chooseAccount: storedFlag.get() })
     // Ownership is synchronous: Cancel can stop even a delayed /start request.
     pending.current = attempt
     setConnecting(true); setError('')
@@ -116,6 +125,7 @@ export function LocalComputeProvider({ children }) {
       const value = await attempt.promise
       if (pending.current !== attempt) throw new Error('Cloud sign-in was cancelled.')
       setCloudOwner(value.owner)
+      storedFlag.set(false)
       setStatus(current => ({ ...current, ...value }))
       return value
     } catch (error) {
@@ -135,6 +145,7 @@ export function LocalComputeProvider({ children }) {
   }
 
   async function disconnect() {
+    storedFlag.set(true)
     try { const value = await localCloudRequest('disconnect', {}); setStatus(value); selectTarget('local') }
     catch (e) { if ([401,403].includes(e.status)) { setStatus(current => ({ ...current, connected: false, machine: null })); selectTarget('local') }; setError(e.message); throw e }
   }
@@ -154,10 +165,30 @@ export function LocalComputeProvider({ children }) {
     }
     return prepareCloudMachine({ owner, signal, onProgress: update })
   }
+  function startCloudSetup() {
+    if (setupRun.current) return
+    const run = { controller: new AbortController() }
+    setupRun.current = run
+    const set = patch => { if (setupRun.current === run) setCloudSetup(current => ({ ...current, ...patch })) }
+    setCloudSetup({ stage: status?.connected ? 'preparing' : 'signing-in', error: null })
+    prepare({ signal: run.controller.signal, onProgress: value => set({ stage: 'preparing', machine: value.machine }) })
+      .then(() => { set({ stage: 'ready' }); refresh().catch(() => {}) })
+      .catch(reason => { if (reason.name === 'AbortError' || run.controller.signal.aborted) { if (setupRun.current === run) setCloudSetup(null) } else set({ stage: 'failed', error: reason.message }) })
+      .finally(() => { if (setupRun.current === run) setupRun.current = null })
+  }
+  function cancelCloudSetup() {
+    const run = setupRun.current
+    setupRun.current = null
+    run?.controller.abort()
+    setCloudSetup(null)
+  }
+  function dismissCloudSetup() { if (!setupRun.current) setCloudSetup(null) }
+  // While a location dialog shows the setup, the background notice stays hidden.
+  const watchCloudSetup = React.useCallback(() => { setSetupWatchers(n => n + 1); return () => setSetupWatchers(n => n - 1) }, [])
   sessionOwner.current = advanceComputeOwner(sessionOwner.current, status?.connected ? status.user?.uid : null)
   const ownerScope = sessionOwner.current.revision
   const sessionKey = `${target}:${ownerScope}`
-  const value = { target, status, available: Boolean(status?.available), checking: status === null, refresh, prepare, localViewer: true, nativeActions: target === 'local' || Boolean(status?.connected), user: status?.user, connected: Boolean(status?.connected), connecting, error, connect, disconnect, selectTarget, createRequested, requestCreate, cancelConnect: () => cancelConnect() }
+  const value = { target, status, available: Boolean(status?.available), checking: status === null, refresh, prepare, localViewer: true, nativeActions: target === 'local' || Boolean(status?.connected), user: status?.user, connected: Boolean(status?.connected), connecting, error, connect, disconnect, selectTarget, createRequested, requestCreate, cancelConnect: () => cancelConnect(), cloudSetup, cloudSetupWatched: setupWatchers > 0, startCloudSetup, cancelCloudSetup, dismissCloudSetup, watchCloudSetup }
   return <ComputeContext.Provider value={value}>
     {target === 'cloud' && !status?.connected ? <main className="grid min-h-screen place-items-center px-6"><section className="max-w-sm text-center">
       <h1 className="text-2xl font-semibold">Connect your cloud workspace</h1>

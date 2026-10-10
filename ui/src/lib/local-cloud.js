@@ -84,7 +84,16 @@ export async function authorizeLocalConnection(handoff, request = fetch) {
   if (typeof result.code !== 'string' || !/^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(result.code)) throw new Error('Invalid sign-in response.')
   return result
 }
-export function createLocalSignInAttempt({ popup, origin, cloud = CLOUD_ORIGIN, request = localCloudRequest, events = window, focus = () => window.focus(), setTimer = setInterval, clearTimer = clearInterval, now = Date.now }) {
+// Asks the cloud console to ignore its existing session and show Google's
+// account picker, so a disconnected computer can connect another account.
+export const CHOOSE_ACCOUNT = 'account'
+export const choosesAccount = search => new URLSearchParams(search).get(CHOOSE_ACCOUNT) === 'choose'
+export function withAccountChoice(url) {
+  const next = new URL(url)
+  next.searchParams.set(CHOOSE_ACCOUNT, 'choose')
+  return next.href
+}
+export function createLocalSignInAttempt({ popup, origin, cloud = CLOUD_ORIGIN, chooseAccount = false, request = localCloudRequest, events = window, focus = () => window.focus(), setTimer = setInterval, clearTimer = clearInterval, now = Date.now }) {
   let nonce, accepted = false, finished = false, resolve, reject
   const promise = new Promise((yes, no) => { resolve = yes; reject = no })
   const cancelNonce = async () => {
@@ -125,7 +134,7 @@ export function createLocalSignInAttempt({ popup, origin, cloud = CLOUD_ORIGIN, 
     const started = await request('start', { origin })
     nonce = started.nonce
     if (finished) { await cancelNonce(); return }
-    popup.location.href = started.url
+    popup.location.href = chooseAccount ? withAccountChoice(started.url) : started.url
   }).catch(error => { if (!finished) cancel(error.message) })
   return { promise, cancel }
 }

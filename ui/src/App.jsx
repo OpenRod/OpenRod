@@ -2,6 +2,7 @@ import { useApi, useCompute } from '@/lib/compute'
 import * as React from "react"
 import { SetupsView, SetupImportNotifications } from "@/components/setups-view"
 import { SandboxCreationNotifications } from "@/components/sandbox-creation-notices"
+import { CloudSetupNotice } from "@/components/cloud-setup-notice"
 import { GatewayDockerNotifications } from "@/components/gateway-docker"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SandboxesView } from "@/components/sandboxes-view"
@@ -170,6 +171,7 @@ export function App() {
           </header>
           <SetupImportNotifications />
           <SandboxCreationNotifications />
+          <CloudSetupNotice />
           {!cloud && <GatewayDockerNotifications />}
           <PageBoundary key={`${view}:${locationIdentity(location) ?? 'unscoped'}`} view={view}>
 

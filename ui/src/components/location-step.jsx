@@ -2,11 +2,13 @@ import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { ArrowLeft, ArrowUpRight, Cloud, Laptop, Loader2, Server } from "lucide-react"
 
+import { CloudAgents } from "@/components/cloud-agents"
 import { RemoteConnect } from "@/components/remote-connect"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { DotPattern } from "@/components/ui/dot-pattern"
 import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Spinner } from "@/components/ui/spinner"
 import { api } from "@/lib/api"
 import { useCompute } from "@/lib/compute"
 import { connectLocalGateway } from "@/lib/locations"
@@ -133,11 +135,7 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   const reduce = useReducedMotion()
   const compute = useCompute()
   const [view, setView] = React.useState("choose")
-  const [cloudBusy, setCloudBusy] = React.useState(false)
-  const [cloudStage, setCloudStage] = React.useState("")
   const [cloudPending, setCloudPending] = React.useState(false)
-  const preparation = React.useRef(null)
-  React.useEffect(() => () => preparation.current?.abort(), [])
   const [locals, setLocals] = React.useState(null)
   const [missingCli, setMissingCli] = React.useState(false)
   const [localBusy, setLocalBusy] = React.useState(false)
@@ -146,30 +144,40 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
   const local = locations.find(location => !location.remote && !location.cloud && location.target !== "cloud")
   const remote = locations.find(location => location.remote && !location.cloud && location.target !== "cloud")
   const cloudOnly = !compute?.localViewer && Boolean(cloud)
+  // Cloud setup runs in the compute provider so closing this dialog leaves it
+  // going in the background; reopening the dialog picks the progress back up.
+  const setup = compute?.cloudSetup
+  const setupActive = setup?.stage === "signing-in" || setup?.stage === "preparing"
+  const cloudBusy = setupActive || cloudPending
+  const followed = React.useRef(false)
+  const watchCloudSetup = compute?.watchCloudSetup
+  React.useEffect(() => watchCloudSetup?.(), [watchCloudSetup])
   React.useEffect(() => {
-    if (cloudPending && cloud?.connected) { setCloudPending(false); setCloudBusy(false); onPick(cloud.id ?? cloud.context) }
+    if (!setup) return
+    if (setupActive) { followed.current = true; return }
+    const finished = followed.current
+    followed.current = false
+    compute.dismissCloudSetup?.()
+    if (setup.stage === "failed") setError(setup.error)
+    else if (setup.stage === "ready" && finished) { setCloudPending(true); onConnected?.({ target: "cloud", gateway: null }) }
+  }, [setup, setupActive, compute, onConnected])
+
+  React.useEffect(() => {
+    if (cloudPending && cloud?.connected) { setCloudPending(false); onPick(cloud.id ?? cloud.context) }
   }, [cloudPending, cloud, onPick])
 
   React.useEffect(() => {
     if (!cloudPending) return
-    const timer = setTimeout(() => { setCloudPending(false); setCloudBusy(false); setError("Cloud is ready but its locations could not load. Refresh the connection and try again.") }, 60000)
+    const timer = setTimeout(() => { setCloudPending(false); setError("Cloud is ready but its locations could not load. Refresh the connection and try again.") }, 60000)
     return () => clearTimeout(timer)
   }, [cloudPending])
 
-  async function chooseCloud() {
+  function chooseCloud() {
     if (cloud?.connected) { onPick(cloud.id ?? cloud.context); return }
-    const controller = new AbortController()
-    preparation.current = controller
-    setError(null); setCloudBusy(true); setCloudStage(compute?.connected ? "Preparing…" : "Signing in…")
-    try {
-      await compute.prepare({ signal: controller.signal, onProgress: value => setCloudStage(value.machine?.status === "ready" ? "Loading workspace…" : "Preparing…") })
-      controller.signal.throwIfAborted()
-      setCloudPending(true)
-      onConnected?.({ target: "cloud", gateway: null })
-    } catch (reason) { if (reason.name !== "AbortError") setError(reason.message); setCloudBusy(false); setCloudPending(false) }
-    finally { preparation.current = null }
+    setError(null); followed.current = true
+    compute?.startCloudSetup?.()
   }
-  function cancelCloud() { preparation.current?.abort(); compute?.cancelConnect?.(); setCloudPending(false); setCloudBusy(false) }
+  function cancelCloud() { followed.current = false; compute?.cancelCloudSetup?.(); setCloudPending(false) }
 
   // Before any gateway is chosen, the inventory has no Local entry; offer the registered gateway instead.
   React.useEffect(() => {
@@ -187,10 +195,12 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
     } catch (reason) { setError(reason.message); setLocalBusy(false) }
   }
 
+  const panel = view === "remote" ? "remote" : cloudBusy ? "cloud" : "choose"
   const slide = reduce ? {} : { initial: { opacity: 0, x: view === "remote" ? 24 : -24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: view === "remote" ? -24 : 24 }, transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] } }
   const localCaption = local ? (local.connected ? "Local gateway" : "Disconnected") : locals?.length ? `Use ${locals[0].name}` : locals ? (missingCli ? "OpenShell isn’t installed" : "No local gateway running") : "Checking…"
 
-  const cloudCaption = cloudBusy ? cloudStage : cloud?.connected ? "Ready to use" : compute?.checking ? "Checking connection…" : !compute?.available ? "Coming soon" : compute?.connected ? "Start cloud machine" : "Connect your account"
+  const signingIn = setup?.stage === "signing-in"
+  const cloudCaption = cloud?.connected ? "Ready to use" : compute?.checking ? "Checking connection…" : !compute?.available ? "Coming soon" : compute?.connected ? "Start cloud machine" : "Connect your account"
 
   return <div className="flex min-h-0 flex-col gap-6 rounded-xl bg-popover p-7 ring-1 ring-foreground/10">
     <DialogHeader className="gap-3">
@@ -204,7 +214,17 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
 
     <div className="-m-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
       <AnimatePresence mode="wait" initial={false}>
-        {view === "choose" ? <motion.div key="choose" {...slide} className="grid gap-3">
+        {panel === "cloud" ? <motion.div key="cloud" {...slide} className="flex flex-col items-center py-4 text-center">
+          <CloudAgents />
+          <p className="text-lg font-semibold">{signingIn ? "Signing in to OpenRod Cloud…" : cloudPending ? "Opening OpenRod Cloud…" : "Setting up your cloud machine…"}</p>
+          <p className="mt-2 text-sm text-muted-foreground">{signingIn ? "Complete sign-in in the new window." : "High demand may slow this down."}</p>
+          <div role="status" className="mt-5 flex items-center justify-center gap-2 rounded-lg bg-muted/50 px-4 py-3 text-xs"><Spinner aria-hidden="true" /><span>{signingIn ? "Waiting for sign-in" : cloudPending ? "Loading your cloud locations" : "Continues automatically when ready"}</span></div>
+          {!cloudPending && <p className="mt-3 text-xs text-muted-foreground">You can close this. Setup keeps going in the background.</p>}
+          <div className="mt-6 flex justify-center gap-2">
+            {!cloudPending && <Button type="button" variant="ghost" onClick={cancelCloud}>Cancel setup</Button>}
+            <Button type="button" variant="outline" onClick={onCancel}>{cloudPending ? "Close" : "Continue in background"}</Button>
+          </div>
+        </motion.div> : panel === "choose" ? <motion.div key="choose" {...slide} className="grid gap-3">
           <div className={`grid gap-4 ${allowRemote ? "sm:grid-cols-3" : cloud && !cloudOnly ? "sm:grid-cols-2" : ""}`}>
           {!cloudOnly && <Place index={0} scene="local" live={local?.connected} title="This computer" caption={localCaption} tone={local?.connected ? "live" : "idle"}
             disabled={local ? !local.connected : !locals?.length || localBusy}
@@ -217,10 +237,9 @@ export function LocationStep({ locations, allowRemote, onPick, onConnected, onCa
             disabled={cloudBusy || (!cloud?.connected && (!compute?.available || compute?.checking))} onClick={chooseCloud}
             trailing={cloudBusy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : undefined} />}
           </div>
-          {cloudBusy && <div role="status" className="flex items-center justify-between gap-3 text-xs text-muted-foreground"><span>{cloudStage === "Signing in…" ? "Complete sign-in in the new window." : cloudPending ? "Loading your cloud locations…" : "Preparing OpenRod Cloud. The first start can take a few minutes."}</span><Button variant="ghost" size="sm" onClick={cancelCloud}>Cancel</Button></div>}
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <div className="mt-3 flex justify-end">
-            <Button type="button" variant="ghost" onClick={() => { cancelCloud(); onCancel() }}>Cancel</Button>
+            <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
           </div>
         </motion.div> : <motion.div key="remote" {...slide}>
           {connecting ? <div role="status" className="grid place-items-center gap-3 py-16 text-xs text-muted-foreground">
