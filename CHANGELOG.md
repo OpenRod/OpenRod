@@ -2,11 +2,12 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.1
 
 ### Changed
 
 - Choosing OpenRod Cloud in local OpenRod shows the OpenRod Cloud animation in the location dialog while you sign in and the cloud machine starts. If you close the dialog, setup keeps going and appears as a notification.
+- Signing in to OpenRod Cloud starts your cloud machine right away, without a separate **Start cloud machine** step.
 - After you disconnect your cloud account in local OpenRod, connecting again shows Google's account picker instead of reusing the account you were signed in with.
 
 ## 0.2.0
