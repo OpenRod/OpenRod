@@ -13,7 +13,7 @@ The console VM created by Terraform is the control plane at your public origin, 
 - The control plane's private subnet and Cloud NAT, shared by all workers. Each worker has its own kernel, filesystem, OpenShell gateway, Docker engine and state. No separate VPC is created per user.
 - The firewall accepts workspace port 4600 only from the control plane's private IP. Workers cannot reach other workers. Operators use IAP for SSH.
 - Each worker requires its own request signature, bound to its owner, HTTP method, full target and a short validity window. The browser receives neither worker addresses nor keys.
-- Fleet capacity defaults to 10 reserved machines (`OPENROD_MAX_MACHINES`, integer 1–100), including failed reservations. No public API frees slots or deletes/recreates VMs. Deletion and capacity changes are operator actions.
+- Fleet capacity defaults to 10 reserved machines (`OPENROD_MAX_MACHINES`, integer 1–1000), including failed reservations. No public API frees slots or deletes/recreates VMs. Deletion and capacity changes are operator actions.
 - Startup runs as a retrying service. Failed provisioning remains visible. A missing previously-ready machine requires operator intervention; user requests do not silently replace its data.
 
 One VM per account does not stop someone creating many Google accounts. The fleet ceiling bounds automatic VM allocation. This deployment has no idle shutdown, payment checks, project spending cap, egress cap, storage snapshot schedule for worker disks, or automatic orphan cleanup. Persistent disks remain billable when a VM stops or is removed. GCP budgets notify; they do not enforce a spending ceiling.

@@ -2,6 +2,12 @@
 
 All notable changes to OpenRod are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Self-hosted cloud deployments accept an `OPENROD_MAX_MACHINES` fleet cap of up to 1,000 machines instead of 100.
+
 ## 0.2.1
 
 ### Changed

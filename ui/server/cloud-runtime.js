@@ -23,7 +23,7 @@ async function loadCloudAdmin() {
 export function cloudRuntimeConfig(config, env = process.env) {
   if (config.mode !== 'cloud') throw Error('Cloud runtime requires cloud mode')
   const maxMachines = Number(env.OPENROD_MAX_MACHINES ?? 10)
-  if (!Number.isInteger(maxMachines) || maxMachines < 1 || maxMachines > 100) throw Error('OPENROD_MAX_MACHINES must be between 1 and 100')
+  if (!Number.isInteger(maxMachines) || maxMachines < 1 || maxMachines > 1000) throw Error('OPENROD_MAX_MACHINES must be between 1 and 1000')
   const databaseId = env.OPENROD_FIRESTORE_DATABASE ?? 'openrod-cloud'
   if (!/^[a-z][a-z0-9-]{2,61}[a-z0-9]$/.test(databaseId)) throw Error('Invalid OPENROD_FIRESTORE_DATABASE')
   const artifact = env.OPENROD_WORKER_ARTIFACT
